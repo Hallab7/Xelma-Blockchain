@@ -389,7 +389,23 @@ Payload: (
 
 **Use Case**: Trigger winner calculations, update leaderboards, notify users of results.
 
-#### 5. Winnings Claimed
+#### 5. Participant Payout Outcome
+Emitted once per participant during round resolution.
+
+```rust
+Topic: ("payout", "outcome")
+Payload: (
+  round_id: u64,          // Round identifier
+  mode: u32,              // 0 = Up/Down, 1 = Precision
+  user: Address,          // Participant address
+  gross_payout: i128,     // Pending winnings credited in stroops; 0 for losses
+  outcome_type: u32       // 0 = loss, 1 = win, 2 = refund
+)
+```
+
+**Use Case**: Reconstruct participant-level settlement outcomes for analytics, UX, and dispute forensics without replaying storage reads.
+
+#### 6. Winnings Claimed
 Emitted when user claims their pending winnings.
 
 ```rust
@@ -402,7 +418,7 @@ Payload: (
 
 **Use Case**: Track payouts, display claim history, calculate platform volume.
 
-#### 6. Windows Updated
+#### 7. Windows Updated
 Emitted when admin updates bet/run window durations.
 
 ```rust
@@ -415,7 +431,7 @@ Payload: (
 
 **Use Case**: Update frontend timers, recalculate round schedules.
 
-#### 7. Initial Mint
+#### 8. Initial Mint
 Emitted when new user mints their first 1000 vXLM.
 
 ```rust
@@ -428,7 +444,7 @@ Payload: (
 
 **Use Case**: Track new users, display welcome messages, analytics.
 
-#### 8. Round Cancelled
+#### 9. Round Cancelled
 Emitted when admin cancels an active round; all stakes are refunded.
 
 ```rust
@@ -441,7 +457,7 @@ Payload: (
 )
 ```
 
-#### 9. Round Fallback (insufficient participants)
+#### 10. Round Fallback (insufficient participants)
 Emitted when a round ends below the minimum-participants threshold; all stakes are refunded.
 
 ```rust
@@ -453,7 +469,7 @@ Payload: (
 )
 ```
 
-#### 10. Oracle Heartbeat
+#### 11. Oracle Heartbeat
 Emitted when the oracle records an on-chain liveness heartbeat.
 
 ```rust
