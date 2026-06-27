@@ -276,10 +276,64 @@ jobs:
           # Surface the results; non-zero exit propagates naturally
           cat /tmp/clippy-security.txt
 
+  wasm-size-gate:
+    name: WASM Size Gate
+    runs-on: ubuntu-latest
+    needs: contract-build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-wasm-gate-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-gate-
+            ${{ runner.os }}-cargo-
+
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build release WASM
+        run: cargo build --target wasm32-unknown-unknown --release --package xelma-contract --locked
+
+      - name: Measure WASM size and check budget
+        run: |
+          WASM_SIZE=$(wc -c < target/wasm32-unknown-unknown/release/xelma_contract.wasm)
+          BASELINE=$(cat .wasm-size-baseline)
+          BUDGET=$(( BASELINE + BASELINE / 10 ))
+
+          echo "WASM size report"
+          echo "  Current : ${WASM_SIZE} bytes"
+          echo "  Baseline: ${BASELINE} bytes"
+          echo "  Budget  : ${BUDGET} bytes (+10%)"
+          echo "  Delta   : $(( WASM_SIZE - BASELINE )) bytes"
+
+          if [ "${WASM_SIZE}" -gt "${BUDGET}" ]; then
+            echo ""
+            echo "ERROR: WASM size ${WASM_SIZE} exceeds budget ${BUDGET} bytes."
+            echo "If this growth is intentional, update .wasm-size-baseline to ${WASM_SIZE}."
+            exit 1
+          else
+            echo "OK: WASM size is within budget."
+          fi
+
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [rust-test, contract-build, bindings-test, bindings-build, parity-check, format-check, security-audit]
+    needs: [rust-test, contract-build, bindings-test, bindings-build, parity-check, format-check, security-audit, wasm-size-gate]
     if: always()
     steps:
       - name: Check all jobs status
@@ -290,7 +344,8 @@ jobs:
              [ "${{ needs.bindings-build.result }}" != "success" ] || \
              [ "${{ needs.parity-check.result }}" != "success" ] || \
              [ "${{ needs.format-check.result }}" != "success" ] || \
-             [ "${{ needs.security-audit.result }}" != "success" ]; then
+             [ "${{ needs.security-audit.result }}" != "success" ] || \
+             [ "${{ needs.wasm-size-gate.result }}" != "success" ]; then
             echo "One or more CI jobs failed"
             echo "Rust Tests: ${{ needs.rust-test.result }}"
             echo "Contract Build: ${{ needs.contract-build.result }}"
@@ -299,6 +354,7 @@ jobs:
             echo "Parity Check: ${{ needs.parity-check.result }}"
             echo "Format Check: ${{ needs.format-check.result }}"
             echo "Security Audit: ${{ needs.security-audit.result }}"
+            echo "WASM Size Gate: ${{ needs.wasm-size-gate.result }}"
             exit 1
           fi
           echo "All CI checks passed"

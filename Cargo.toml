@@ -20,6 +20,4 @@ lto = true
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
-[dev-dependencies]
-proptest = "1.0"
-rand = "0.8"
+
