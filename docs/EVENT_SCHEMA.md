@@ -125,6 +125,23 @@ All stakes are refunded; no competitive settlement occurs.
 
 ---
 
+### `("round", "summary")`
+
+Emitted when a round is resolved, cancelled, or refunded. Contains compact settlement data.
+
+| Position | Field               | Type   | Description                                                           |
+|----------|---------------------|--------|-----------------------------------------------------------------------|
+| 0        | `round_id`          | `u64`  | Round identifier                                                      |
+| 1        | `mode`              | `u32`  | Round mode: `0` = UpDown, `1` = Precision                             |
+| 2        | `price_start`       | `u128` | Opening price at round start (4 dec.)                                 |
+| 3        | `price_final`       | `u128` | Settlement price (or `0` for administrative cancellation) (4 dec.)    |
+| 4        | `participant_count` | `u32`  | Total unique user participants in the round                           |
+| 5        | `total_pot`         | `i128` | Total accumulated round pot (in stroops)                              |
+| 6        | `status`            | `u32`  | Round status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund   |
+
+---
+
+
 ### `("claim", "winnings")`
 
 Emitted when a user successfully claims pending winnings.
@@ -166,6 +183,15 @@ Emitted when the oracle records an on-chain liveness heartbeat.
 |----------|-------------|-------|--------------------------------------------------------------|
 | 0        | `timestamp` | `u64` | Unix epoch seconds when the heartbeat was recorded on-chain  |
 | 1        | `status`    | `u32` | Oracle status: `0` = active, `1` = degraded, `2` = offline  |
+
+### `("mode", "transition")`
+
+Emitted when the contract's emergency runtime mode is changed by the admin.
+
+| Position | Field      | Type  | Description                                                         |
+|----------|------------|-------|---------------------------------------------------------------------|
+| 0        | `old_mode` | `u32` | Previous runtime mode: `0` = Normal, `1` = ClaimsOnly, `2` = Paused |
+| 1        | `new_mode` | `u32` | New runtime mode: `0` = Normal, `1` = ClaimsOnly, `2` = Paused      |
 
 ---
 

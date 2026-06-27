@@ -11,6 +11,16 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Runtime mode for the contract lifecycle
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RuntimeMode {
+    Normal = 0,
+    ClaimsOnly = 1,
+    FullyPaused = 2,
+}
+
 /// Storage keys for contract data
 ///
 /// ## Indexed position keys (variants 13–15)
