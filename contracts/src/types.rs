@@ -239,6 +239,30 @@ pub struct Round {
     pub mode: RoundMode,     // Round mode: UpDown (0) or Precision (1)
 }
 
+/// Aggregated active-round pool composition for frontend transparency.
+///
+/// Up/Down rounds populate the up/down pools, counts, and stake ratios.
+/// Precision rounds populate the precision totals and participant counters while
+/// leaving side-specific Up/Down fields at zero. Ratios are basis points of
+/// the mode's total visible stake (10_000 = 100%).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoundPoolStats {
+    pub round_id: u64,
+    pub mode: RoundMode,
+    pub total_up_stake: i128,
+    pub total_down_stake: i128,
+    pub up_participant_count: u32,
+    pub down_participant_count: u32,
+    pub up_stake_ratio_bps: u32,
+    pub down_stake_ratio_bps: u32,
+    pub precision_total_stake: i128,
+    pub precision_participant_count: u32,
+    pub precision_prediction_count: u32,
+    pub precision_commitment_count: u32,
+    pub precision_revealed_count: u32,
+}
+
 /// Terminal outcome recorded when a round leaves the active state.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
