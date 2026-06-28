@@ -110,6 +110,10 @@ pub enum DataKey {
     /// heartbeat status is degraded (1) or unhealthy/offline (2).
     /// When absent or `false`: lenient mode — settlement proceeds regardless.
     HeartbeatSettlementStrict,
+    /// Bounded index of user addresses sorted by total wins descending
+    LeaderboardWins,
+    /// Bounded index of user addresses sorted by best streak descending
+    LeaderboardStreak,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
@@ -356,3 +360,12 @@ pub struct UserRoundOutcome {
     pub payout: i128,
     pub outcome: UserOutcomeType,
 }
+
+/// A single entry in the leaderboard.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeaderboardEntry {
+    pub user: Address,
+    pub stats: UserStats,
+}
+

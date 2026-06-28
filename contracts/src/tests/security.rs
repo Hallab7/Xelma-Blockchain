@@ -1150,7 +1150,7 @@ fn test_heartbeat_policy_degraded_strict_blocked() {
     let result = client.try_resolve_round(&payload);
     assert_eq!(
         result,
-        Err(Ok(ContractError::HeartbeatSettlementBlocked)),
+        Err(Ok(ContractError::StaleOracleData)),
         "degraded + strict must block settlement"
     );
 }
@@ -1182,7 +1182,7 @@ fn test_heartbeat_policy_unhealthy_strict_blocked() {
     let result = client.try_resolve_round(&payload);
     assert_eq!(
         result,
-        Err(Ok(ContractError::HeartbeatSettlementBlocked)),
+        Err(Ok(ContractError::StaleOracleData)),
         "unhealthy + strict must block settlement"
     );
 }
@@ -1325,7 +1325,7 @@ fn test_heartbeat_policy_admin_toggle_unblocks() {
     // Strict → blocked
     let payload = make_payload(&env, &contract_id, round.start_ledger);
     let blocked = client.try_resolve_round(&payload);
-    assert_eq!(blocked, Err(Ok(ContractError::HeartbeatSettlementBlocked)));
+    assert_eq!(blocked, Err(Ok(ContractError::StaleOracleData)));
 
     // Switch to lenient → settlement proceeds
     client.set_heartbeat_settlement_strict(&false);

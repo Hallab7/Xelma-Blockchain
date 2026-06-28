@@ -11,7 +11,7 @@ use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     OracleHeartbeatRecord, OraclePayload, PendingConfigChange, PrecisionCommitment,
     PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, UserOutcomeType,
-    UserPosition, UserRoundOutcome, UserStats,
+    UserPosition, UserRoundOutcome, UserStats, LeaderboardEntry,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -24,6 +24,7 @@ const MAX_PRECISION_PARTICIPANTS_LIMIT: u32 = 10_000;
 /// Maximum number of entries returned per page by paginated query methods,
 /// regardless of the caller-requested `limit` (Issue #139).
 const MAX_PAGE_SIZE: u32 = 100;
+const LEADERBOARD_LIMIT: u32 = 100;
 
 // ─── Oracle heartbeat limits ──────────────────────────────────────────────────
 const DEFAULT_ORACLE_STALE_THRESHOLD: u64 = 3_600; // 1 hour
@@ -1035,7 +1036,7 @@ impl VirtualTokenContract {
         Self::_ensure_not_paused(&env)?;
 
         if max == 0 || max > MAX_PRECISION_PARTICIPANTS_LIMIT {
-            return Err(ContractError::InvalidPrecisionParticipantCap);
+            return Err(ContractError::InvalidPrecisionCap);
         }
 
         let key = DataKey::MaxPrecisionParticipants;
@@ -1217,6 +1218,79 @@ impl VirtualTokenContract {
         Self::_extend_persistent_ttl(&env, &key);
         env.storage().persistent().get(&key).unwrap_or(0)
     }
+
+    /// Returns a paginated slice of the wins leaderboard.
+    /// Ordered by total wins descending, with user address ascending as a tie-breaker.
+    pub fn get_leaderboard_by_wins(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<LeaderboardEntry> {
+        let limit = limit.min(MAX_PAGE_SIZE);
+        if limit == 0 {
+            return Vec::new(&env);
+        }
+
+        let key = DataKey::LeaderboardWins;
+        Self::_extend_persistent_ttl(&env, &key);
+        let list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
+
+        let total = list.len();
+        if offset >= total {
+            return Vec::new(&env);
+        }
+
+        let end = offset.saturating_add(limit).min(total);
+        let mut result = Vec::new(&env);
+        for i in offset..end {
+            if let Some(user) = list.get(i) {
+                let stats = Self::get_user_stats(env.clone(), user.clone());
+                result.push_back(LeaderboardEntry { user, stats });
+            }
+        }
+        result
+    }
+
+    /// Returns a paginated slice of the best streak leaderboard.
+    /// Ordered by best streak descending, with user address ascending as a tie-breaker.
+    pub fn get_leaderboard_by_streak(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<LeaderboardEntry> {
+        let limit = limit.min(MAX_PAGE_SIZE);
+        if limit == 0 {
+            return Vec::new(&env);
+        }
+
+        let key = DataKey::LeaderboardStreak;
+        Self::_extend_persistent_ttl(&env, &key);
+        let list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
+
+        let total = list.len();
+        if offset >= total {
+            return Vec::new(&env);
+        }
+
+        let end = offset.saturating_add(limit).min(total);
+        let mut result = Vec::new(&env);
+        for i in offset..end {
+            if let Some(user) = list.get(i) {
+                let stats = Self::get_user_stats(env.clone(), user.clone());
+                result.push_back(LeaderboardEntry { user, stats });
+            }
+        }
+        result
+    }
+
 
     /// Places a bet on the active round (Up/Down mode only).
     ///
@@ -1429,7 +1503,7 @@ impl VirtualTokenContract {
             .unwrap_or(Vec::new(&env));
         let max_precision_participants = Self::get_max_precision_participants(env.clone());
         if participants.len() >= max_precision_participants {
-            return Err(ContractError::PrecisionParticipantCapExceeded);
+            return Err(ContractError::PrecisionCapExceeded);
         }
 
         let user_balance = Self::balance(env.clone(), user.clone());
@@ -1964,7 +2038,7 @@ impl VirtualTokenContract {
                             (symbol_short!("oracle"), symbol_short!("hb_block")),
                             (hb.status,),
                         );
-                        return Err(ContractError::HbBlocked);
+                        return Err(ContractError::StaleOracleData);
                     }
                 }
             }
@@ -3269,7 +3343,7 @@ impl VirtualTokenContract {
     }
 
     pub(crate) fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> {
-        let key = DataKey::UserStats(user);
+        let key = DataKey::UserStats(user.clone());
         let mut stats: UserStats = env.storage().persistent().get(&key).unwrap_or(UserStats {
             total_wins: 0,
             total_losses: 0,
@@ -3292,11 +3366,12 @@ impl VirtualTokenContract {
 
         env.storage().persistent().set(&key, &stats);
         Self::_extend_persistent_ttl(env, &key);
+        Self::_update_leaderboards(env, user)?;
         Ok(())
     }
 
     pub(crate) fn _update_stats_loss(env: &Env, user: Address) -> Result<(), ContractError> {
-        let key = DataKey::UserStats(user);
+        let key = DataKey::UserStats(user.clone());
         let mut stats: UserStats = env.storage().persistent().get(&key).unwrap_or(UserStats {
             total_wins: 0,
             total_losses: 0,
@@ -3312,8 +3387,116 @@ impl VirtualTokenContract {
 
         env.storage().persistent().set(&key, &stats);
         Self::_extend_persistent_ttl(env, &key);
+        Self::_update_leaderboards(env, user)?;
         Ok(())
     }
+
+    fn _sort_leaderboard_wins(env: &Env, addresses: Vec<Address>) -> Vec<Address> {
+        let mut sorted: Vec<Address> = Vec::new(env);
+        for addr in addresses.iter() {
+            let addr_stats = Self::get_user_stats(env.clone(), addr.clone());
+            let mut inserted = false;
+            for i in 0..sorted.len() {
+                let other = sorted.get_unchecked(i);
+                let other_stats = Self::get_user_stats(env.clone(), other.clone());
+                if addr_stats.total_wins > other_stats.total_wins {
+                    sorted.insert(i, addr.clone());
+                    inserted = true;
+                    break;
+                } else if addr_stats.total_wins == other_stats.total_wins {
+                    if addr < other {
+                        sorted.insert(i, addr.clone());
+                        inserted = true;
+                        break;
+                    }
+                }
+            }
+            if !inserted {
+                sorted.push_back(addr);
+            }
+        }
+        sorted
+    }
+
+    fn _sort_leaderboard_streak(env: &Env, addresses: Vec<Address>) -> Vec<Address> {
+        let mut sorted: Vec<Address> = Vec::new(env);
+        for addr in addresses.iter() {
+            let addr_stats = Self::get_user_stats(env.clone(), addr.clone());
+            let mut inserted = false;
+            for i in 0..sorted.len() {
+                let other = sorted.get_unchecked(i);
+                let other_stats = Self::get_user_stats(env.clone(), other.clone());
+                if addr_stats.best_streak > other_stats.best_streak {
+                    sorted.insert(i, addr.clone());
+                    inserted = true;
+                    break;
+                } else if addr_stats.best_streak == other_stats.best_streak {
+                    if addr < other {
+                        sorted.insert(i, addr.clone());
+                        inserted = true;
+                        break;
+                    }
+                }
+            }
+            if !inserted {
+                sorted.push_back(addr);
+            }
+        }
+        sorted
+    }
+
+    fn _update_leaderboards(env: &Env, user: Address) -> Result<(), ContractError> {
+        let wins_key = DataKey::LeaderboardWins;
+        let wins_list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&wins_key)
+            .unwrap_or(Vec::new(env));
+        
+        let mut new_wins_list = Vec::new(env);
+        for addr in wins_list.iter() {
+            if addr != user {
+                new_wins_list.push_back(addr);
+            }
+        }
+        new_wins_list.push_back(user.clone());
+        
+        let sorted_wins = Self::_sort_leaderboard_wins(env, new_wins_list);
+        let mut final_wins = Vec::new(env);
+        let limit_wins = LEADERBOARD_LIMIT.min(sorted_wins.len());
+        for i in 0..limit_wins {
+            final_wins.push_back(sorted_wins.get_unchecked(i));
+        }
+        env.storage().persistent().set(&wins_key, &final_wins);
+        Self::_extend_persistent_ttl(env, &wins_key);
+
+        let streak_key = DataKey::LeaderboardStreak;
+        let streak_list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&streak_key)
+            .unwrap_or(Vec::new(env));
+            
+        let mut new_streak_list = Vec::new(env);
+        for addr in streak_list.iter() {
+            if addr != user {
+                new_streak_list.push_back(addr);
+            }
+        }
+        new_streak_list.push_back(user);
+        
+        let sorted_streak = Self::_sort_leaderboard_streak(env, new_streak_list);
+        let mut final_streak = Vec::new(env);
+        let limit_streak = LEADERBOARD_LIMIT.min(sorted_streak.len());
+        for i in 0..limit_streak {
+            final_streak.push_back(sorted_streak.get_unchecked(i));
+        }
+        env.storage().persistent().set(&streak_key, &final_streak);
+        Self::_extend_persistent_ttl(env, &streak_key);
+
+        Ok(())
+    }
+
 
     /// Mints 1000 vXLM for new users (one-time only)
     pub fn mint_initial(env: Env, user: Address) -> i128 {

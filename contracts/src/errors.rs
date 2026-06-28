@@ -75,9 +75,9 @@ pub enum ContractError {
     /// Oracle stale threshold is out of valid range (must be 60–86400 seconds)
     InvalidStaleThreshold = 37,
     /// Precision participant cap is out of range (must be 1–10000)
-    InvalidPrecisionParticipantCap = 38,
+    InvalidPrecisionCap = 38,
     /// Precision round has reached the configured participant cap
-    PrecisionParticipantCapExceeded = 39,
+    PrecisionCapExceeded = 39,
     /// Oracle max deviation bps is invalid (must be > 0)
     InvalidOracleDeviationBps = 40,
     /// Oracle final price deviates beyond configured threshold
@@ -108,7 +108,4 @@ pub enum ContractError {
     MintLimitExceeded = 53,
     /// Archive retention limit is outside the allowed range
     InvalidArchiveRetention = 54,
-    /// Settlement was blocked because oracle heartbeat is degraded or unhealthy
-    /// and strict heartbeat-settlement mode is enabled
-    HbBlocked = 55,
 }
