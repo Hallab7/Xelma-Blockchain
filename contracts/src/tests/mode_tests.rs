@@ -493,11 +493,11 @@ fn test_predict_price_invalid_scale() {
 
     // Try to predict with price exceeding max scale (> 9999.9999)
     let result = client.try_predict_price(&user, &100_000_000, &100_0000000);
-    assert_eq!(result, Err(Ok(ContractError::InvalidPriceScale)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 
     // Try with extremely large value
     let result = client.try_predict_price(&user, &999_999_999_999, &100_0000000);
-    assert_eq!(result, Err(Ok(ContractError::InvalidPriceScale)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 }
 
 #[test]

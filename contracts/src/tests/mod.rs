@@ -18,6 +18,7 @@ mod mode_tests;
 mod overflow_tests;
 mod pause;
 mod property_invariants;
+mod rotation;
 mod reference_model;
 mod resolution;
 mod security;

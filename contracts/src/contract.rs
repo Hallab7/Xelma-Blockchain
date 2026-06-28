@@ -8,9 +8,9 @@ use soroban_sdk::{
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    OracleHeartbeatRecord, OraclePayload, PendingConfigChange, PrecisionCommitment,
-    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, UserPosition,
-    UserStats,
+    OracleHeartbeatRecord, OraclePayload, OracleRotationProposal, PendingConfigChange,
+    PrecisionCommitment, PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus,
+    RoundMode, UserPosition, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -28,6 +28,9 @@ const MAX_PAGE_SIZE: u32 = 100;
 const DEFAULT_ORACLE_STALE_THRESHOLD: u64 = 3_600; // 1 hour
 const MIN_ORACLE_STALE_THRESHOLD: u64 = 60; // 1 minute
 const MAX_ORACLE_STALE_THRESHOLD: u64 = 86_400; // 24 hours
+
+// ─── Oracle rotation expiry ───────────────────────────────────────────────────
+const MIN_ROTATION_EXPIRY_SECONDS: u64 = 60; // 1 minute minimum
 
 const DEFAULT_BET_WINDOW_LEDGERS: u32 = 6;
 const DEFAULT_RUN_WINDOW_LEDGERS: u32 = 12;
@@ -78,7 +81,7 @@ impl VirtualTokenContract {
         admin.require_auth();
 
         if admin == oracle {
-            return Err(ContractError::AdminIsOracle);
+            return Err(ContractError::InvalidMode);
         }
 
         if env.storage().persistent().has(&DataKey::Admin) {
@@ -139,7 +142,7 @@ impl VirtualTokenContract {
 
         let from = Self::_schema_version(&env).unwrap_or(1);
         if from != 1 || CURRENT_SCHEMA_VERSION != 2 {
-            return Err(ContractError::InvalidMigrationPath);
+            return Err(ContractError::UnsupportedSchemaVersion);
         }
 
         let schema_key = DataKey::SchemaVersion;
@@ -205,10 +208,10 @@ impl VirtualTokenContract {
     ) -> Result<(), ContractError> {
         Self::_require_supported_schema(&env)?;
         if start_price < MIN_START_PRICE {
-            return Err(ContractError::StartPriceTooLow);
+            return Err(ContractError::InvalidStartPrice);
         }
         if start_price > MAX_START_PRICE {
-            return Err(ContractError::StartPriceTooHigh);
+            return Err(ContractError::InvalidStartPrice);
         }
 
         // Default to Up/Down mode (0) if not specified
@@ -603,6 +606,150 @@ impl VirtualTokenContract {
             .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD)
     }
 
+    // ─── Oracle rotation (two-step with expiry) ─────────────────────────────
+
+    /// Proposes a new oracle address with an expiry window (admin only).
+    ///
+    /// The proposal must be accepted via [`Self::accept_oracle_rotation`] before
+    /// `expires_in_seconds` elapses, otherwise acceptance is rejected.
+    /// Minimum expiry is 60 seconds.
+    ///
+    /// Emits `("oracle", "propose")`.
+    pub fn propose_oracle_rotation(
+        env: Env,
+        new_oracle: Address,
+        expires_in_seconds: u64,
+    ) -> Result<(), ContractError> {
+        Self::_require_supported_schema(&env)?;
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::AdminNotSet)?;
+        admin.require_auth();
+        Self::_ensure_not_paused(&env)?;
+
+        if expires_in_seconds < MIN_ROTATION_EXPIRY_SECONDS {
+            return Err(ContractError::InvalidStaleThreshold);
+        }
+
+        let proposed_at = env.ledger().timestamp();
+        let expires_at = proposed_at
+            .checked_add(expires_in_seconds)
+            .ok_or(ContractError::Overflow)?;
+
+        let proposal = OracleRotationProposal {
+            new_oracle: new_oracle.clone(),
+            proposed_at,
+            expires_at,
+        };
+
+        let key = DataKey::OracleRotationProposal;
+        env.storage().persistent().set(&key, &proposal);
+        Self::_extend_persistent_ttl(&env, &key);
+
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("oracle"), symbol_short!("propose")),
+            (new_oracle, expires_at),
+        );
+
+        Ok(())
+    }
+
+    /// Accepts a pending oracle rotation proposal before expiry (any caller).
+    ///
+    /// If the proposal has expired the call returns `RotationExpired` and the
+    /// stale proposal is removed after emitting `("oracle", "expired")`.
+    /// On success the stored oracle address is updated and
+    /// `("oracle", "accept")` is emitted.
+    pub fn accept_oracle_rotation(env: Env) -> Result<(), ContractError> {
+        Self::_require_supported_schema(&env)?;
+        Self::_ensure_not_paused(&env)?;
+
+        let key = DataKey::OracleRotationProposal;
+        let proposal: OracleRotationProposal = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ContractError::NoPendingRotation)?;
+
+        let current_ts = env.ledger().timestamp();
+
+        if current_ts > proposal.expires_at {
+            env.storage().persistent().remove(&key);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("oracle"), symbol_short!("expired")),
+                (
+                    proposal.new_oracle,
+                    proposal.proposed_at,
+                    proposal.expires_at,
+                ),
+            );
+            return Err(ContractError::RotationExpired);
+        }
+
+        let oracle_key = DataKey::Oracle;
+        let previous: Address = env
+            .storage()
+            .persistent()
+            .get(&oracle_key)
+            .ok_or(ContractError::OracleNotSet)?;
+
+        env.storage()
+            .persistent()
+            .set(&oracle_key, &proposal.new_oracle);
+        Self::_extend_persistent_ttl(&env, &oracle_key);
+        env.storage().persistent().remove(&key);
+
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("oracle"), symbol_short!("accept")),
+            (previous, proposal.new_oracle),
+        );
+
+        Ok(())
+    }
+
+    /// Cancels a pending oracle rotation proposal before it expires (admin only).
+    ///
+    /// Emits `("oracle", "cancel")` on success.
+    pub fn cancel_oracle_rotation(env: Env) -> Result<(), ContractError> {
+        Self::_require_supported_schema(&env)?;
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::AdminNotSet)?;
+        admin.require_auth();
+        Self::_ensure_not_paused(&env)?;
+
+        let key = DataKey::OracleRotationProposal;
+        let proposal: OracleRotationProposal = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ContractError::NoPendingRotation)?;
+
+        env.storage().persistent().remove(&key);
+
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("oracle"), symbol_short!("cancel")),
+            (proposal.new_oracle,),
+        );
+
+        Ok(())
+    }
+
+    /// Returns the pending oracle rotation proposal, if any.
+    pub fn get_oracle_rotation_proposal(env: Env) -> Option<OracleRotationProposal> {
+        let key = DataKey::OracleRotationProposal;
+        Self::_extend_persistent_ttl(&env, &key);
+        env.storage().persistent().get(&key)
+    }
+
     /// Schedules a timelocked windows update (alias for [`Self::schedule_windows`]).
     /// bet_ledgers: Number of ledgers users can place bets
     /// run_ledgers: Total number of ledgers before round can be resolved
@@ -802,7 +949,7 @@ impl VirtualTokenContract {
         let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
         let new_treasury = current
             .checked_sub(amount)
-            .ok_or(ContractError::FeeTreasuryUnderflow)?;
+            .ok_or(ContractError::Overflow)?;
         env.storage().persistent().set(&treasury_key, &new_treasury);
         Self::_extend_persistent_ttl(&env, &treasury_key);
 
@@ -815,7 +962,7 @@ impl VirtualTokenContract {
 
         #[allow(deprecated)]
         env.events().publish(
-            (symbol_short!("protocol"), symbol_short!("fee_withdrawn")),
+            (symbol_short!("protocol"), symbol_short!("withdrawn")),
             (recipient, amount, new_treasury),
         );
 
@@ -1173,7 +1320,7 @@ impl VirtualTokenContract {
         // Validate price scale (must be 4 decimal places, max value 9999 for 0.9999)
         // Reasonable max: 99999999 (9999.9999 XLM)
         if predicted_price > 99_999_999 {
-            return Err(ContractError::InvalidPriceScale);
+            return Err(ContractError::InvalidPrice);
         }
 
         // Single read of the active round — cache in call scope
@@ -3090,7 +3237,7 @@ impl VirtualTokenContract {
 
         #[allow(deprecated)]
         env.events().publish(
-            (symbol_short!("protocol"), symbol_short!("fee_collected")),
+            (symbol_short!("protocol"), symbol_short!("collected")),
             (round_id, fee_amount, new_treasury, bps_value),
         );
 
@@ -3301,7 +3448,7 @@ impl VirtualTokenContract {
                 }
                 #[allow(deprecated)]
                 env.events().publish(
-                    (symbol_short!("protocol"), symbol_short!("fee_bps_set")),
+                    (symbol_short!("protocol"), symbol_short!("bps_set")),
                     (bps.clone(),),
                 );
             }

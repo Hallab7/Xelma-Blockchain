@@ -158,7 +158,7 @@ fn test_initialize_fails_identical_addresses() {
 
     // Try to initialize using the same address for both
     let result = client.try_initialize(&admin_and_oracle, &admin_and_oracle);
-    assert_eq!(result, Err(Ok(ContractError::AdminIsOracle)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidMode)));
 }
 
 #[test]

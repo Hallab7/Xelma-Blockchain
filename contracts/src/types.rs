@@ -95,6 +95,8 @@ pub enum DataKey {
     LedgerMintCounter(u32),
     /// Mint limit configuration: maximum number of mints allowed per ledger.
     MintLimitConfig,
+    /// Pending two-step oracle rotation proposal with expiry.
+    OracleRotationProposal,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
@@ -306,4 +308,17 @@ pub struct ArchivedRoundSummary {
     pub pool_down: i128,
     pub participant_count: u32,
     pub settled_at_ledger: u32,
+}
+
+/// Pending two-step oracle rotation proposal.
+///
+/// The admin proposes a new oracle address with a timestamp-based expiry window.
+/// After `expires_at` (ledger timestamp) the proposal is stale and acceptance
+/// is rejected until the admin submits a fresh proposal.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OracleRotationProposal {
+    pub new_oracle: Address,
+    pub proposed_at: u64,
+    pub expires_at: u64,
 }
