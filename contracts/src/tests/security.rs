@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Security tests for Oracle data freshness and round validation.
 
 use super::config_helpers::{apply_oracle_max_deviation_bps, apply_oracle_stale_threshold};
@@ -897,4 +898,183 @@ fn test_resolve_round_both_network_and_contract_wrong() {
         contract_addr: wrong_contract,
     });
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
+}
+
+// ─── Protocol health endpoint tests ──────────────────────────────────────────
+
+#[test]
+fn test_protocol_health_no_heartbeat_unknown_oracle() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // No heartbeat recorded → oracle_status=3, oracle_live=false
+    let health = client.get_protocol_health();
+    assert_eq!(health.oracle_status, 3); // unknown
+    assert!(!health.oracle_live);
+    assert!(!health.has_active_round);
+    assert_eq!(health.status_code, 2); // ORACLE_STALE
+    assert!(health.ledger_sequence > 0);
+}
+
+#[test]
+fn test_protocol_health_oracle_offline() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // Record offline heartbeat
+    env.ledger().with_mut(|li| {
+        li.timestamp = 500;
+    });
+    client.update_oracle_heartbeat(&2u32); // offline
+
+    let health = client.get_protocol_health();
+    assert!(!health.oracle_live);
+    assert_eq!(health.oracle_status, 2); // offline
+    assert_eq!(health.status_code, 2); // ORACLE_STALE
+}
+
+#[test]
+fn test_protocol_health_round_resolvable_stale() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+
+    // Advance past end_ledger so round is resolvable
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 30;
+        li.timestamp = 100;
+    });
+
+    // Keep oracle alive
+    client.update_oracle_heartbeat(&0u32);
+
+    let health = client.get_protocol_health();
+    assert!(health.has_active_round);
+    assert_eq!(health.active_round_phase, 3); // resolvable
+    assert_eq!(health.status_code, 3); // ROUND_STALE
+}
+
+#[test]
+fn test_protocol_health_multiple_issues() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+
+    // No heartbeat (oracle unknown) + round past end_ledger → multiple issues
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 30;
+        li.timestamp = 100;
+    });
+
+    let health = client.get_protocol_health();
+    assert!(!health.oracle_live);
+    assert!(health.has_active_round);
+    assert_eq!(health.active_round_phase, 3); // resolvable
+    assert_eq!(health.status_code, 5); // MULTIPLE_ISSUES
+}
+
+#[test]
+fn test_protocol_health_schema_version_present() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    let health = client.get_protocol_health();
+    assert_eq!(health.schema_version, 2);
+}
+
+#[test]
+fn test_protocol_health_round_betting_phase() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user);
+
+    // Oracle heartbeat active
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+    });
+    client.update_oracle_heartbeat(&0u32);
+
+    // Create round at ledger 6
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 6;
+    });
+    client.create_round(&1_0000000, &None);
+
+    // Still in betting window (ledger 6, bet_end = 6+6=12)
+    let health = client.get_protocol_health();
+    assert!(health.has_active_round);
+    assert_eq!(health.active_round_phase, 1); // betting
+    assert_eq!(health.status_code, 0); // HEALTHY
+}
+
+#[test]
+fn test_protocol_health_round_running_phase() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user);
+
+    // Oracle heartbeat active
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+    });
+    client.update_oracle_heartbeat(&0u32);
+
+    // Create round at ledger 0
+    client.create_round(&1_0000000, &None);
+    // Default windows: bet=6, run=12
+    // bet_end = 6, end = 12
+
+    // Advance into running phase (past bet_end, before end)
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 8;
+    });
+
+    let health = client.get_protocol_health();
+    assert!(health.has_active_round);
+    assert_eq!(health.active_round_phase, 2); // running
+    assert_eq!(health.status_code, 0); // HEALTHY
 }

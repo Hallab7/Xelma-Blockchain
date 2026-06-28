@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: MIT
 //! Event coverage and completeness verification tests (Issue #117).
 
 use super::config_helpers::apply_windows;
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
-use crate::types::{BetSide, OraclePayload};
+use crate::types::{BetSide, ConfigChangeKind, ConfigChangePayload, OraclePayload};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     symbol_short,
@@ -25,6 +26,88 @@ fn setup() -> (
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
     (env, contract_id, admin, oracle, client)
+}
+
+fn assert_last_config_updated(
+    env: &Env,
+    kind: ConfigChangeKind,
+    old_value: ConfigChangePayload,
+    new_value: ConfigChangePayload,
+) {
+    let events = env.events().all();
+    let (_contract, topics, data) = events
+        .iter()
+        .rev()
+        .find(|(_contract, topics, _data)| {
+            topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(env) == Ok(symbol_short!("config"))
+                && topics.get(1).unwrap().try_into_val(env) == Ok(symbol_short!("updated"))
+        })
+        .expect("config updated event should exist");
+
+    assert_eq!(topics.len(), 2);
+    assert_eq!(
+        topics.get(0).unwrap().try_into_val(env),
+        Ok(symbol_short!("config"))
+    );
+    assert_eq!(
+        topics.get(1).unwrap().try_into_val(env),
+        Ok(symbol_short!("updated"))
+    );
+    assert_eq!(data.try_into_val(env), Ok((kind, old_value, new_value)));
+}
+
+#[test]
+fn test_event_coverage_direct_config_setters_emit_audit_event() {
+    let (env, _, _, _, client) = setup();
+
+    client.set_min_participants(&Some(2));
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::MinParticipants,
+        ConfigChangePayload::MinParticipants(None),
+        ConfigChangePayload::MinParticipants(Some(2)),
+    );
+
+    client.set_max_precision_participants(&25);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::MaxPrecisionParticipants,
+        ConfigChangePayload::MaxPrecisionParticipants(1_000),
+        ConfigChangePayload::MaxPrecisionParticipants(25),
+    );
+
+    client.set_mint_limit(&7);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::MintLimit,
+        ConfigChangePayload::MintLimit(0),
+        ConfigChangePayload::MintLimit(7),
+    );
+
+    client.set_archive_retention(&64);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::ArchiveRetention,
+        ConfigChangePayload::ArchiveRetention(128),
+        ConfigChangePayload::ArchiveRetention(64),
+    );
+}
+
+#[test]
+fn test_event_coverage_timelocked_config_apply_emits_audit_event() {
+    let (env, _, _, _, client) = setup();
+
+    client.schedule_windows(&10, &20);
+    env.ledger().with_mut(|li| li.sequence_number = 1_441);
+    client.apply_scheduled_changes(&ConfigChangeKind::Windows);
+
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::Windows,
+        ConfigChangePayload::Windows(6, 12),
+        ConfigChangePayload::Windows(10, 20),
+    );
 }
 
 #[test]

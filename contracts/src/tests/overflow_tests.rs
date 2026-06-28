@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Overflow boundary tests for payout arithmetic in claim_winnings and helpers.
 //!
 //! Each test targets a specific arithmetic branch:

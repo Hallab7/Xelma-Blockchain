@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Property-based tests for payout invariants.
 //!
 //! These tests exercise randomized scenarios to ensure core invariants such as:

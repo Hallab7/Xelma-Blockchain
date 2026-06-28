@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for bet placement and validation.
 
 use super::config_helpers::{apply_max_stake, apply_max_user_exposure};

@@ -77,6 +77,16 @@ export enum RoundMode {
 }
 
 
+/**
+ * Lifecycle phase of an active round, derived from ledger windows.
+ */
+export enum RoundPhase {
+  Betting = 1,
+  Running = 2,
+  Resolvable = 3,
+}
+
+
 export interface UserStats {
   best_streak: u32;
   current_streak: u32;
@@ -414,8 +424,64 @@ export const ContractError = {
   /**
    * Oracle payload contract_addr does not match the current contract
    */
-  50: {message:"OracleContractMismatch"}
+  50: {message:"OracleContractMismatch"},
+  /**
+   * Protocol fee bps is outside the allowed range (must be in 1..=MAX_PROTOCOL_FEE_BPS)
+   */
+  51: {message:"InvalidProtocolFeeBps"},
+  /**
+   * Treasury withdrawal would underflow the accumulated treasury balance
+   */
+  52: {message:"FeeTreasuryUnderflow"}
 }
+
+/**
+ * Decodes a contract error code into a structured result suitable for wallet UX.
+ * @param code - The on-chain u32 error code returned by the contract.
+ * @returns An object with the code, variant name, and human-readable message, or null if the code is unknown.
+ */
+export function decodeContractError(code: number): {
+  code: number;
+  variant: string;
+  message: string;
+} | null {
+  const entry = ContractError[code];
+  if (!entry) {
+    return null;
+  }
+  return {
+    code,
+    variant: entry.message,
+    message: entry.message,
+  };
+}
+
+/**
+ * Formats a contract error code into a user-facing string for wallet display.
+ * Returns a fallback for unknown codes.
+ * @param code - The on-chain u32 error code returned by the contract.
+ */
+export function formatContractError(code: number): string {
+  const decoded = decodeContractError(code);
+  if (!decoded) {
+    return `Unknown contract error (code ${code})`;
+  }
+  return `${decoded.message} (code ${code})`;
+}
+
+/**
+ * Decode contract error code to human‑readable message.
+ * @param code Numeric error code returned by the contract.
+ * @returns Friendly message for UI or wallet integration.
+ */
+export function ContractErrorDecoder(code: number): string {
+  const err = (ContractError as any)[code];
+  if (err && err.message) {
+    return err.message;
+  }
+  return `Unknown contract error code ${code}`;
+}
+
 
 export interface Client {
   /**
@@ -551,6 +617,7 @@ export interface Client {
   get_active_round: (options?: MethodOptions) => Promise<AssembledTransaction<Option<Round>>>
 
   /**
+   /**
    * Construct and simulate a get_runtime_mode transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Returns the current runtime mode (0 = Normal, 1 = ClaimsOnly, 2 = FullyPaused)
    */
@@ -568,6 +635,19 @@ export interface Client {
    * Sets the runtime mode of the contract (admin only)
    */
   set_runtime_mode: ({mode}: {mode: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate a get_round_phase transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns the current lifecycle phase of the active round.
+   *
+   * Phase boundaries are deterministic:
+   * - `Betting` while `ledger < bet_end_ledger`
+   * - `Running` while `bet_end_ledger ≤ ledger < end_ledger`
+   * - `Resolvable` when `ledger ≥ end_ledger`
+   *
+   * Returns `NoActiveRound` when no round is active.
+   */
+  get_round_phase: (options?: MethodOptions) => Promise<AssembledTransaction<Result<RoundPhase>>>
 
   /**
    * Construct and simulate a unpause_contract transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -992,6 +1072,7 @@ export class Client extends ContractClient {
         get_runtime_mode: this.txFromJSON<u32>,
         schedule_windows: this.txFromJSON<Result<void>>,
         set_runtime_mode: this.txFromJSON<Result<void>>,
+        get_round_phase: this.txFromJSON<Result<RoundPhase>>,
         unpause_contract: this.txFromJSON<Result<void>>,
         commit_prediction: this.txFromJSON<Result<void>>,
         get_last_round_id: this.txFromJSON<u64>,

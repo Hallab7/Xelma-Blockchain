@@ -52,3 +52,28 @@ contract.|
 ```
 
 As long as your editor is configured to show JavaScript/TypeScript documentation, you can pause your typing at that `|` to get a list of all exports and inline-documentation for each. It exports a separate [async](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function) function for each method in the smart contract, with documentation for each generated from the comments the contract's author included in the original source code.
+
+# Decode contract errors
+
+When a transaction fails, the contract returns a `u32` error code. Use the helpers
+below to translate that code into a structured result or a user-facing string
+suitable for wallet UX.
+
+```ts
+import { decodeContractError, formatContractError } from "bindings"
+
+// Structured result for programmatic handling
+const decoded = decodeContractError(4)
+if (decoded) {
+  console.log(`Error ${decoded.code}: ${decoded.variant} — ${decoded.message}`)
+  // => "Error 4: UnauthorizedAdmin — UnauthorizedAdmin"
+}
+
+// One-liner for display in a wallet or bot
+console.log(formatContractError(9) ?? "Unknown error")
+// => "InsufficientBalance (code 9)"
+```
+
+Use `decodeContractError` to surface contextual information in your wallet or
+bot, and fall back to `"Unknown contract error (code N)"` for codes that the
+current bindings do not yet recognise.
