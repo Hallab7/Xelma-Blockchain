@@ -12,6 +12,21 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Lifecycle phase of an active round, derived from ledger windows.
+///
+/// Semantics (given `start_ledger`, `bet_end_ledger`, `end_ledger`):
+/// - `Betting`: `ledger < bet_end_ledger` — bets and precision predictions accepted
+/// - `Running`: `bet_end_ledger ≤ ledger < end_ledger` — reveal window (precision)
+/// - `Resolvable`: `ledger ≥ end_ledger` — round may be settled via oracle payload
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RoundPhase {
+    Betting = 1,
+    Running = 2,
+    Resolvable = 3,
+}
+
 /// Storage keys for contract data
 ///
 /// ## Indexed position keys (variants 13–15)
@@ -105,11 +120,6 @@ pub enum DataKey {
     /// retained on-chain before the oldest are pruned (FIFO). If unset, the protocol
     /// default is used.
     ArchiveRetention,
-    /// Heartbeat-settlement policy toggle (admin-configurable).
-    /// When present and `true`: strict mode — settlement is blocked when the oracle
-    /// heartbeat status is degraded (1) or unhealthy/offline (2).
-    /// When absent or `false`: lenient mode — settlement proceeds regardless.
-    HeartbeatSettlementStrict,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
