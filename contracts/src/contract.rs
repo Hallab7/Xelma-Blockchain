@@ -10,8 +10,8 @@ use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     OracleHeartbeatRecord, OraclePayload, PendingConfigChange, PrecisionCommitment,
-    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, UserOutcomeType,
-    UserPosition, UserRoundOutcome, UserStats,
+    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode,
+    RoundPoolStats, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -365,6 +365,97 @@ impl VirtualTokenContract {
     /// Returns the currently active round, if any
     pub fn get_active_round(env: Env) -> Option<Round> {
         env.storage().persistent().get(&DataKey::ActiveRound)
+    }
+
+    /// Returns live pool-composition metrics for the currently active round.
+    pub fn get_round_pool_stats(env: Env) -> Option<RoundPoolStats> {
+        let round: Round = env.storage().persistent().get(&DataKey::ActiveRound)?;
+        let participants_key = DataKey::RoundParticipants(round.round_id);
+        let participants: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&participants_key)
+            .unwrap_or(Vec::new(&env));
+
+        let mut stats = RoundPoolStats {
+            round_id: round.round_id,
+            mode: round.mode.clone(),
+            total_up_stake: 0,
+            total_down_stake: 0,
+            up_participant_count: 0,
+            down_participant_count: 0,
+            up_stake_ratio_bps: 0,
+            down_stake_ratio_bps: 0,
+            precision_total_stake: 0,
+            precision_participant_count: 0,
+            precision_prediction_count: 0,
+            precision_commitment_count: 0,
+            precision_revealed_count: 0,
+        };
+
+        match round.mode {
+            RoundMode::UpDown => {
+                stats.total_up_stake = round.pool_up;
+                stats.total_down_stake = round.pool_down;
+
+                let mut idx = 0;
+                while idx < participants.len() {
+                    if let Some(user) = participants.get(idx) {
+                        if let Some(position) = env
+                            .storage()
+                            .persistent()
+                            .get::<_, UserPosition>(&DataKey::Position(round.round_id, user))
+                        {
+                            match position.side {
+                                BetSide::Up => stats.up_participant_count += 1,
+                                BetSide::Down => stats.down_participant_count += 1,
+                            }
+                        }
+                    }
+                    idx += 1;
+                }
+
+                let total_stake = round.pool_up.checked_add(round.pool_down).unwrap_or(0);
+                if total_stake > 0 {
+                    stats.up_stake_ratio_bps = ((round.pool_up as u128)
+                        .saturating_mul(BPS_DENOMINATOR as u128)
+                        / total_stake as u128) as u32;
+                    stats.down_stake_ratio_bps = ((round.pool_down as u128)
+                        .saturating_mul(BPS_DENOMINATOR as u128)
+                        / total_stake as u128) as u32;
+                }
+            }
+            RoundMode::Precision => {
+                stats.precision_participant_count = participants.len();
+
+                let mut idx = 0;
+                while idx < participants.len() {
+                    if let Some(user) = participants.get(idx) {
+                        if let Some(prediction) =
+                            env.storage().persistent().get::<_, PrecisionPrediction>(
+                                &DataKey::PrecisionPosition(round.round_id, user.clone()),
+                            )
+                        {
+                            stats.precision_prediction_count += 1;
+                            stats.precision_total_stake += prediction.amount;
+                        } else if let Some(commitment) =
+                            env.storage().persistent().get::<_, PrecisionCommitment>(
+                                &DataKey::PrecisionCommitment(round.round_id, user),
+                            )
+                        {
+                            stats.precision_commitment_count += 1;
+                            stats.precision_total_stake += commitment.amount;
+                            if commitment.revealed {
+                                stats.precision_revealed_count += 1;
+                            }
+                        }
+                    }
+                    idx += 1;
+                }
+            }
+        }
+
+        Some(stats)
     }
 
     /// Returns the ID of the last created round (0 if no rounds created yet)
