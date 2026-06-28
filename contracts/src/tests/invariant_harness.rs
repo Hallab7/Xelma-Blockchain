@@ -2,11 +2,13 @@
 //! Differential invariant test harness using a reference model.
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, TestRunner};
+use proptest::strategy::ValueTree;
+use proptest::test_runner::{Config, RngSeed, TestRunner};
+use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
 use std::collections::HashMap;
 use std::env;
-use rand::{rngs::StdRng, SeedableRng};
+use std::string::String;
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::types::BetSide;
@@ -28,7 +30,11 @@ enum Action {
 /// Generate a random sequence of actions.
 fn action_strategy() -> impl Strategy<Value = Action> {
     // Generate a random address.
-    let addr = any::<[u8; 32]>().prop_map(|bytes| Address::from_bytes(&bytes));
+    let addr = any::<[u8; 32]>().prop_map(|bytes| {
+        let env = Env::default();
+        let bn: soroban_sdk::BytesN<32> = soroban_sdk::BytesN::from_array(&env, &bytes);
+        Address::from_string_bytes(&bn.into())
+    });
     let amount = 0i128..=1_000_000i128;
     // Simple string generators for config actions.
     let key = any::<String>();
@@ -53,11 +59,10 @@ fn pretty_print_failure(seed: Option<u64>, actions: &[Action], diff: &str) -> ! 
     );
 }
 
-proptest! {
-    #[test]
-    fn differential_invariant_harness() {
+#[test]
+fn differential_invariant_harness() {
         // Environment configuration
-        let seq_len: usize = env::var("SEQUENCE_LENGTH")
+        let seq_len: u32 = env::var("SEQUENCE_LENGTH")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(20);
@@ -66,14 +71,16 @@ proptest! {
             .and_then(|v| v.parse().ok());
 
         // Set up proptest runner with optional seed (deterministic when seed is provided)
-        let config = Config::with_cases(seq_len);
-        let rng = match seed_opt {
-            Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_entropy(),
-        };
-        let mut runner = TestRunner::new_with_rng(config, rng);
-        let actions_strategy = prop::collection::vec(action_strategy(), 1..=seq_len);
-        let actions = runner.run(&actions_strategy, |v| Ok(v)).expect("Failed to generate actions");
+        let mut config = Config::with_cases(seq_len);
+        if let Some(seed) = seed_opt {
+            config.rng_seed = RngSeed::Fixed(seed);
+        }
+        let mut runner = TestRunner::new(config);
+        let actions_strategy = prop::collection::vec(action_strategy(), 1..=seq_len as usize);
+        let actions = actions_strategy
+            .new_tree(&mut runner)
+            .expect("Failed to generate actions")
+            .current();
 
         // Setup contract environment.
         let env = Env::default();
@@ -101,11 +108,11 @@ proptest! {
         for act in &actions {
             match act {
                 Action::BetUp { user, amount } => {
-                    client.place_bet(&user, &(amount as u128), &BetSide::Up).unwrap();
+                    client.place_bet(&user, amount, &BetSide::Up);
                     model.place_bet(&user, *amount);
                 }
                 Action::BetDown { user, amount } => {
-                    client.place_bet(&user, &(amount as u128), &BetSide::Down).unwrap();
+                    client.place_bet(&user, amount, &BetSide::Down);
                     model.place_bet(&user, *amount);
                 }
                 Action::Resolve { price_up } => {
@@ -114,6 +121,8 @@ proptest! {
                         timestamp: env.ledger().timestamp(),
                         round_id: 0,
                         nonce: 1u64,
+                        network_id: env.ledger().network_id(),
+                        contract_addr: contract_id.clone(),
                     });
                     // Simplified: no explicit winners map; model resolves with empty map.
                     model.resolve(&HashMap::new());
@@ -135,11 +144,10 @@ proptest! {
                 Action::ConfigChange { key, value } => {
                     // Placeholder: implement contract config change if available
                     // client.config_change(key, value);
-                    model.config_change(key, value);
+                    model.config_change(&key, &value);
                 }
             }
             // Check invariants after each action.
             check(&model);
         }
     }
-}

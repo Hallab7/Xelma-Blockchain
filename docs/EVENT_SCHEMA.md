@@ -213,7 +213,35 @@ Emitted when the admin reconfigures the bet and run window lengths.
 
 ---
 
-### `("oracle", "heartbeat")`
+#### `("action", "rejct")` — Diagnostic rejected-action event (Issue #196)
+
+Emitted when a privileged action (admin or oracle) is rejected due to an
+auth failure, paused contract, invalid state, or validation error. Enables
+operators to diagnose failed privileged transactions from on-chain events
+without relying on off-chain error logs.
+
+**Privacy**: the payload contains only the `actor` Address, an `action`
+Symbol, and a numeric `reason` code (a `ContractError` variant). No
+personally identifiable information, financial amounts, or internal state
+is exposed. Operators can match reason codes against the `ContractError`
+enum variants in `contracts/src/errors.rs`.
+
+| Position | Field    | Type      | Description                                                        |
+|----------|----------|-----------|--------------------------------------------------------------------|
+| 0        | `actor`  | `Address` | Address of the authenticated caller whose action was rejected       |
+| 1        | `action` | `Symbol`  | Short name of the privileged action (e.g. `"create"`, `"resolve"`) |
+| 2        | `reason` | `u32`     | Numeric error code matching a `ContractError` variant               |
+
+**Example action symbols**: `"create"`, `"resolve"`, `"cancel"`, `"migrate"`,
+`"withdraw"`, `"hbeat"`, `"arm_ovr"`, `"set_arch"`, `"sched"`,
+`"cncl_cfg"`, `"min_par"`, `"max_prec"`, `"mint_lim"`.
+
+**Reason codes** are the integer values of `ContractError` — see
+`contracts/src/errors.rs`.
+
+---
+
+## `("oracle", "heartbeat")`
 
 Emitted when the oracle records an on-chain liveness heartbeat.
 
