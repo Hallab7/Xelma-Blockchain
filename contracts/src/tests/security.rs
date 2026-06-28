@@ -1078,3 +1078,295 @@ fn test_protocol_health_round_running_phase() {
     assert_eq!(health.active_round_phase, 2); // running
     assert_eq!(health.status_code, 0); // HEALTHY
 }
+
+// ─── Heartbeat settlement policy tests ───────────────────────────────────────
+
+/// Helper: build a valid OraclePayload for the active round at current ledger time.
+fn make_payload(env: &Env, contract_id: &Address, round_start: u32) -> OraclePayload {
+    OraclePayload {
+        price: 1_5000000u128,
+        timestamp: env.ledger().timestamp(),
+        round_id: round_start,
+        nonce: env.ledger().sequence() as u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    }
+}
+
+/// Healthy heartbeat (status=0) with strict mode → settlement succeeds.
+#[test]
+fn test_heartbeat_policy_healthy_strict_settles() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    // Enable strict mode
+    client.set_heartbeat_settlement_strict(&true);
+
+    // Record healthy heartbeat
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+        li.sequence_number = 12;
+    });
+    client.update_oracle_heartbeat(&0u32); // healthy
+
+    let payload = make_payload(&env, &contract_id, round.start_ledger);
+    client.resolve_round(&payload);
+    assert_eq!(client.get_active_round(), None, "round must be resolved");
+}
+
+/// Degraded heartbeat (status=1) + strict mode → settlement blocked.
+#[test]
+fn test_heartbeat_policy_degraded_strict_blocked() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    client.set_heartbeat_settlement_strict(&true);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+        li.sequence_number = 12;
+    });
+    client.update_oracle_heartbeat(&1u32); // degraded
+
+    let payload = make_payload(&env, &contract_id, round.start_ledger);
+    let result = client.try_resolve_round(&payload);
+    assert_eq!(
+        result,
+        Err(Ok(ContractError::HeartbeatSettlementBlocked)),
+        "degraded + strict must block settlement"
+    );
+}
+
+/// Unhealthy/offline heartbeat (status=2) + strict mode → settlement blocked.
+#[test]
+fn test_heartbeat_policy_unhealthy_strict_blocked() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    client.set_heartbeat_settlement_strict(&true);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+        li.sequence_number = 12;
+    });
+    client.update_oracle_heartbeat(&2u32); // offline/unhealthy
+
+    let payload = make_payload(&env, &contract_id, round.start_ledger);
+    let result = client.try_resolve_round(&payload);
+    assert_eq!(
+        result,
+        Err(Ok(ContractError::HeartbeatSettlementBlocked)),
+        "unhealthy + strict must block settlement"
+    );
+}
+
+/// Degraded heartbeat (status=1) + lenient mode (default) → settlement succeeds.
+#[test]
+fn test_heartbeat_policy_degraded_lenient_settles() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    // strict mode is false by default — no call to set_heartbeat_settlement_strict
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+        li.sequence_number = 12;
+    });
+    client.update_oracle_heartbeat(&1u32); // degraded
+
+    let payload = make_payload(&env, &contract_id, round.start_ledger);
+    client.resolve_round(&payload);
+    assert_eq!(
+        client.get_active_round(),
+        None,
+        "degraded + lenient must still settle"
+    );
+}
+
+/// Unhealthy heartbeat (status=2) + lenient mode → settlement succeeds.
+#[test]
+fn test_heartbeat_policy_unhealthy_lenient_settles() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    // Explicitly set lenient
+    client.set_heartbeat_settlement_strict(&false);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+        li.sequence_number = 12;
+    });
+    client.update_oracle_heartbeat(&2u32); // offline/unhealthy
+
+    let payload = make_payload(&env, &contract_id, round.start_ledger);
+    client.resolve_round(&payload);
+    assert_eq!(
+        client.get_active_round(),
+        None,
+        "unhealthy + lenient must still settle"
+    );
+}
+
+/// When settlement is blocked, a ("oracle", "hb_block") event is emitted
+/// carrying the heartbeat status as the payload.
+#[test]
+fn test_heartbeat_policy_blocked_emits_event() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    client.set_heartbeat_settlement_strict(&true);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+        li.sequence_number = 12;
+    });
+    client.update_oracle_heartbeat(&1u32); // degraded
+
+    let payload = make_payload(&env, &contract_id, round.start_ledger);
+    let _ = client.try_resolve_round(&payload);
+
+    let events = env.events().all();
+    let blocked_event = events.iter().find(|e| {
+        let (_contract, topics, _data) = e;
+        topics.len() == 2
+            && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("oracle"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("hb_block"))
+    });
+    assert!(
+        blocked_event.is_some(),
+        "hb_block event must be emitted when settlement is blocked"
+    );
+}
+
+/// Admin toggle: switching strict→lenient unblocks settlement for subsequent calls.
+#[test]
+fn test_heartbeat_policy_admin_toggle_unblocks() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+
+    // Assert default is lenient
+    assert!(!client.get_heartbeat_settlement_strict());
+
+    // Enable strict mode and confirm it is stored
+    client.set_heartbeat_settlement_strict(&true);
+    assert!(client.get_heartbeat_settlement_strict());
+
+    // Create round + degraded heartbeat
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+        li.sequence_number = 12;
+    });
+    client.update_oracle_heartbeat(&1u32); // degraded
+
+    // Strict → blocked
+    let payload = make_payload(&env, &contract_id, round.start_ledger);
+    let blocked = client.try_resolve_round(&payload);
+    assert_eq!(blocked, Err(Ok(ContractError::HeartbeatSettlementBlocked)));
+
+    // Switch to lenient → settlement proceeds
+    client.set_heartbeat_settlement_strict(&false);
+    assert!(!client.get_heartbeat_settlement_strict());
+
+    // Need a fresh nonce; create a new round (same environment)
+    // The active round was NOT resolved (blocked), so it's still active.
+    // Use a different nonce — our helper uses sequence as nonce, already at 12.
+    // Advance sequence so we get a fresh nonce.
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 13;
+        li.timestamp = 100;
+    });
+    let payload2 = make_payload(&env, &contract_id, round.start_ledger);
+    client.resolve_round(&payload2);
+    assert_eq!(client.get_active_round(), None, "should resolve after toggle to lenient");
+}
+
+/// set_heartbeat_settlement_strict requires admin authorisation.
+#[test]
+fn test_heartbeat_policy_setter_requires_admin_auth() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+
+    // Only auth the initialize call
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "initialize",
+            args: (&admin, &oracle).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.initialize(&admin, &oracle);
+
+    // No auth for set_heartbeat_settlement_strict — must fail
+    let result = client.try_set_heartbeat_settlement_strict(&true);
+    assert!(result.is_err(), "setter must require admin auth");
+}

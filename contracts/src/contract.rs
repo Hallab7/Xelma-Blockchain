@@ -1155,6 +1155,50 @@ impl VirtualTokenContract {
             .unwrap_or(DEFAULT_ARCHIVE_RETENTION)
     }
 
+    // ─── Heartbeat settlement policy ─────────────────────────────────────────
+
+    /// Configures whether `resolve_round` enforces oracle heartbeat health before
+    /// settlement (admin only).
+    ///
+    /// When `strict` is `true` (strict mode):
+    ///   - Settlement is **blocked** when the heartbeat status is `1` (degraded)
+    ///     or `2` (offline/unhealthy). A `("oracle", "hb_block")` event is
+    ///     emitted and `HbBlocked` is returned.
+    ///   - Settlement proceeds normally when heartbeat status is `0` (active)
+    ///     or when no heartbeat record exists.
+    ///
+    /// When `strict` is `false` (lenient mode, the default):
+    ///   - Settlement proceeds regardless of heartbeat status (existing behavior).
+    pub fn set_heartbeat_settlement_strict(env: Env, strict: bool) -> Result<(), ContractError> {
+        Self::_require_supported_schema(&env)?;
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::AdminNotSet)?;
+        admin.require_auth();
+        Self::_ensure_not_paused(&env)?;
+
+        let key = DataKey::HeartbeatSettlementStrict;
+        let old_strict: bool = env.storage().persistent().get(&key).unwrap_or(false);
+        env.storage().persistent().set(&key, &strict);
+        Self::_extend_persistent_ttl(&env, &key);
+
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("oracle"), symbol_short!("hb_policy")),
+            (old_strict, strict),
+        );
+        Ok(())
+    }
+
+    /// Returns `true` if strict heartbeat-settlement mode is enabled, `false` otherwise.
+    pub fn get_heartbeat_settlement_strict(env: Env) -> bool {
+        let key = DataKey::HeartbeatSettlementStrict;
+        Self::_extend_persistent_ttl(&env, &key);
+        env.storage().persistent().get(&key).unwrap_or(false)
+    }
+
     /// Returns user statistics (wins, losses, streaks)
     pub fn get_user_stats(env: Env, user: Address) -> UserStats {
         let key = DataKey::UserStats(user);
@@ -1893,11 +1937,45 @@ impl VirtualTokenContract {
         oracle.require_auth();
         Self::_ensure_not_paused(&env)?;
 
+        // ─── Heartbeat settlement policy check ───────────────────────────────
+        // In strict mode (HeartbeatSettlementStrict == true), block settlement
+        // when the oracle heartbeat reports a degraded (1) or offline (2) status.
+        // Lenient mode (default / absent) preserves existing settlement behavior.
+        {
+            let strict_key = DataKey::HeartbeatSettlementStrict;
+            Self::_extend_persistent_ttl(&env, &strict_key);
+            let strict: bool = env
+                .storage()
+                .persistent()
+                .get(&strict_key)
+                .unwrap_or(false);
+            if strict {
+                let hb_key = DataKey::OracleHeartbeat;
+                Self::_extend_persistent_ttl(&env, &hb_key);
+                if let Some(hb) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, OracleHeartbeatRecord>(&hb_key)
+                {
+                    // status 1 = degraded, status 2 = offline/unhealthy
+                    if hb.status == 1 || hb.status == 2 {
+                        #[allow(deprecated)]
+                        env.events().publish(
+                            (symbol_short!("oracle"), symbol_short!("hb_block")),
+                            (hb.status,),
+                        );
+                        return Err(ContractError::HbBlocked);
+                    }
+                }
+            }
+        }
+
         let round: Round = env
             .storage()
             .persistent()
             .get(&DataKey::ActiveRound)
             .ok_or(ContractError::NoActiveRound)?;
+
 
         // Verify round ID matches to prevent cross-round replays
         if payload.round_id != round.start_ledger {

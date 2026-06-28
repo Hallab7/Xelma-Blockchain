@@ -105,6 +105,11 @@ pub enum DataKey {
     /// retained on-chain before the oldest are pruned (FIFO). If unset, the protocol
     /// default is used.
     ArchiveRetention,
+    /// Heartbeat-settlement policy toggle (admin-configurable).
+    /// When present and `true`: strict mode — settlement is blocked when the oracle
+    /// heartbeat status is degraded (1) or unhealthy/offline (2).
+    /// When absent or `false`: lenient mode — settlement proceeds regardless.
+    HeartbeatSettlementStrict,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.

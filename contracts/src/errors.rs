@@ -108,4 +108,7 @@ pub enum ContractError {
     MintLimitExceeded = 53,
     /// Archive retention limit is outside the allowed range
     InvalidArchiveRetention = 54,
+    /// Settlement was blocked because oracle heartbeat is degraded or unhealthy
+    /// and strict heartbeat-settlement mode is enabled
+    HbBlocked = 55,
 }
