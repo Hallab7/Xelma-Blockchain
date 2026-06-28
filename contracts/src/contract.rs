@@ -10,8 +10,9 @@ use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     OracleHeartbeatRecord, OraclePayload, PendingConfigChange, PrecisionCommitment,
-    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, UserOutcomeType,
-    UserPosition, UserRoundOutcome, UserStats, LeaderboardEntry,
+    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, RoundPhase,
+    UserOutcomeType,
+    UserPosition, UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -24,7 +25,6 @@ const MAX_PRECISION_PARTICIPANTS_LIMIT: u32 = 10_000;
 /// Maximum number of entries returned per page by paginated query methods,
 /// regardless of the caller-requested `limit` (Issue #139).
 const MAX_PAGE_SIZE: u32 = 100;
-const LEADERBOARD_LIMIT: u32 = 100;
 
 // ─── Oracle heartbeat limits ──────────────────────────────────────────────────
 const DEFAULT_ORACLE_STALE_THRESHOLD: u64 = 3_600; // 1 hour
@@ -368,6 +368,23 @@ impl VirtualTokenContract {
         env.storage().persistent().get(&DataKey::ActiveRound)
     }
 
+    /// Returns the current lifecycle phase of the active round.
+    ///
+    /// Phase boundaries are deterministic:
+    /// - `Betting` while `ledger < bet_end_ledger`
+    /// - `Running` while `bet_end_ledger ≤ ledger < end_ledger`
+    /// - `Resolvable` when `ledger ≥ end_ledger`
+    ///
+    /// Returns [`ContractError::NoActiveRound`] when no round is active.
+    pub fn get_round_phase(env: Env) -> Result<RoundPhase, ContractError> {
+        let round = env
+            .storage()
+            .persistent()
+            .get::<_, Round>(&DataKey::ActiveRound)
+            .ok_or(ContractError::NoActiveRound)?;
+        Ok(Self::_derive_round_phase(env.ledger().sequence(), &round))
+    }
+
     /// Returns the ID of the last created round (0 if no rounds created yet)
     pub fn get_last_round_id(env: Env) -> u64 {
         env.storage()
@@ -618,14 +635,8 @@ impl VirtualTokenContract {
         {
             None => (false, 0u32),
             Some(round) => {
-                let phase = if ledger_sequence < round.bet_end_ledger {
-                    1u32
-                } else if ledger_sequence < round.end_ledger {
-                    2u32
-                } else {
-                    3u32
-                };
-                (true, phase)
+                let phase = Self::_derive_round_phase(ledger_sequence, &round);
+                (true, phase as u32)
             }
         };
 
@@ -1036,7 +1047,7 @@ impl VirtualTokenContract {
         Self::_ensure_not_paused(&env)?;
 
         if max == 0 || max > MAX_PRECISION_PARTICIPANTS_LIMIT {
-            return Err(ContractError::InvalidPrecisionCap);
+            return Err(ContractError::InvalidPrecisionParticipantCap);
         }
 
         let key = DataKey::MaxPrecisionParticipants;
@@ -1156,50 +1167,6 @@ impl VirtualTokenContract {
             .unwrap_or(DEFAULT_ARCHIVE_RETENTION)
     }
 
-    // ─── Heartbeat settlement policy ─────────────────────────────────────────
-
-    /// Configures whether `resolve_round` enforces oracle heartbeat health before
-    /// settlement (admin only).
-    ///
-    /// When `strict` is `true` (strict mode):
-    ///   - Settlement is **blocked** when the heartbeat status is `1` (degraded)
-    ///     or `2` (offline/unhealthy). A `("oracle", "hb_block")` event is
-    ///     emitted and `HbBlocked` is returned.
-    ///   - Settlement proceeds normally when heartbeat status is `0` (active)
-    ///     or when no heartbeat record exists.
-    ///
-    /// When `strict` is `false` (lenient mode, the default):
-    ///   - Settlement proceeds regardless of heartbeat status (existing behavior).
-    pub fn set_heartbeat_settlement_strict(env: Env, strict: bool) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
-
-        let key = DataKey::HeartbeatSettlementStrict;
-        let old_strict: bool = env.storage().persistent().get(&key).unwrap_or(false);
-        env.storage().persistent().set(&key, &strict);
-        Self::_extend_persistent_ttl(&env, &key);
-
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("oracle"), symbol_short!("hb_policy")),
-            (old_strict, strict),
-        );
-        Ok(())
-    }
-
-    /// Returns `true` if strict heartbeat-settlement mode is enabled, `false` otherwise.
-    pub fn get_heartbeat_settlement_strict(env: Env) -> bool {
-        let key = DataKey::HeartbeatSettlementStrict;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key).unwrap_or(false)
-    }
-
     /// Returns user statistics (wins, losses, streaks)
     pub fn get_user_stats(env: Env, user: Address) -> UserStats {
         let key = DataKey::UserStats(user);
@@ -1218,79 +1185,6 @@ impl VirtualTokenContract {
         Self::_extend_persistent_ttl(&env, &key);
         env.storage().persistent().get(&key).unwrap_or(0)
     }
-
-    /// Returns a paginated slice of the wins leaderboard.
-    /// Ordered by total wins descending, with user address ascending as a tie-breaker.
-    pub fn get_leaderboard_by_wins(
-        env: Env,
-        offset: u32,
-        limit: u32,
-    ) -> Vec<LeaderboardEntry> {
-        let limit = limit.min(MAX_PAGE_SIZE);
-        if limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let key = DataKey::LeaderboardWins;
-        Self::_extend_persistent_ttl(&env, &key);
-        let list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(Vec::new(&env));
-
-        let total = list.len();
-        if offset >= total {
-            return Vec::new(&env);
-        }
-
-        let end = offset.saturating_add(limit).min(total);
-        let mut result = Vec::new(&env);
-        for i in offset..end {
-            if let Some(user) = list.get(i) {
-                let stats = Self::get_user_stats(env.clone(), user.clone());
-                result.push_back(LeaderboardEntry { user, stats });
-            }
-        }
-        result
-    }
-
-    /// Returns a paginated slice of the best streak leaderboard.
-    /// Ordered by best streak descending, with user address ascending as a tie-breaker.
-    pub fn get_leaderboard_by_streak(
-        env: Env,
-        offset: u32,
-        limit: u32,
-    ) -> Vec<LeaderboardEntry> {
-        let limit = limit.min(MAX_PAGE_SIZE);
-        if limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let key = DataKey::LeaderboardStreak;
-        Self::_extend_persistent_ttl(&env, &key);
-        let list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(Vec::new(&env));
-
-        let total = list.len();
-        if offset >= total {
-            return Vec::new(&env);
-        }
-
-        let end = offset.saturating_add(limit).min(total);
-        let mut result = Vec::new(&env);
-        for i in offset..end {
-            if let Some(user) = list.get(i) {
-                let stats = Self::get_user_stats(env.clone(), user.clone());
-                result.push_back(LeaderboardEntry { user, stats });
-            }
-        }
-        result
-    }
-
 
     /// Places a bet on the active round (Up/Down mode only).
     ///
@@ -1503,7 +1397,7 @@ impl VirtualTokenContract {
             .unwrap_or(Vec::new(&env));
         let max_precision_participants = Self::get_max_precision_participants(env.clone());
         if participants.len() >= max_precision_participants {
-            return Err(ContractError::PrecisionCapExceeded);
+            return Err(ContractError::PrecisionParticipantCapExceeded);
         }
 
         let user_balance = Self::balance(env.clone(), user.clone());
@@ -2011,45 +1905,11 @@ impl VirtualTokenContract {
         oracle.require_auth();
         Self::_ensure_not_paused(&env)?;
 
-        // ─── Heartbeat settlement policy check ───────────────────────────────
-        // In strict mode (HeartbeatSettlementStrict == true), block settlement
-        // when the oracle heartbeat reports a degraded (1) or offline (2) status.
-        // Lenient mode (default / absent) preserves existing settlement behavior.
-        {
-            let strict_key = DataKey::HeartbeatSettlementStrict;
-            Self::_extend_persistent_ttl(&env, &strict_key);
-            let strict: bool = env
-                .storage()
-                .persistent()
-                .get(&strict_key)
-                .unwrap_or(false);
-            if strict {
-                let hb_key = DataKey::OracleHeartbeat;
-                Self::_extend_persistent_ttl(&env, &hb_key);
-                if let Some(hb) = env
-                    .storage()
-                    .persistent()
-                    .get::<_, OracleHeartbeatRecord>(&hb_key)
-                {
-                    // status 1 = degraded, status 2 = offline/unhealthy
-                    if hb.status == 1 || hb.status == 2 {
-                        #[allow(deprecated)]
-                        env.events().publish(
-                            (symbol_short!("oracle"), symbol_short!("hb_block")),
-                            (hb.status,),
-                        );
-                        return Err(ContractError::StaleOracleData);
-                    }
-                }
-            }
-        }
-
         let round: Round = env
             .storage()
             .persistent()
             .get(&DataKey::ActiveRound)
             .ok_or(ContractError::NoActiveRound)?;
-
 
         // Verify round ID matches to prevent cross-round replays
         if payload.round_id != round.start_ledger {
@@ -3343,7 +3203,7 @@ impl VirtualTokenContract {
     }
 
     pub(crate) fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> {
-        let key = DataKey::UserStats(user.clone());
+        let key = DataKey::UserStats(user);
         let mut stats: UserStats = env.storage().persistent().get(&key).unwrap_or(UserStats {
             total_wins: 0,
             total_losses: 0,
@@ -3366,12 +3226,11 @@ impl VirtualTokenContract {
 
         env.storage().persistent().set(&key, &stats);
         Self::_extend_persistent_ttl(env, &key);
-        Self::_update_leaderboards(env, user)?;
         Ok(())
     }
 
     pub(crate) fn _update_stats_loss(env: &Env, user: Address) -> Result<(), ContractError> {
-        let key = DataKey::UserStats(user.clone());
+        let key = DataKey::UserStats(user);
         let mut stats: UserStats = env.storage().persistent().get(&key).unwrap_or(UserStats {
             total_wins: 0,
             total_losses: 0,
@@ -3387,116 +3246,8 @@ impl VirtualTokenContract {
 
         env.storage().persistent().set(&key, &stats);
         Self::_extend_persistent_ttl(env, &key);
-        Self::_update_leaderboards(env, user)?;
         Ok(())
     }
-
-    fn _sort_leaderboard_wins(env: &Env, addresses: Vec<Address>) -> Vec<Address> {
-        let mut sorted: Vec<Address> = Vec::new(env);
-        for addr in addresses.iter() {
-            let addr_stats = Self::get_user_stats(env.clone(), addr.clone());
-            let mut inserted = false;
-            for i in 0..sorted.len() {
-                let other = sorted.get_unchecked(i);
-                let other_stats = Self::get_user_stats(env.clone(), other.clone());
-                if addr_stats.total_wins > other_stats.total_wins {
-                    sorted.insert(i, addr.clone());
-                    inserted = true;
-                    break;
-                } else if addr_stats.total_wins == other_stats.total_wins {
-                    if addr < other {
-                        sorted.insert(i, addr.clone());
-                        inserted = true;
-                        break;
-                    }
-                }
-            }
-            if !inserted {
-                sorted.push_back(addr);
-            }
-        }
-        sorted
-    }
-
-    fn _sort_leaderboard_streak(env: &Env, addresses: Vec<Address>) -> Vec<Address> {
-        let mut sorted: Vec<Address> = Vec::new(env);
-        for addr in addresses.iter() {
-            let addr_stats = Self::get_user_stats(env.clone(), addr.clone());
-            let mut inserted = false;
-            for i in 0..sorted.len() {
-                let other = sorted.get_unchecked(i);
-                let other_stats = Self::get_user_stats(env.clone(), other.clone());
-                if addr_stats.best_streak > other_stats.best_streak {
-                    sorted.insert(i, addr.clone());
-                    inserted = true;
-                    break;
-                } else if addr_stats.best_streak == other_stats.best_streak {
-                    if addr < other {
-                        sorted.insert(i, addr.clone());
-                        inserted = true;
-                        break;
-                    }
-                }
-            }
-            if !inserted {
-                sorted.push_back(addr);
-            }
-        }
-        sorted
-    }
-
-    fn _update_leaderboards(env: &Env, user: Address) -> Result<(), ContractError> {
-        let wins_key = DataKey::LeaderboardWins;
-        let wins_list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&wins_key)
-            .unwrap_or(Vec::new(env));
-        
-        let mut new_wins_list = Vec::new(env);
-        for addr in wins_list.iter() {
-            if addr != user {
-                new_wins_list.push_back(addr);
-            }
-        }
-        new_wins_list.push_back(user.clone());
-        
-        let sorted_wins = Self::_sort_leaderboard_wins(env, new_wins_list);
-        let mut final_wins = Vec::new(env);
-        let limit_wins = LEADERBOARD_LIMIT.min(sorted_wins.len());
-        for i in 0..limit_wins {
-            final_wins.push_back(sorted_wins.get_unchecked(i));
-        }
-        env.storage().persistent().set(&wins_key, &final_wins);
-        Self::_extend_persistent_ttl(env, &wins_key);
-
-        let streak_key = DataKey::LeaderboardStreak;
-        let streak_list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&streak_key)
-            .unwrap_or(Vec::new(env));
-            
-        let mut new_streak_list = Vec::new(env);
-        for addr in streak_list.iter() {
-            if addr != user {
-                new_streak_list.push_back(addr);
-            }
-        }
-        new_streak_list.push_back(user);
-        
-        let sorted_streak = Self::_sort_leaderboard_streak(env, new_streak_list);
-        let mut final_streak = Vec::new(env);
-        let limit_streak = LEADERBOARD_LIMIT.min(sorted_streak.len());
-        for i in 0..limit_streak {
-            final_streak.push_back(sorted_streak.get_unchecked(i));
-        }
-        env.storage().persistent().set(&streak_key, &final_streak);
-        Self::_extend_persistent_ttl(env, &streak_key);
-
-        Ok(())
-    }
-
 
     /// Mints 1000 vXLM for new users (one-time only)
     pub fn mint_initial(env: Env, user: Address) -> i128 {
@@ -3574,6 +3325,17 @@ impl VirtualTokenContract {
         }
 
         Ok(())
+    }
+
+    /// Derives the round lifecycle phase for `round` at `ledger_sequence`.
+    fn _derive_round_phase(ledger_sequence: u32, round: &Round) -> RoundPhase {
+        if ledger_sequence < round.bet_end_ledger {
+            RoundPhase::Betting
+        } else if ledger_sequence < round.end_ledger {
+            RoundPhase::Running
+        } else {
+            RoundPhase::Resolvable
+        }
     }
 
     fn _schema_version(env: &Env) -> Option<u32> {
