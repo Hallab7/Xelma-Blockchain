@@ -1,10 +1,11 @@
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{ArchivedRoundSummary, DataKey, OraclePayload};
+use std::vec::Vec;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
-    Address, Env, TryIntoVal, Vec,
+    Address, Env, TryIntoVal,
 };
 
 fn setup_with_oracle() -> (Env, VirtualTokenContractClient<'static>, Address, Address) {
