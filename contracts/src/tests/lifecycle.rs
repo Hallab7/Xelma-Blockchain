@@ -191,6 +191,7 @@ fn test_full_round_lifecycle() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Round should be cleared
@@ -276,6 +277,7 @@ fn test_multiple_rounds_lifecycle() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
     client.claim_winnings(&alice);
 
@@ -312,6 +314,7 @@ fn test_multiple_rounds_lifecycle() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let stats = client.get_user_stats(&alice);
@@ -438,6 +441,7 @@ fn test_resolve_round_fails_without_oracle_auth() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
     assert!(result.is_err());
 }
@@ -522,6 +526,7 @@ fn test_round_created_event_includes_mode() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     client.create_round(&1_0000000, &Some(1));
@@ -827,6 +832,7 @@ fn test_cross_round_mode_alternation() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(client.get_active_round(), None);
@@ -887,6 +893,7 @@ fn test_cross_round_mode_alternation() {
         nonce: 2u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(client.get_active_round(), None);
@@ -946,6 +953,7 @@ fn test_cross_round_mode_alternation() {
         nonce: 3u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(client.get_active_round(), None);
@@ -982,3 +990,5 @@ fn test_cross_round_mode_alternation() {
     // Bob:   1000 - 50(R1) + 0 - 150(R2) + 0 - 100(R3) + 0 = 700
     assert_eq!(client.balance(&bob), 700_0000000);
 }
+
+

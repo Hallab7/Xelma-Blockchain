@@ -12,6 +12,16 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Runtime mode for the contract lifecycle
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RuntimeMode {
+    Normal = 0,
+    ClaimsOnly = 1,
+    FullyPaused = 2,
+}
+
 /// Lifecycle phase of an active round, derived from ledger windows.
 ///
 /// Semantics (given `start_ledger`, `bet_end_ledger`, `end_ledger`):
@@ -93,6 +103,11 @@ pub enum DataKey {
     /// One-shot admin override allowing the next settlement to bypass deviation checks.
     /// Automatically cleared after use.
     OracleDeviationOverrideArmed,
+    /// Minimum oracle confidence threshold in basis points (0–10000).
+    /// If unset, confidence guardrails are disabled.
+    OracleMinConfidenceBps,
+    /// When true, payloads with missing confidence are rejected in strict mode.
+    OracleStrictMode,
     /// Compact post-settlement summary keyed by round id for historical queries.
     ArchivedRound(u64),
     /// Ordered round ids for archive retention (oldest at index 0).
@@ -230,6 +245,10 @@ pub struct OraclePayload {
     /// Contract address this payload is intended for.
     /// Validated against `env.current_contract_address()` to prevent cross-contract replay.
     pub contract_addr: Address,
+    /// Optional confidence score from the price feed (0–10000 bps, where 10000 = 100%).
+    /// When `None`, the payload is treated as a legacy submission.
+    /// When strict mode is enabled, `None` is rejected.
+    pub confidence: Option<u32>,
 }
 
 /// Oracle liveness record, updated by the oracle service on each heartbeat call.
@@ -252,6 +271,30 @@ pub struct Round {
     pub pool_up: i128,       // Total vXLM bet on UP
     pub pool_down: i128,     // Total vXLM bet on DOWN
     pub mode: RoundMode,     // Round mode: UpDown (0) or Precision (1)
+}
+
+/// Aggregated active-round pool composition for frontend transparency.
+///
+/// Up/Down rounds populate the up/down pools, counts, and stake ratios.
+/// Precision rounds populate the precision totals and participant counters while
+/// leaving side-specific Up/Down fields at zero. Ratios are basis points of
+/// the mode's total visible stake (10_000 = 100%).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoundPoolStats {
+    pub round_id: u64,
+    pub mode: RoundMode,
+    pub total_up_stake: i128,
+    pub total_down_stake: i128,
+    pub up_participant_count: u32,
+    pub down_participant_count: u32,
+    pub up_stake_ratio_bps: u32,
+    pub down_stake_ratio_bps: u32,
+    pub precision_total_stake: i128,
+    pub precision_participant_count: u32,
+    pub precision_prediction_count: u32,
+    pub precision_commitment_count: u32,
+    pub precision_revealed_count: u32,
 }
 
 /// Terminal outcome recorded when a round leaves the active state.

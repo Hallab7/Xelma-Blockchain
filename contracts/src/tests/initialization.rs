@@ -196,7 +196,8 @@ fn test_mint_initial_with_rate_limiting() {
 
     // Minting for user3 in the same ledger should fail
     let res3 = client.try_mint_initial(&user3);
-    assert_eq!(res3, Err(Ok(soroban_sdk::Error::from_contract_error(ContractError::MintLimitExceeded as u32))));
+    let err = res3.unwrap().unwrap_err();
+    assert_eq!(err, soroban_sdk::Error::from_contract_error(ContractError::MintLimitExceeded as u32));
 
     // Moving to a new ledger should reset the counter, so user3 can now mint
     env.ledger().with_mut(|li| {
