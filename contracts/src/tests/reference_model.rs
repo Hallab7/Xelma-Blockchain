@@ -1,3 +1,4 @@
+extern crate std;
 // SPDX-License-Identifier: MIT
 //! Simplified reference model for contract state used in invariant testing.
 
@@ -101,3 +102,6 @@ impl ReferenceModel {
         violations
     }
 }
+
+
+

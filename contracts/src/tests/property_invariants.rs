@@ -100,6 +100,7 @@ proptest! {
             nonce: 1u64,
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
+        confidence: None,
         });
 
         let alice_pending = client.get_pending_winnings(&alice);
@@ -215,6 +216,7 @@ proptest! {
             nonce: 1u64,
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
+        confidence: None,
         });
 
         let alice_pending = client.get_pending_winnings(&alice);
@@ -277,3 +279,5 @@ proptest! {
         });
     }
 }
+
+
