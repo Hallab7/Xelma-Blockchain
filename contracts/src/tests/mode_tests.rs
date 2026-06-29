@@ -454,6 +454,7 @@ fn test_predict_price_valid_scales() {
                 nonce: 1u64,
                 network_id: env.ledger().network_id(),
                 contract_addr: contract_id.clone(),
+        confidence: None,
             });
         }
 
@@ -626,6 +627,7 @@ fn test_all_events_for_updown_round() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let events = env.events().all();
@@ -746,6 +748,7 @@ fn test_all_events_for_precision_round() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let events = env.events().all();
@@ -1499,3 +1502,5 @@ fn test_precision_predictions_page_limit_is_capped_at_max_page_size() {
     let page = client.get_precision_predictions_page(&0, &1_000_000);
     assert_eq!(page.len(), 2);
 }
+
+

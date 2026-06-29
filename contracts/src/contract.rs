@@ -10,9 +10,10 @@ use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     OracleHeartbeatRecord, OraclePayload, PendingConfigChange, PrecisionCommitment,
+    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode,
+    RoundPoolStats, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
     PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, RoundPhase,
-    UserOutcomeType,
-    UserPosition, UserRoundOutcome, UserStats,
+    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -149,9 +150,7 @@ impl VirtualTokenContract {
         }
 
         let schema_key = DataKey::SchemaVersion;
-        env.storage()
-            .persistent()
-            .set(&schema_key, &TARGET_VERSION);
+        env.storage().persistent().set(&schema_key, &TARGET_VERSION);
         Self::_extend_persistent_ttl(&env, &schema_key);
 
         #[allow(deprecated)]
@@ -192,9 +191,7 @@ impl VirtualTokenContract {
         }
 
         let schema_key = DataKey::SchemaVersion;
-        env.storage()
-            .persistent()
-            .set(&schema_key, &TARGET_VERSION);
+        env.storage().persistent().set(&schema_key, &TARGET_VERSION);
         Self::_extend_persistent_ttl(&env, &schema_key);
 
         env.storage()
@@ -367,7 +364,95 @@ impl VirtualTokenContract {
     pub fn get_active_round(env: Env) -> Option<Round> {
         env.storage().persistent().get(&DataKey::ActiveRound)
     }
+    /// Returns live pool-composition metrics for the currently active round.
+    pub fn get_round_pool_stats(env: Env) -> Option<RoundPoolStats> {
+        let round: Round = env.storage().persistent().get(&DataKey::ActiveRound)?;
+        let participants_key = DataKey::RoundParticipants(round.round_id);
+        let participants: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&participants_key)
+            .unwrap_or(Vec::new(&env));
 
+        let mut stats = RoundPoolStats {
+            round_id: round.round_id,
+            mode: round.mode.clone(),
+            total_up_stake: 0,
+            total_down_stake: 0,
+            up_participant_count: 0,
+            down_participant_count: 0,
+            up_stake_ratio_bps: 0,
+            down_stake_ratio_bps: 0,
+            precision_total_stake: 0,
+            precision_participant_count: 0,
+            precision_prediction_count: 0,
+            precision_commitment_count: 0,
+            precision_revealed_count: 0,
+        };
+
+        match round.mode {
+            RoundMode::UpDown => {
+                stats.total_up_stake = round.pool_up;
+                stats.total_down_stake = round.pool_down;
+
+                let mut idx = 0;
+                while idx < participants.len() {
+                    if let Some(user) = participants.get(idx) {
+                        if let Some(position) = env
+                            .storage()
+                            .persistent()
+                            .get::<_, UserPosition>(&DataKey::Position(round.round_id, user))
+                        {
+                            match position.side {
+                                BetSide::Up => stats.up_participant_count += 1,
+                                BetSide::Down => stats.down_participant_count += 1,
+                            }
+                        }
+                    }
+                    idx += 1;
+                }
+
+                let total_stake = round.pool_up.checked_add(round.pool_down).unwrap_or(0);
+                if total_stake > 0 {
+                    stats.up_stake_ratio_bps = ((round.pool_up as u128)
+                        .saturating_mul(BPS_DENOMINATOR as u128)
+                        / total_stake as u128) as u32;
+                    stats.down_stake_ratio_bps = ((round.pool_down as u128)
+                        .saturating_mul(BPS_DENOMINATOR as u128)
+                        / total_stake as u128) as u32;
+                }
+            }
+            RoundMode::Precision => {
+                stats.precision_participant_count = participants.len();
+
+                let mut idx = 0;
+                while idx < participants.len() {
+                    if let Some(user) = participants.get(idx) {
+                        if let Some(prediction) =
+                            env.storage().persistent().get::<_, PrecisionPrediction>(
+                                &DataKey::PrecisionPosition(round.round_id, user.clone()),
+                            )
+                        {
+                            stats.precision_prediction_count += 1;
+                            stats.precision_total_stake += prediction.amount;
+                        } else if let Some(commitment) =
+                            env.storage().persistent().get::<_, PrecisionCommitment>(
+                                &DataKey::PrecisionCommitment(round.round_id, user),
+                            )
+                        {
+                            stats.precision_commitment_count += 1;
+                            stats.precision_total_stake += commitment.amount;
+                            if commitment.revealed {
+                                stats.precision_revealed_count += 1;
+                            }
+                        }
+                    }
+                    idx += 1;
+                }
+            }
+        }
+
+        Some(stats)
     /// Returns the current lifecycle phase of the active round.
     ///
     /// Phase boundaries are deterministic:
@@ -505,6 +590,69 @@ impl VirtualTokenContract {
         env.storage().persistent().set(&override_key, &true);
         Self::_extend_persistent_ttl(&env, &override_key);
         Ok(())
+    }
+    /// Sets the minimum oracle confidence threshold in basis points (admin only).
+    /// `None` disables confidence guardrails entirely. Valid range: 0–10000 bps.
+    pub fn set_oracle_min_confidence_bps(
+        env: Env,
+        min_bps: Option<u32>,
+    ) -> Result<(), ContractError> {
+        Self::_require_supported_schema(&env)?;
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::AdminNotSet)?;
+        admin.require_auth();
+        if let Some(bps) = min_bps {
+            if bps > 10_000 {
+                return Err(ContractError::InvalidOracleDeviationBps);
+            }
+        }
+        match min_bps {
+            None => env
+                .storage()
+                .persistent()
+                .remove(&DataKey::OracleMinConfidenceBps),
+            Some(bps) => {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::OracleMinConfidenceBps, &bps);
+                Self::_extend_persistent_ttl(&env, &DataKey::OracleMinConfidenceBps);
+            }
+        }
+        Ok(())
+    }
+
+    /// Enables or disables strict mode for oracle confidence (admin only).
+    /// When enabled, payloads missing a confidence score are rejected.
+    pub fn set_oracle_strict_mode(env: Env, enabled: bool) -> Result<(), ContractError> {
+        Self::_require_supported_schema(&env)?;
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::AdminNotSet)?;
+        admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::OracleStrictMode, &enabled);
+        Self::_extend_persistent_ttl(&env, &DataKey::OracleStrictMode);
+        Ok(())
+    }
+
+    /// Returns the configured minimum oracle confidence bps, if set.
+    pub fn get_oracle_min_confidence_bps(env: Env) -> Option<u32> {
+        let key = DataKey::OracleMinConfidenceBps;
+        Self::_extend_persistent_ttl(&env, &key);
+        env.storage().persistent().get(&key)
+    }
+
+    /// Returns whether oracle strict mode is enabled.
+    pub fn get_oracle_strict_mode(env: Env) -> bool {
+        let key = DataKey::OracleStrictMode;
+        Self::_extend_persistent_ttl(&env, &key);
+        env.storage().persistent().get(&key).unwrap_or(false)
     }
 
     // ─── Oracle heartbeat and liveness (on-chain health tracking) ───────────
@@ -2014,6 +2162,37 @@ impl VirtualTokenContract {
             }
         }
 
+        // ─── Oracle confidence guardrails ────────────────────────────────────────
+        Self::_extend_persistent_ttl(&env, &DataKey::OracleMinConfidenceBps);
+        Self::_extend_persistent_ttl(&env, &DataKey::OracleStrictMode);
+        if let Some(min_confidence_bps) = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::OracleMinConfidenceBps)
+        {
+            match payload.confidence {
+                None => {
+                    let strict_mode: bool = env
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::OracleStrictMode)
+                        .unwrap_or(false);
+                    if strict_mode {
+                        return Err(ContractError::InvalidPrice);
+                    }
+                }
+                Some(confidence_bps) => {
+                    if confidence_bps > 10_000 || confidence_bps < min_confidence_bps {
+                        #[allow(deprecated)]
+                        env.events().publish(
+                            (symbol_short!("oracle"), symbol_short!("lowconf")),
+                            (round.round_id, confidence_bps, min_confidence_bps),
+                        );
+                        return Err(ContractError::InvalidPrice);
+                    }
+                }
+            }
+        }
         // Per-round nonce replay guard (Issue #118).
         // Consume the nonce only after all validation passes so a rejected payload
         // doesn't permanently burn a nonce value.
@@ -2131,7 +2310,7 @@ impl VirtualTokenContract {
         #[allow(deprecated)]
         env.events().publish(
             (symbol_short!("round"), symbol_short!("resolved")),
-            (round_id, payload.price, mode_value),
+            (round_id, payload.price, mode_value, payload.confidence),
         );
 
         Ok(())
@@ -2560,17 +2739,17 @@ impl VirtualTokenContract {
                         );
                         Self::_update_stats_loss(env, user.clone())?;
 
-                         Self::_persist_user_outcome(
-                             env,
-                             round_id,
-                             1,
-                             &user,
-                             2,
-                             predicted_price,
-                             stake,
-                             0,
-                             UserOutcomeType::Loss,
-                         );
+                        Self::_persist_user_outcome(
+                            env,
+                            round_id,
+                            1,
+                            &user,
+                            2,
+                            predicted_price,
+                            stake,
+                            0,
+                            UserOutcomeType::Loss,
+                        );
                     }
                 }
             }
@@ -2900,7 +3079,8 @@ impl VirtualTokenContract {
         for i in 0..participants.len() {
             if let Some(user) = participants.get(i) {
                 let pos_key = DataKey::Position(round_id, user.clone());
-                if let Some(position) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
+                if let Some(position) = env.storage().persistent().get::<_, UserPosition>(&pos_key)
+                {
                     Self::_accumulate_pending(env, user.clone(), position.amount)?;
                     let prediction_side = match position.side {
                         BetSide::Up => 0,
@@ -2954,7 +3134,8 @@ impl VirtualTokenContract {
         for i in 0..participants.len() {
             if let Some(user) = participants.get(i) {
                 let pos_key = DataKey::Position(round_id, user.clone());
-                if let Some(position) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
+                if let Some(position) = env.storage().persistent().get::<_, UserPosition>(&pos_key)
+                {
                     if position.side == winning_side {
                         // Compute all payout math before any storage write
                         let share_numerator = Self::payout_mul(position.amount, losing_pool)?;
@@ -3082,8 +3263,8 @@ impl VirtualTokenContract {
         }
 
         env.storage()
-             .persistent()
-             .set(&DataKey::RecentArchivedRoundIds, &recent);
+            .persistent()
+            .set(&DataKey::RecentArchivedRoundIds, &recent);
     }
 
     fn _persist_user_outcome(
