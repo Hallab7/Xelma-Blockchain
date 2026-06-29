@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for storage TTL rent policy enforcement (Issue #142).
 
 use super::config_helpers::apply_max_stake;
@@ -115,3 +116,5 @@ fn test_oracle_and_heartbeat_ttl_extended() {
     });
     assert!(oracle_ttl >= 518_400);
 }
+
+
