@@ -294,6 +294,7 @@ fn test_event_coverage_resolve_round() {
         nonce: 1,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let events = env.events().all();
@@ -309,7 +310,10 @@ fn test_event_coverage_resolve_round() {
         topics.get(1).unwrap().try_into_val(&env),
         Ok(symbol_short!("resolved"))
     );
-    assert_eq!(data.try_into_val(&env), Ok((1u64, 1_2000000u128, 0u32)));
+    assert_eq!(
+        data.try_into_val(&env),
+        Ok((1u64, 1_2000000u128, 0u32, Option::<u32>::None))
+    );
 }
 
 #[test]
@@ -354,6 +358,7 @@ fn test_event_coverage_claim_winnings() {
         nonce: 1,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     client.claim_winnings(&user);
@@ -372,4 +377,160 @@ fn test_event_coverage_claim_winnings() {
         Ok(symbol_short!("winnings"))
     );
     assert_eq!(data.try_into_val(&env), Ok((user, 100_0000000i128)));
+}
+
+#[test]
+fn test_event_coverage_round_summary() {
+    let (env, contract_id, _, _, client) = setup();
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    client.mint_initial(&user1);
+    client.mint_initial(&user2);
+
+    // 1. Up/Down Mode Resolution Summary Event
+    client.create_round(&1_0000000, &None);
+    client.place_bet(&user1, &100_0000000, &BetSide::Up);
+    client.place_bet(&user2, &200_0000000, &BetSide::Down);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 12;
+    });
+
+    client.resolve_round(&OraclePayload {
+        price: 1_2000000,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0,
+        nonce: 1,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
+
+    let events = env.events().all();
+    let summary_event = events
+        .iter()
+        .rev()
+        .find(|e| {
+            let (_contract, topics, _data) = e;
+            topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
+                && topics.get(1).unwrap().try_into_val(&env)
+                    == Ok(soroban_sdk::Symbol::new(&env, "summary"))
+        })
+        .expect("Up/Down summary event should exist");
+
+    let (_contract, _topics, data) = summary_event;
+    // Payload: (round_id: u64, mode: u32, price_start: u128, price_final: u128, participant_count: u32, total_pot: i128, status: u32)
+    assert_eq!(
+        data.try_into_val(&env),
+        Ok((
+            1u64,
+            0u32,
+            1_0000000u128,
+            1_2000000u128,
+            2u32,
+            300_0000000i128,
+            0u32
+        )) // status 0 = Resolved
+    );
+
+    // 2. Precision Mode Resolution Summary Event
+    let start_price: u128 = 2000;
+    client.create_round(&start_price, &Some(1)); // Precision mode (1)
+    client.place_precision_prediction(&user1, &150_0000000, &2100);
+    client.place_precision_prediction(&user2, &250_0000000, &2200);
+
+    // Get info of the active round
+    let round = client.get_active_round().unwrap();
+    let round_id = round.round_id;
+    let start_ledger = round.start_ledger;
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = round.end_ledger;
+    });
+
+    client.resolve_round(&OraclePayload {
+        price: 2150,
+        timestamp: env.ledger().timestamp(),
+        round_id: start_ledger,
+        nonce: 2,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
+
+    let events = env.events().all();
+    let summary_event = events
+        .iter()
+        .rev()
+        .find(|e| {
+            let (_contract, topics, data) = e;
+            if topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
+                && topics.get(1).unwrap().try_into_val(&env)
+                    == Ok(soroban_sdk::Symbol::new(&env, "summary"))
+            {
+                let parsed_opt: Result<(u64, u32, u128, u128, u32, i128, u32), _> =
+                    data.try_into_val(&env);
+                if let Ok((r_id, _, _, _, _, _, _)) = parsed_opt {
+                    return r_id == round_id;
+                }
+            }
+            false
+        })
+        .expect("Precision summary event should exist");
+
+    let (_contract, _topics, data) = summary_event;
+    assert_eq!(
+        data.try_into_val(&env),
+        Ok((
+            round_id,
+            1u32,
+            2000u128,
+            2150u128,
+            2u32,
+            400_0000000i128,
+            0u32
+        )) // status 0 = Resolved
+    );
+
+    // 3. Cancelled Round Summary Event
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+    let cancel_round_id = round.round_id;
+    client.place_bet(&user1, &50_0000000, &BetSide::Up);
+    client.cancel_round(&99u32);
+
+    let events = env.events().all();
+    let summary_event = events
+        .iter()
+        .rev()
+        .find(|e| {
+            let (_contract, topics, data) = e;
+            if topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
+                && topics.get(1).unwrap().try_into_val(&env)
+                    == Ok(soroban_sdk::Symbol::new(&env, "summary"))
+            {
+                let parsed_opt: Result<(u64, u32, u128, u128, u32, i128, u32), _> =
+                    data.try_into_val(&env);
+                if let Ok((r_id, _, _, _, _, _, _)) = parsed_opt {
+                    return r_id == cancel_round_id;
+                }
+            }
+            false
+        })
+        .expect("Cancelled summary event should exist");
+
+    let (_contract, _topics, data) = summary_event;
+    assert_eq!(
+        data.try_into_val(&env),
+        Ok((
+            cancel_round_id,
+            0u32,
+            1_0000000u128,
+            0u128,
+            1u32,
+            50_0000000i128,
+            1u32
+        )) // status 1 = Cancelled
+    );
 }

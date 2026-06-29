@@ -170,6 +170,7 @@ fn bench_resolve_cleans_indexed_keys() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     env.as_contract(&contract_id, || {
@@ -235,6 +236,7 @@ fn bench_large_round_resolves_correctly() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Each UP winner should have pending = bet + (bet/winning_pool) * losing_pool
@@ -327,6 +329,7 @@ fn bench_precision_mode_indexed_keys() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Bob wins entire pot (3 * 10_0000000)
@@ -334,3 +337,5 @@ fn bench_precision_mode_indexed_keys() {
     assert_eq!(client.get_pending_winnings(&alice), 0);
     assert_eq!(client.get_pending_winnings(&carol), 0);
 }
+
+
