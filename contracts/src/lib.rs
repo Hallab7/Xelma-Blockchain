@@ -12,6 +12,9 @@
 //! - Proportional payout distribution
 //! - Comprehensive error handling
 
+#[cfg(test)]
+extern crate std;
+
 mod contract;
 mod errors;
 mod types;
@@ -24,5 +27,5 @@ pub use errors::ContractError;
 pub use types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     PendingConfigChange, PrecisionCommitment, PrecisionPrediction, ProtocolHealthStatus, Round,
-    RoundArchiveStatus, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    RoundArchiveStatus, RoundMode, RoundPhase, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };

@@ -12,6 +12,21 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Lifecycle phase of an active round, derived from ledger windows.
+///
+/// Semantics (given `start_ledger`, `bet_end_ledger`, `end_ledger`):
+/// - `Betting`: `ledger < bet_end_ledger` — bets and precision predictions accepted
+/// - `Running`: `bet_end_ledger ≤ ledger < end_ledger` — reveal window (precision)
+/// - `Resolvable`: `ledger ≥ end_ledger` — round may be settled via oracle payload
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RoundPhase {
+    Betting = 1,
+    Running = 2,
+    Resolvable = 3,
+}
+
 /// Storage keys for contract data
 ///
 /// ## Indexed position keys (variants 13–15)
@@ -78,6 +93,11 @@ pub enum DataKey {
     /// One-shot admin override allowing the next settlement to bypass deviation checks.
     /// Automatically cleared after use.
     OracleDeviationOverrideArmed,
+    /// Minimum oracle confidence threshold in basis points (0–10000).
+    /// If unset, confidence guardrails are disabled.
+    OracleMinConfidenceBps,
+    /// When true, payloads with missing confidence are rejected in strict mode.
+    OracleStrictMode,
     /// Compact post-settlement summary keyed by round id for historical queries.
     ArchivedRound(u64),
     /// Ordered round ids for archive retention (oldest at index 0).
@@ -215,6 +235,10 @@ pub struct OraclePayload {
     /// Contract address this payload is intended for.
     /// Validated against `env.current_contract_address()` to prevent cross-contract replay.
     pub contract_addr: Address,
+    /// Optional confidence score from the price feed (0–10000 bps, where 10000 = 100%).
+    /// When `None`, the payload is treated as a legacy submission.
+    /// When strict mode is enabled, `None` is rejected.
+    pub confidence: Option<u32>,
 }
 
 /// Oracle liveness record, updated by the oracle service on each heartbeat call.

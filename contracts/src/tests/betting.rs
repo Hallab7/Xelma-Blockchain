@@ -511,3 +511,5 @@ fn test_get_round_pool_stats_precision_pool() {
     assert_eq!(stats.precision_commitment_count, 1);
     assert_eq!(stats.precision_revealed_count, 0);
 }
+
+
