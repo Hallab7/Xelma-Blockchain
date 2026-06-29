@@ -10,9 +10,8 @@ use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     OracleHeartbeatRecord, OraclePayload, PendingConfigChange, PrecisionCommitment,
-    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, RoundPhase,
-    UserOutcomeType,
-    UserPosition, UserRoundOutcome, UserStats,
+    PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundMode,
+    RoundPhase, RoundStatus, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -680,6 +679,93 @@ impl VirtualTokenContract {
             ledger_timestamp,
             status_code,
         }
+    }
+
+    /// Returns the global status of the protocol.
+    ///
+    /// This is the canonical single-call status endpoint for frontends and
+    /// monitoring dashboards. The returned [`ProtocolStatus`] maps directly to
+    /// the three mutually-exclusive states visible to end users:
+    ///
+    /// | return value      | meaning                                             |
+    /// |-------------------|-----------------------------------------------------|
+    /// | `Active`      (0) | A round is live; bets or reveals are accepted.      |
+    /// | `Paused`      (1) | Emergency pause active; mutations rejected.          |
+    /// | `ClaimsOnly`  (2) | No active round; only `claim_winnings` is useful.   |
+    ///
+    /// **Priority**: `Paused` is always returned first when the contract is
+    /// paused, regardless of whether an active round exists.
+    pub fn get_protocol_status(env: Env) -> ProtocolStatus {
+        if Self::is_paused(env.clone()) {
+            ProtocolStatus::Paused
+        } else if env.storage().persistent().has(&DataKey::ActiveRound) {
+            ProtocolStatus::Active
+        } else {
+            ProtocolStatus::ClaimsOnly
+        }
+    }
+
+    /// Returns the status of a specific round identified by `round_id`.
+    ///
+    /// Lookup strategy (in priority order):
+    /// 1. If the round is the **current active round**, derive status from
+    ///    ledger position relative to `bet_end_ledger` / `end_ledger`.
+    /// 2. If the round appears in the **on-chain archive**, map its
+    ///    [`RoundArchiveStatus`] to the corresponding terminal [`RoundStatus`].
+    /// 3. If a `CancelledRound` marker exists (archive may be pruned),
+    ///    return `Cancelled`.
+    /// 4. Otherwise, return `Unknown`.
+    ///
+    /// | return value          | meaning                                                       |
+    /// |-----------------------|---------------------------------------------------------------|
+    /// | `Unknown`        (0)  | Round not found; never created or pruned from archive.       |
+    /// | `Betting`        (1)  | Active; `ledger < bet_end_ledger`.                           |
+    /// | `Running`        (2)  | Active; `bet_end_ledger ≤ ledger < end_ledger`.              |
+    /// | `AwaitingResolve`(3)  | Active; `ledger ≥ end_ledger`, oracle not yet called.        |
+    /// | `Resolved`       (4)  | Settled normally; pot distributed.                           |
+    /// | `Cancelled`      (5)  | Admin-cancelled; stakes refunded.                            |
+    /// | `FallbackRefund` (6)  | Settled with insufficient participants; stakes refunded.     |
+    ///
+    /// Note: `Betting`, `Running`, and `AwaitingResolve` are **derived** from
+    /// ledger sequence — they do not involve additional storage writes.
+    pub fn get_round_status(env: Env, round_id: u64) -> RoundStatus {
+        // First check if it is the active round
+        if let Some(active_round) = env
+            .storage()
+            .persistent()
+            .get::<_, Round>(&DataKey::ActiveRound)
+        {
+            if active_round.round_id == round_id {
+                let phase = Self::_derive_round_phase(env.ledger().sequence(), &active_round);
+                return match phase {
+                    RoundPhase::Betting => RoundStatus::Betting,
+                    RoundPhase::Running => RoundStatus::Running,
+                    RoundPhase::Resolvable => RoundStatus::AwaitingResolve,
+                };
+            }
+        }
+
+        // Second, check the archived rounds summary
+        let archive_key = DataKey::ArchivedRound(round_id);
+        if let Some(archive) = env
+            .storage()
+            .persistent()
+            .get::<_, ArchivedRoundSummary>(&archive_key)
+        {
+            return match archive.status {
+                RoundArchiveStatus::Resolved => RoundStatus::Resolved,
+                RoundArchiveStatus::Cancelled => RoundStatus::Cancelled,
+                RoundArchiveStatus::FallbackRefund => RoundStatus::FallbackRefund,
+            };
+        }
+
+        // Third, fallback check for cancelled rounds (in case it was pruned but CancelledRound flag remains)
+        if Self::is_round_cancelled(env.clone(), round_id) {
+            return RoundStatus::Cancelled;
+        }
+
+        // Otherwise, it's not active, not in archive, not cancelled.
+        RoundStatus::Unknown
     }
 
     /// Returns the configured oracle stale threshold, or the default (3600 s) if not set.

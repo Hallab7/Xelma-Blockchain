@@ -155,6 +155,74 @@ export enum RoundArchiveStatus {
   FallbackRefund = 2,
 }
 
+/**
+ * Global status of the protocol, returned by `get_protocol_status`.
+ *
+ * Designed for frontend state machines that need a single, stable code
+ * rather than combining multiple boolean flags.
+ *
+ * | value | variant      | description                                                         |
+ * |-------|--------------|---------------------------------------------------------------------|
+ * | 0     | `Active`     | Not paused; a round is live (bets open or running).                 |
+ * | 1     | `Paused`     | Emergency-paused by admin; mutations rejected except `unpause`.     |
+ * | 2     | `ClaimsOnly` | Not paused; no active round. Only `claim_winnings` is meaningful.   |
+ *
+ * **Transition rules**
+ * - `ClaimsOnly` → `Active` on successful `create_round()`
+ * - `Active` → `ClaimsOnly` on `resolve_round()` or `cancel_round()`
+ * - Any → `Paused` on `pause_contract()`
+ * - `Paused` → `Active` on `unpause_contract()` when an active round still exists
+ * - `Paused` → `ClaimsOnly` on `unpause_contract()` when no active round exists
+ */
+export enum ProtocolStatus {
+  /** The contract is not paused and has a currently active round. */
+  Active = 0,
+  /** The contract is emergency-paused by the admin. */
+  Paused = 1,
+  /** The contract is not paused, but no round is active. Mutating actions limited to claiming pending winnings. */
+  ClaimsOnly = 2,
+}
+
+/**
+ * Status of a specific round, returned by `get_round_status(round_id)`.
+ *
+ * Covers all lifecycle stages from creation through terminal settlement.
+ *
+ * | value | variant            | description                                                                     |
+ * |-------|--------------------|---------------------------------------------------------------------------------|
+ * | 0     | `Unknown`          | Round not found or pruned from the on-chain archive.                            |
+ * | 1     | `Betting`          | Active; bets and predictions accepted (`ledger < bet_end_ledger`).              |
+ * | 2     | `Running`          | Betting closed; reveal window open (`bet_end_ledger ≤ ledger < end_ledger`).   |
+ * | 3     | `AwaitingResolve`  | Round ended; awaiting oracle settlement (`ledger ≥ end_ledger`).               |
+ * | 4     | `Resolved`         | Oracle settled normally; pot distributed to winners.                            |
+ * | 5     | `Cancelled`        | Admin cancelled the round; all stakes refunded.                                 |
+ * | 6     | `FallbackRefund`   | Insufficient participants at settlement; all stakes refunded.                   |
+ *
+ * **Transition rules**
+ * - `Unknown` → `Betting` on `create_round()`
+ * - `Betting` → `Running` when `ledger ≥ bet_end_ledger` (derived from ledger position)
+ * - `Running` → `AwaitingResolve` when `ledger ≥ end_ledger` (derived from ledger position)
+ * - `{Betting | Running | AwaitingResolve}` → `Cancelled` on `cancel_round()`
+ * - `AwaitingResolve` → `Resolved` on `resolve_round()` with enough participants
+ * - `AwaitingResolve` → `FallbackRefund` on `resolve_round()` with fewer than `min_participants`
+ */
+export enum RoundStatus {
+  /** Round does not exist or has been pruned from the on-chain archive. */
+  Unknown = 0,
+  /** Round is active; bets and predictions accepted (`ledger < bet_end_ledger`). */
+  Betting = 1,
+  /** Betting is closed; reveal window is open (`bet_end_ledger ≤ ledger < end_ledger`). */
+  Running = 2,
+  /** Round has ended and is waiting for oracle settlement (`ledger ≥ end_ledger`). */
+  AwaitingResolve = 3,
+  /** Oracle settled the round normally; pot distributed to winners. */
+  Resolved = 4,
+  /** Admin cancelled the round; all stakes refunded. */
+  Cancelled = 5,
+  /** Settlement triggered but insufficient participants; all stakes refunded. */
+  FallbackRefund = 6,
+}
+
 
 export interface PrecisionCommitment {
   amount: i128;
@@ -597,6 +665,39 @@ export interface Client {
   get_active_round: (options?: MethodOptions) => Promise<AssembledTransaction<Option<Round>>>
 
   /**
+   * Construct and simulate a get_protocol_status transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   *
+   * Returns the global `ProtocolStatus` — the canonical single-call status endpoint for
+   * frontends and monitoring dashboards.
+   *
+   * | value | variant      | meaning                                              |
+   * |-------|--------------|------------------------------------------------------|
+   * | 0     | `Active`     | A round is live; bets or reveals are accepted.       |
+   * | 1     | `Paused`     | Emergency pause active; mutations rejected.           |
+   * | 2     | `ClaimsOnly` | No active round; only `claim_winnings` is useful.    |
+   *
+   * `Paused` takes priority over all other states.
+   */
+  get_protocol_status: (options?: MethodOptions) => Promise<AssembledTransaction<ProtocolStatus>>
+
+  /**
+   * Construct and simulate a get_round_status transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   *
+   * Returns the `RoundStatus` for a specific round by its monotonic `round_id`.
+   *
+   * | value | variant            | meaning                                                          |
+   * |-------|--------------------|------------------------------------------------------------------|
+   * | 0     | `Unknown`          | Not found or pruned from the archive.                            |
+   * | 1     | `Betting`          | Active; `ledger < bet_end_ledger`.                               |
+   * | 2     | `Running`          | Active; `bet_end_ledger <= ledger < end_ledger`.                 |
+   * | 3     | `AwaitingResolve`  | Active; `ledger >= end_ledger`, oracle not yet called.           |
+   * | 4     | `Resolved`         | Settled normally.                                                |
+   * | 5     | `Cancelled`        | Admin-cancelled; stakes refunded.                                |
+   * | 6     | `FallbackRefund`   | Settled with insufficient participants; stakes refunded.         |
+   */
+  get_round_status: ({round_id}: {round_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<RoundStatus>>
+
+  /**
    * Construct and simulate a get_round_phase transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Returns the current lifecycle phase of the active round.
    *
@@ -965,6 +1066,8 @@ export class Client extends ContractClient {
         is_oracle_live: this.txFromJSON<boolean>,
         pause_contract: this.txFromJSON<Result<void>>,
         get_active_round: this.txFromJSON<Option<Round>>,
+        get_protocol_status: this.txFromJSON<ProtocolStatus>,
+        get_round_status: this.txFromJSON<RoundStatus>,
         get_round_phase: this.txFromJSON<Result<RoundPhase>>,
         unpause_contract: this.txFromJSON<Result<void>>,
         commit_prediction: this.txFromJSON<Result<void>>,

@@ -366,3 +366,81 @@ pub struct UserRoundOutcome {
     pub payout: i128,
     pub outcome: UserOutcomeType,
 }
+
+/// Global status of the protocol, returned by `get_protocol_status`.
+///
+/// Designed for frontend state machines that need a single, stable code
+/// instead of combining multiple boolean flags.
+///
+/// ## Status codes
+///
+/// | value | variant      | description                                                             |
+/// |-------|--------------|-------------------------------------------------------------------------|
+/// | 0     | `Active`     | Not paused; a round is currently active (bets open or running).          |
+/// | 1     | `Paused`     | Emergency-paused by the admin; no mutations accepted except unpause.     |
+/// | 2     | `ClaimsOnly` | Not paused; no active round. Only `claim_winnings` is meaningful.        |
+///
+/// ## Transition rules
+///
+/// - `ClaimsOnly` → `Active` when `create_round()` succeeds.
+/// - `Active` → `ClaimsOnly` when `resolve_round()` or `cancel_round()` completes.
+/// - Any state → `Paused` when `pause_contract()` is called.
+/// - `Paused` → `Active` when `unpause_contract()` is called *and* an active round still exists.
+/// - `Paused` → `ClaimsOnly` when `unpause_contract()` is called *and* no active round exists.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum ProtocolStatus {
+    /// The contract is not paused and has a currently active round.
+    Active = 0,
+    /// The contract is emergency-paused by the admin.
+    Paused = 1,
+    /// The contract is not paused, but no round is active.
+    /// Mutating actions are limited to claiming pending winnings.
+    ClaimsOnly = 2,
+}
+
+/// Status of a specific round, returned by `get_round_status(round_id)`.
+///
+/// Queries a round by its monotonic `round_id`. Covers all lifecycle
+/// stages from creation through terminal settlement.
+///
+/// ## Status codes
+///
+/// | value | variant          | description                                                                      |
+/// |-------|------------------|-----------------------------------------------------------------------------------|
+/// | 0     | `Unknown`        | Round does not exist or has been pruned from the on-chain archive.               |
+/// | 1     | `Betting`        | Round is active; bets and predictions accepted (`ledger < bet_end_ledger`).      |
+/// | 2     | `Running`        | Betting closed; reveal window open (`bet_end_ledger ≤ ledger < end_ledger`).    |
+/// | 3     | `AwaitingResolve`| Round ended; awaiting oracle settlement (`ledger ≥ end_ledger`).                |
+/// | 4     | `Resolved`       | Oracle settled the round; pot distributed to winners.                            |
+/// | 5     | `Cancelled`      | Admin cancelled the round; all stakes refunded.                                  |
+/// | 6     | `FallbackRefund` | Insufficient participants at settlement; all stakes refunded.                    |
+///
+/// ## Transition rules
+///
+/// - `Unknown` → `Betting` when `create_round()` succeeds.
+/// - `Betting` → `Running` when `ledger ≥ bet_end_ledger` (derived; no on-chain write).
+/// - `Running` → `AwaitingResolve` when `ledger ≥ end_ledger` (derived; no on-chain write).
+/// - `{Betting | Running | AwaitingResolve}` → `Cancelled` when `cancel_round()` is called.
+/// - `AwaitingResolve` → `Resolved` when `resolve_round()` settles with enough participants.
+/// - `AwaitingResolve` → `FallbackRefund` when `resolve_round()` finds fewer than `min_participants`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RoundStatus {
+    /// Round does not exist or has been pruned from the on-chain archive.
+    Unknown = 0,
+    /// Round is active; bets and predictions accepted (`ledger < bet_end_ledger`).
+    Betting = 1,
+    /// Betting is closed; reveal window is open (`bet_end_ledger ≤ ledger < end_ledger`).
+    Running = 2,
+    /// Round has ended and is waiting for oracle settlement (`ledger ≥ end_ledger`).
+    AwaitingResolve = 3,
+    /// Oracle settled the round normally; pot distributed to winners.
+    Resolved = 4,
+    /// Admin cancelled the round; all stakes refunded.
+    Cancelled = 5,
+    /// Settlement triggered but insufficient participants; all stakes refunded.
+    FallbackRefund = 6,
+}
