@@ -381,3 +381,5 @@ fn test_get_max_stake_returns_configured_value() {
     apply_max_stake(&env, &client, None);
     assert_eq!(client.get_max_stake(), None);
 }
+
+

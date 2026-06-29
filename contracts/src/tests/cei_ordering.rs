@@ -74,6 +74,7 @@ fn test_claim_winnings_cei_pending_cleared_after_claim() {
         nonce: 1,
         network_id: env.ledger().network_id(),
         contract_addr: env.current_contract_address(),
+        confidence: None,
     };
     client.resolve_round(&payload);
 
@@ -179,3 +180,5 @@ fn test_cancel_config_change_rejected_after_activation() {
         "cancellation must be rejected once activation ledger is reached"
     );
 }
+
+

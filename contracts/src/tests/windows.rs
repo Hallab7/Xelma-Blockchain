@@ -330,6 +330,7 @@ fn test_resolution_only_allowed_after_run_ledgers() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
     assert_eq!(result, Err(Ok(ContractError::RoundNotEnded)));
 
@@ -346,6 +347,7 @@ fn test_resolution_only_allowed_after_run_ledgers() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Round should be cleared
@@ -569,3 +571,5 @@ fn test_get_round_phase_default_windows() {
     env.ledger().with_mut(|li| li.sequence_number = 62);
     assert_eq!(client.get_round_phase(), RoundPhase::Resolvable);
 }
+
+
