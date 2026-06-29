@@ -3,7 +3,8 @@
 
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, symbol_short, Address, Bytes, BytesN, Env, Map, Vec,
+    contract, contractimpl, panic_with_error, symbol_short, Address, Bytes, BytesN, Env, Map,
+    Symbol, Vec,
 };
 
 use crate::errors::ContractError;
@@ -13,6 +14,7 @@ use crate::types::{
     PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode,
     RoundPoolStats, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
     PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, RoundPhase,
+    RuntimeMode, UserOutcomeType, UserRoundOutcome, UserPosition, UserStats,
     UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 
@@ -94,7 +96,9 @@ impl VirtualTokenContract {
 
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::Oracle, &oracle);
-        env.storage().persistent().set(&DataKey::Paused, &false);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Paused, &RuntimeMode::Normal);
         env.storage()
             .persistent()
             .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
@@ -137,7 +141,7 @@ impl VirtualTokenContract {
             .get(&admin_key)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         if env.storage().persistent().has(&DataKey::ActiveRound) {
             return Err(ContractError::MigrationActiveRound);
@@ -211,7 +215,12 @@ impl VirtualTokenContract {
     pub fn is_paused(env: Env) -> bool {
         let key = DataKey::Paused;
         Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key).unwrap_or(false)
+        let mode = env
+            .storage()
+            .persistent()
+            .get::<_, RuntimeMode>(&key)
+            .unwrap_or(RuntimeMode::Normal);
+        mode == RuntimeMode::FullyPaused
     }
 
     /// Pauses the contract for emergency recovery (admin only)
@@ -224,8 +233,7 @@ impl VirtualTokenContract {
             .ok_or(ContractError::AdminNotSet)?;
 
         admin.require_auth();
-        env.storage().persistent().set(&DataKey::Paused, &true);
-        Self::_extend_persistent_ttl(&env, &DataKey::Paused);
+        Self::_set_mode(&env, RuntimeMode::FullyPaused)?;
 
         Ok(())
     }
@@ -240,8 +248,42 @@ impl VirtualTokenContract {
             .ok_or(ContractError::AdminNotSet)?;
 
         admin.require_auth();
-        env.storage().persistent().set(&DataKey::Paused, &false);
-        Self::_extend_persistent_ttl(&env, &DataKey::Paused);
+        Self::_set_mode(&env, RuntimeMode::Normal)?;
+
+        Ok(())
+    }
+
+    /// Returns the current runtime mode (0 = Normal, 1 = ClaimsOnly, 2 = FullyPaused)
+    pub fn get_runtime_mode(env: Env) -> u32 {
+        let key = DataKey::Paused;
+        Self::_extend_persistent_ttl(&env, &key);
+        let mode = env
+            .storage()
+            .persistent()
+            .get::<_, RuntimeMode>(&key)
+            .unwrap_or(RuntimeMode::Normal);
+        mode as u32
+    }
+
+    /// Sets the runtime mode of the contract (admin only)
+    pub fn set_runtime_mode(env: Env, mode: u32) -> Result<(), ContractError> {
+        Self::_require_supported_schema(&env)?;
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::AdminNotSet)?;
+
+        admin.require_auth();
+
+        let new_mode = match mode {
+            0 => RuntimeMode::Normal,
+            1 => RuntimeMode::ClaimsOnly,
+            2 => RuntimeMode::FullyPaused,
+            _ => return Err(ContractError::InvalidMode),
+        };
+
+        Self::_set_mode(&env, new_mode)?;
 
         Ok(())
     }
@@ -282,7 +324,7 @@ impl VirtualTokenContract {
             .ok_or(ContractError::AdminNotSet)?;
 
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
         Self::assert_no_active_round(&env)?;
 
         // Get configured windows (with defaults)
@@ -584,7 +626,7 @@ impl VirtualTokenContract {
             .get(&admin_key)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         let override_key = DataKey::OracleDeviationOverrideArmed;
         env.storage().persistent().set(&override_key, &true);
@@ -1072,7 +1114,7 @@ impl VirtualTokenContract {
     /// Applies a scheduled critical config change after its activation ledger (any caller).
     pub fn apply_scheduled_changes(env: Env, kind: ConfigChangeKind) -> Result<(), ContractError> {
         Self::_require_supported_schema(&env)?;
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         let key = DataKey::PendingConfigChange(kind.clone());
         let pending: PendingConfigChange = env
@@ -1107,7 +1149,7 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         let key = DataKey::PendingConfigChange(kind.clone());
         let pending: PendingConfigChange = env
@@ -1153,7 +1195,7 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         let key = DataKey::MinParticipants;
         let old_min: Option<u32> = env.storage().persistent().get(&key);
@@ -1192,7 +1234,7 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         if max == 0 || max > MAX_PRECISION_PARTICIPANTS_LIMIT {
             return Err(ContractError::InvalidPrecisionParticipantCap);
@@ -1349,7 +1391,7 @@ impl VirtualTokenContract {
     ) -> Result<(), ContractError> {
         Self::_require_supported_schema(&env)?;
         user.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         if amount <= 0 {
             return Err(ContractError::InvalidBetAmount);
@@ -1478,7 +1520,7 @@ impl VirtualTokenContract {
     ) -> Result<(), ContractError> {
         Self::_require_supported_schema(&env)?;
         user.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         if amount <= 0 {
             return Err(ContractError::InvalidBetAmount);
@@ -1604,7 +1646,7 @@ impl VirtualTokenContract {
         amount: i128,
     ) -> Result<(), ContractError> {
         user.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         if amount <= 0 {
             return Err(ContractError::InvalidBetAmount);
@@ -1706,7 +1748,7 @@ impl VirtualTokenContract {
         salt: BytesN<32>,
     ) -> Result<(), ContractError> {
         user.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         // Single read of the active round
         let round: Round = env
@@ -2051,7 +2093,7 @@ impl VirtualTokenContract {
             .ok_or(ContractError::OracleNotSet)?;
 
         oracle.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_normal_mode(&env)?;
 
         let round: Round = env
             .storage()
@@ -3211,6 +3253,7 @@ impl VirtualTokenContract {
         final_price: u128,
         participant_count: u32,
     ) {
+        let status_val = status.clone() as u32;
         let summary = ArchivedRoundSummary {
             round_id: round.round_id,
             price_start: round.price_start,
@@ -3226,6 +3269,74 @@ impl VirtualTokenContract {
         env.storage()
             .persistent()
             .set(&DataKey::ArchivedRound(round.round_id), &summary);
+
+        let mut total_pot: i128 = 0;
+        match round.mode {
+            RoundMode::UpDown => {
+                total_pot = round.pool_up.checked_add(round.pool_down).unwrap_or(0);
+            }
+            RoundMode::Precision => {
+                let participants: Vec<Address> = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::RoundParticipants(round.round_id))
+                    .unwrap_or(Vec::new(env));
+                if participants.is_empty() {
+                    let legacy: Map<Address, PrecisionPrediction> = env
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::PrecisionPositions)
+                        .unwrap_or(Map::new(env));
+                    for entry in legacy.iter() {
+                        total_pot = total_pot.checked_add(entry.1.amount).unwrap_or(total_pot);
+                    }
+                } else {
+                    for i in 0..participants.len() {
+                        if let Some(user) = participants.get(i) {
+                            let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
+                            let commit_key =
+                                DataKey::PrecisionCommitment(round.round_id, user.clone());
+
+                            let pred_opt = env
+                                .storage()
+                                .persistent()
+                                .get::<_, PrecisionPrediction>(&pred_key);
+
+                            let commitment_opt = env
+                                .storage()
+                                .persistent()
+                                .get::<_, PrecisionCommitment>(&commit_key);
+
+                            let amount = if let Some(ref pred) = pred_opt {
+                                pred.amount
+                            } else if let Some(ref commit) = commitment_opt {
+                                commit.amount
+                            } else {
+                                0
+                            };
+                            total_pot = total_pot.checked_add(amount).unwrap_or(total_pot);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Emit forensic round summary event
+        // Topic: ("round", "summary")
+        // Payload: (round_id, mode, price_start, price_final, participant_count, total_pot, status)
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("round"), Symbol::new(env, "summary")),
+            (
+                round.round_id,
+                round.mode.clone() as u32,
+                round.price_start,
+                final_price,
+                participant_count,
+                total_pot,
+                status_val,
+            ),
+        );
 
         let mut recent: Vec<u64> = env
             .storage()
@@ -3436,8 +3547,8 @@ impl VirtualTokenContract {
         if let Err(e) = Self::_require_supported_schema(&env) {
             panic_with_error!(&env, e);
         }
-        if Self::is_paused(env.clone()) {
-            panic_with_error!(&env, ContractError::ContractPaused);
+        if let Err(e) = Self::_ensure_normal_mode(&env) {
+            panic_with_error!(&env, e);
         }
 
         let key = DataKey::Balance(user.clone());
@@ -3500,11 +3611,49 @@ impl VirtualTokenContract {
     }
 
     fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
-        Self::_extend_persistent_ttl(env, &DataKey::Paused);
-        if Self::is_paused(env.clone()) {
+        let key = DataKey::Paused;
+        Self::_extend_persistent_ttl(env, &key);
+        let mode = env
+            .storage()
+            .persistent()
+            .get::<_, RuntimeMode>(&key)
+            .unwrap_or(RuntimeMode::Normal);
+        if mode == RuntimeMode::FullyPaused {
             return Err(ContractError::ContractPaused);
         }
+        Ok(())
+    }
 
+    fn _ensure_normal_mode(env: &Env) -> Result<(), ContractError> {
+        let key = DataKey::Paused;
+        Self::_extend_persistent_ttl(env, &key);
+        let mode = env
+            .storage()
+            .persistent()
+            .get::<_, RuntimeMode>(&key)
+            .unwrap_or(RuntimeMode::Normal);
+        if mode != RuntimeMode::Normal {
+            return Err(ContractError::ContractPaused);
+        }
+        Ok(())
+    }
+
+    fn _set_mode(env: &Env, new_mode: RuntimeMode) -> Result<(), ContractError> {
+        let key = DataKey::Paused;
+        let old_mode = env
+            .storage()
+            .persistent()
+            .get::<_, RuntimeMode>(&key)
+            .unwrap_or(RuntimeMode::Normal);
+        if old_mode != new_mode {
+            env.storage().persistent().set(&key, &new_mode);
+            Self::_extend_persistent_ttl(env, &key);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("mode"), Symbol::new(env, "transition")),
+                (old_mode as u32, new_mode as u32),
+            );
+        }
         Ok(())
     }
 
@@ -3845,7 +3994,7 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(env)?;
+        Self::_ensure_normal_mode(env)?;
 
         let key = DataKey::PendingConfigChange(kind.clone());
         if env.storage().persistent().has(&key) {
