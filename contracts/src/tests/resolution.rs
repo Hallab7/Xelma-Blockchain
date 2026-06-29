@@ -3,8 +3,7 @@
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{BetSide, DataKey, OraclePayload, PrecisionPrediction, Round, UserOutcomeType, UserPosition};
-use crate::types::{BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, OraclePayload, PrecisionPrediction, Round, UserPosition};
+use crate::types::{BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, OraclePayload, PrecisionPrediction, Round, UserOutcomeType, UserPosition};
 use crate::types::{RoundArchiveStatus, RoundMode};
 use soroban_sdk::{
     symbol_short,
@@ -2196,7 +2195,7 @@ fn count_outcome_loss_events(env: &Env) -> u32 {
 /// Helper: collects every decoded loss event payload for assertions.
 fn collect_outcome_loss_events(
     env: &Env,
-) -> Vec<(soroban_sdk::Address, u64, u32, soroban_sdk::I128, u32, u128)> {
+) -> Vec<(soroban_sdk::Address, u64, u32, i128, u32, u128)> {
     env.events()
         .all()
         .iter()
@@ -2208,15 +2207,8 @@ fn collect_outcome_loss_events(
             {
                 return None;
             }
-            data.try_into_val::<(
-                soroban_sdk::Address,
-                u64,
-                u32,
-                soroban_sdk::I128,
-                u32,
-                u128,
-            )>(env)
-            .ok()
+            let res: Result<(soroban_sdk::Address, u64, u32, i128, u32, u128), _> = data.try_into_val(env);
+            res.ok()
         })
         .collect()
 }
@@ -2277,7 +2269,7 @@ fn test_outcome_loss_event_updown_indexed_path() {
     }
 
     // Verify both losers are represented, each with their losing side.
-    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (soroban_sdk::I128, u32)> =
+    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (i128, u32)> =
         std::collections::HashMap::new();
     for (user, _round_id, _mode, amount, side, _price) in &losses {
         by_addr.insert(user.to_string(), (*amount, *side));
@@ -2430,7 +2422,7 @@ fn test_outcome_loss_event_precision_indexed_path() {
         assert_eq!(*side, 0u32, "`side` is unused in Precision mode");
     }
 
-    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (soroban_sdk::I128, u128)> =
+    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (i128, u128)> =
         std::collections::HashMap::new();
     for (user, _, _, amount, _, price) in &losses {
         by_addr.insert(user.to_string(), (*amount, *price));
@@ -2510,7 +2502,7 @@ fn test_outcome_loss_event_precision_legacy_path() {
 
     // 2 losers => 2 loss events.
     assert_eq!(count_outcome_loss_events(&env), 2);
-    let losses: std::collections::HashMap<soroban_sdk::String, (soroban_sdk::I128, u128)> =
+    let losses: std::collections::HashMap<soroban_sdk::String, (i128, u128)> =
         collect_outcome_loss_events(&env)
             .iter()
             .map(|(u, _, _, amount, _, price)| (u.to_string(), (*amount, *price)))
@@ -3012,7 +3004,7 @@ fn test_get_user_archived_participation_min_participants_refund() {
 
 fn collect_protocol_fee_events(
     env: &Env,
-) -> Vec<(u64, soroban_sdk::I128, soroban_sdk::I128, u32)> {
+) -> Vec<(u64, i128, i128, u32)> {
     env.events()
         .all()
         .iter()
@@ -3024,8 +3016,8 @@ fn collect_protocol_fee_events(
             {
                 return None;
             }
-            data.try_into_val::<(u64, soroban_sdk::I128, soroban_sdk::I128, u32)>(env)
-                .ok()
+            let res: Result<(u64, i128, i128, u32), _> = data.try_into_val(env);
+            res.ok()
         })
         .collect()
 }
@@ -3045,7 +3037,7 @@ fn count_protocol_fee_events(env: &Env) -> u32 {
 
 /// Build a deterministic Vector of user-side pre-resolution `("outcome","loss")` events
 /// helper to keep the conservation-test bodies short.
-fn sum_pending_payouts(env: &Env, users: &[soroban_sdk::Address]) -> soroban_sdk::I128 {
+fn sum_pending_payouts(env: &Env, users: &[soroban_sdk::Address]) -> i128 {
     let mut total: i128 = 0;
     env.as_contract(&env.current_contract_address(), || {
         for u in users {

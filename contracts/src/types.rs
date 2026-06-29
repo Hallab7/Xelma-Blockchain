@@ -12,6 +12,16 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Runtime mode for the contract lifecycle
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RuntimeMode {
+    Normal = 0,
+    ClaimsOnly = 1,
+    FullyPaused = 2,
+}
+
 /// Lifecycle phase of an active round, derived from ledger windows.
 ///
 /// Semantics (given `start_ledger`, `bet_end_ledger`, `end_ledger`):
