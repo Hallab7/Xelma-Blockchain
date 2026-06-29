@@ -454,6 +454,7 @@ fn test_predict_price_valid_scales() {
                 nonce: 1u64,
                 network_id: env.ledger().network_id(),
                 contract_addr: contract_id.clone(),
+        confidence: None,
             });
         }
 
@@ -626,6 +627,7 @@ fn test_all_events_for_updown_round() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let events = env.events().all();
@@ -746,6 +748,7 @@ fn test_all_events_for_precision_round() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let events = env.events().all();
@@ -936,7 +939,7 @@ fn test_custom_precision_participant_cap_boundary_and_over_cap() {
     let result = client.try_place_precision_prediction(&user3, &100_0000000, &2299u128);
     assert_eq!(
         result,
-        Err(Ok(ContractError::PrecisionCapExceeded))
+        Err(Ok(ContractError::PrecisionParticipantCapExceeded))
     );
     assert_eq!(client.balance(&user3), 1000_0000000);
     assert!(client.get_user_precision_prediction(&user3).is_none());
@@ -955,12 +958,12 @@ fn test_set_max_precision_participants_validation() {
     client.initialize(&admin, &oracle);
 
     let zero = client.try_set_max_precision_participants(&0u32);
-    assert_eq!(zero, Err(Ok(ContractError::InvalidPrecisionCap)));
+    assert_eq!(zero, Err(Ok(ContractError::InvalidPrecisionParticipantCap)));
 
     let too_high = client.try_set_max_precision_participants(&10_001u32);
     assert_eq!(
         too_high,
-        Err(Ok(ContractError::InvalidPrecisionCap))
+        Err(Ok(ContractError::InvalidPrecisionParticipantCap))
     );
 
     client.set_max_precision_participants(&3u32);
@@ -1499,3 +1502,5 @@ fn test_precision_predictions_page_limit_is_capped_at_max_page_size() {
     let page = client.get_precision_predictions_page(&0, &1_000_000);
     assert_eq!(page.len(), 2);
 }
+
+
