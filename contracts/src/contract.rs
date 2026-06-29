@@ -12,10 +12,8 @@ use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     OracleHeartbeatRecord, OraclePayload, PendingConfigChange, PrecisionCommitment,
     PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode,
-    RoundPoolStats, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
-    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundMode, RoundPhase,
-    RuntimeMode, UserOutcomeType, UserRoundOutcome, UserPosition, UserStats,
-    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    RoundPhase, RoundPoolStats, RuntimeMode, UserOutcomeType, UserPosition, UserRoundOutcome,
+    UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -141,15 +139,30 @@ impl VirtualTokenContract {
             .get(&admin_key)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_normal_mode(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("migrate"), e);
+            e
+        })?;
 
         if env.storage().persistent().has(&DataKey::ActiveRound) {
+            Self::_emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("migrate"),
+                ContractError::MigrationActiveRound,
+            );
             return Err(ContractError::MigrationActiveRound);
         }
 
         let from = Self::_schema_version(&env).unwrap_or(1);
         const TARGET_VERSION: u32 = 2;
         if from != 1 {
+            Self::_emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("migrate"),
+                ContractError::InvalidMigrationPath,
+            );
             return Err(ContractError::InvalidMigrationPath);
         }
 
@@ -182,15 +195,30 @@ impl VirtualTokenContract {
             .get(&admin_key)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("migrate"), e);
+            e
+        })?;
 
         if env.storage().persistent().has(&DataKey::ActiveRound) {
+            Self::_emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("migrate"),
+                ContractError::MigrationActiveRound,
+            );
             return Err(ContractError::MigrationActiveRound);
         }
 
         let from = Self::_schema_version(&env).unwrap_or(1);
         const TARGET_VERSION: u32 = 3;
         if from != 2 {
+            Self::_emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("migrate"),
+                ContractError::InvalidMigrationPath,
+            );
             return Err(ContractError::InvalidMigrationPath);
         }
 
@@ -324,8 +352,14 @@ impl VirtualTokenContract {
             .ok_or(ContractError::AdminNotSet)?;
 
         admin.require_auth();
-        Self::_ensure_normal_mode(&env)?;
-        Self::assert_no_active_round(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("create"), e);
+            e
+        })?;
+        Self::assert_no_active_round(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("create"), e);
+            e
+        })?;
 
         // Get configured windows (with defaults)
         Self::_extend_persistent_ttl(&env, &DataKey::BetWindowLedgers);
@@ -495,6 +529,8 @@ impl VirtualTokenContract {
         }
 
         Some(stats)
+    }
+
     /// Returns the current lifecycle phase of the active round.
     ///
     /// Phase boundaries are deterministic:
@@ -626,7 +662,10 @@ impl VirtualTokenContract {
             .get(&admin_key)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_normal_mode(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("arm_ovr"), e);
+            e
+        })?;
 
         let override_key = DataKey::OracleDeviationOverrideArmed;
         env.storage().persistent().set(&override_key, &true);
@@ -705,6 +744,15 @@ impl VirtualTokenContract {
     pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractError> {
         Self::_require_supported_schema(&env)?;
         if status > 2 {
+            Self::_extend_persistent_ttl(&env, &DataKey::Oracle);
+            if let Some(oracle) = env.storage().persistent().get::<_, Address>(&DataKey::Oracle) {
+                Self::_emit_action_rejected(
+                    &env,
+                    &oracle,
+                    symbol_short!("hbeat"),
+                    ContractError::InvalidOracleStatus,
+                );
+            }
             return Err(ContractError::InvalidOracleStatus);
         }
         Self::_extend_persistent_ttl(&env, &DataKey::Oracle);
@@ -1071,7 +1119,10 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("withdraw"), e);
+            e
+        })?;
 
         if amount <= 0 {
             return Err(ContractError::InvalidBetAmount);
@@ -1149,7 +1200,10 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_normal_mode(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("cncl_cfg"), e);
+            e
+        })?;
 
         let key = DataKey::PendingConfigChange(kind.clone());
         let pending: PendingConfigChange = env
@@ -1159,6 +1213,12 @@ impl VirtualTokenContract {
             .ok_or(ContractError::CommitmentNotFound)?;
 
         if env.ledger().sequence() >= pending.activation_ledger {
+            Self::_emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("cncl_cfg"),
+                ContractError::RoundNotCancellable,
+            );
             return Err(ContractError::RoundNotCancellable);
         }
 
@@ -1195,12 +1255,21 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_normal_mode(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("min_par"), e);
+            e
+        })?;
 
         let key = DataKey::MinParticipants;
         let old_min: Option<u32> = env.storage().persistent().get(&key);
         if let Some(v) = min {
             if v == 0 || v > MAX_MIN_PARTICIPANTS {
+                Self::_emit_action_rejected(
+                    &env,
+                    &admin,
+                    symbol_short!("min_par"),
+                    ContractError::InvalidMinParticipants,
+                );
                 return Err(ContractError::InvalidMinParticipants);
             }
             env.storage().persistent().set(&key, &v);
@@ -1234,9 +1303,18 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_normal_mode(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("max_prec"), e);
+            e
+        })?;
 
         if max == 0 || max > MAX_PRECISION_PARTICIPANTS_LIMIT {
+            Self::_emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("max_prec"),
+                ContractError::InvalidPrecisionParticipantCap,
+            );
             return Err(ContractError::InvalidPrecisionParticipantCap);
         }
 
@@ -1276,7 +1354,10 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("mint_lim"), e);
+            e
+        })?;
 
         let old_limit: u32 = env
             .storage()
@@ -1317,9 +1398,18 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_not_paused(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &admin, symbol_short!("set_arch"), e);
+            e
+        })?;
 
         if limit < MIN_ARCHIVE_RETENTION || limit > MAX_ARCHIVE_RETENTION {
+            Self::_emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("set_arch"),
+                ContractError::InvalidArchiveRetention,
+            );
             return Err(ContractError::InvalidArchiveRetention);
         }
 
@@ -2093,7 +2183,10 @@ impl VirtualTokenContract {
             .ok_or(ContractError::OracleNotSet)?;
 
         oracle.require_auth();
-        Self::_ensure_normal_mode(&env)?;
+        Self::_ensure_not_paused(&env).map_err(|e| {
+            Self::_emit_action_rejected(&env, &oracle, symbol_short!("resolve"), e);
+            e
+        })?;
 
         let round: Round = env
             .storage()
@@ -2103,15 +2196,33 @@ impl VirtualTokenContract {
 
         // Verify round ID matches to prevent cross-round replays
         if payload.round_id != round.start_ledger {
+            Self::_emit_action_rejected(
+                &env,
+                &oracle,
+                symbol_short!("resolve"),
+                ContractError::InvalidOracleRound,
+            );
             return Err(ContractError::InvalidOracleRound);
         }
 
         // ─── Domain-context validation (Issue #143) ─────────────────────────
         // Reject payloads targeting a different network or contract deployment.
         if payload.network_id != env.ledger().network_id() {
+            Self::_emit_action_rejected(
+                &env,
+                &oracle,
+                symbol_short!("resolve"),
+                ContractError::OracleNetworkMismatch,
+            );
             return Err(ContractError::OracleNetworkMismatch);
         }
         if payload.contract_addr != env.current_contract_address() {
+            Self::_emit_action_rejected(
+                &env,
+                &oracle,
+                symbol_short!("resolve"),
+                ContractError::OracleContractMismatch,
+            );
             return Err(ContractError::OracleContractMismatch);
         }
 
@@ -2120,10 +2231,22 @@ impl VirtualTokenContract {
 
         // Reject future timestamps to prevent time-skew manipulation
         if payload.timestamp > current_time {
+            Self::_emit_action_rejected(
+                &env,
+                &oracle,
+                symbol_short!("resolve"),
+                ContractError::FutureOracleData,
+            );
             return Err(ContractError::FutureOracleData);
         }
 
         if current_time > payload.timestamp + 300 {
+            Self::_emit_action_rejected(
+                &env,
+                &oracle,
+                symbol_short!("resolve"),
+                ContractError::StaleOracleData,
+            );
             return Err(ContractError::StaleOracleData);
         }
 
@@ -2240,6 +2363,12 @@ impl VirtualTokenContract {
         // doesn't permanently burn a nonce value.
         let nonce_key = DataKey::ConsumedOracleNonce(round.round_id, payload.nonce);
         if env.storage().persistent().has(&nonce_key) {
+            Self::_emit_action_rejected(
+                &env,
+                &oracle,
+                symbol_short!("resolve"),
+                ContractError::OracleNonceReused,
+            );
             return Err(ContractError::OracleNonceReused);
         }
         env.storage().persistent().set(&nonce_key, &true);
@@ -2247,6 +2376,12 @@ impl VirtualTokenContract {
         // Verify round has reached end_ledger
         let current_ledger = env.ledger().sequence();
         if current_ledger < round.end_ledger {
+            Self::_emit_action_rejected(
+                &env,
+                &oracle,
+                symbol_short!("resolve"),
+                ContractError::RoundNotEnded,
+            );
             return Err(ContractError::RoundNotEnded);
         }
 
@@ -2956,7 +3091,15 @@ impl VirtualTokenContract {
             .storage()
             .persistent()
             .get(&DataKey::ActiveRound)
-            .ok_or(ContractError::RoundNotCancellable)?;
+            .ok_or_else(|| {
+                Self::_emit_action_rejected(
+                    &env,
+                    &admin,
+                    symbol_short!("cancel"),
+                    ContractError::RoundNotCancellable,
+                );
+                ContractError::RoundNotCancellable
+            })?;
 
         let round_id = round.round_id;
 
@@ -3904,6 +4047,18 @@ impl VirtualTokenContract {
         Ok((distributable, fee_amount))
     }
 
+    fn _emit_action_rejected(env: &Env, actor: &Address, action: Symbol, reason: ContractError) {
+        // Privacy: event payload contains only the actor Address, an action
+        // symbol, and a numeric reason code. No personally identifiable
+        // information, financial amounts, or internal state is exposed.
+        // Operators can match reason codes against ContractError variants.
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("action"), symbol_short!("rejct")),
+            (actor.clone(), action, reason as u32),
+        );
+    }
+
     fn _emit_config_updated(
         env: &Env,
         kind: ConfigChangeKind,
@@ -3994,10 +4149,19 @@ impl VirtualTokenContract {
             .get(&DataKey::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
-        Self::_ensure_normal_mode(env)?;
+        Self::_ensure_not_paused(env).map_err(|e| {
+            Self::_emit_action_rejected(env, &admin, symbol_short!("sched"), e);
+            e
+        })?;
 
         let key = DataKey::PendingConfigChange(kind.clone());
         if env.storage().persistent().has(&key) {
+            Self::_emit_action_rejected(
+                env,
+                &admin,
+                symbol_short!("sched"),
+                ContractError::RoundAlreadyActive,
+            );
             return Err(ContractError::RoundAlreadyActive);
         }
 

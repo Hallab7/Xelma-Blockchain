@@ -3,7 +3,10 @@
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env};
+use soroban_sdk::{
+    testutils::{Address as _, Events, Ledger as _},
+    Address, Env,
+};
 
 #[test]
 fn test_mint_initial() {

@@ -29,12 +29,12 @@ impl ReferenceModel {
     }
     /// Deposit tokens for a user.
     pub fn deposit(&mut self, user: &Address, amount: i128) {
-        *self.balances.entry(user.clone()).or_default() += amount;
+        *self.balances.entry(user.to_string().to_string()).or_default() += amount;
     }
 
     /// Withdraw tokens for a user (ensures non‑negative balance).
     pub fn withdraw(&mut self, user: &Address, amount: i128) {
-        let entry = self.balances.entry(user.clone()).or_default();
+        let entry = self.balances.entry(user.to_string().to_string()).or_default();
         *entry = entry.saturating_sub(amount);
     }
 
@@ -55,8 +55,8 @@ impl ReferenceModel {
 
     /// Claim pending winnings for a user (moves to balance).
     pub fn claim(&mut self, user: &Address) {
-        if let Some(w) = self.pending_winnings.remove(user) {
-            *self.balances.entry(user.clone()).or_default() += w;
+        if let Some(w) = self.pending_winnings.remove(&user.to_string().to_string()) {
+            *self.balances.entry(user.to_string().to_string()).or_default() += w;
         }
     }
 

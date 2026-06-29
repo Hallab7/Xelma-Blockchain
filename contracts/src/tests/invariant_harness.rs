@@ -3,7 +3,9 @@ extern crate std;
 //! Differential invariant test harness using a reference model.
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, TestRunner};
+use proptest::strategy::ValueTree;
+use proptest::test_runner::{Config, RngSeed, TestRunner};
+use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
 use std::env;
 use std::string::String;
@@ -29,7 +31,7 @@ enum Action {
 
 /// Generate a random sequence of actions.
 fn action_strategy() -> impl Strategy<Value = Action> {
-    let user_idx = 0..5usize;
+let user_idx = 0..5usize;
     let amount = 0i128..=1_000_000i128;
     // Simple string generators for config actions.
     let key = any::<String>();
@@ -54,11 +56,10 @@ fn pretty_print_failure(seed: Option<u64>, actions: &[Action], diff: &str) -> ! 
     );
 }
 
-proptest! {
-    #[test]
-    fn differential_invariant_harness() {
+#[test]
+fn differential_invariant_harness() {
         // Environment configuration
-        let seq_len: usize = env::var("SEQUENCE_LENGTH")
+        let seq_len: u32 = env::var("SEQUENCE_LENGTH")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(20);
@@ -67,14 +68,16 @@ proptest! {
             .and_then(|v| v.parse().ok());
 
         // Set up proptest runner with optional seed (deterministic when seed is provided)
-        let config = Config::with_cases(seq_len);
-        let rng = match seed_opt {
-            Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_entropy(),
-        };
-        let mut runner = TestRunner::new_with_rng(config, rng);
-        let actions_strategy = prop::collection::vec(action_strategy(), 1..=seq_len);
-        let actions = runner.run(&actions_strategy, |v| Ok(v)).expect("Failed to generate actions");
+        let mut config = Config::with_cases(seq_len);
+        if let Some(seed) = seed_opt {
+            config.rng_seed = RngSeed::Fixed(seed);
+        }
+        let mut runner = TestRunner::new(config);
+        let actions_strategy = prop::collection::vec(action_strategy(), 1..=seq_len as usize);
+        let actions = actions_strategy
+            .new_tree(&mut runner)
+            .expect("Failed to generate actions")
+            .current();
 
         // Setup contract environment.
         let env = Env::default();
@@ -149,6 +152,3 @@ proptest! {
         }
     }
 }
-
-
-
