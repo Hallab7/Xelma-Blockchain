@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Simplified reference model for contract state used in invariant testing.
 
 use std::collections::HashMap;

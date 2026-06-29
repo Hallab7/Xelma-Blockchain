@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: MIT
 //! Tests for round resolution and winnings distribution.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{BetSide, DataKey, OraclePayload, PrecisionPrediction, Round, UserPosition};
+use crate::types::{BetSide, DataKey, OraclePayload, PrecisionPrediction, Round, UserOutcomeType, UserPosition};
+use crate::types::{BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, OraclePayload, PrecisionPrediction, Round, UserPosition};
 use crate::types::{RoundArchiveStatus, RoundMode};
 use soroban_sdk::{
     symbol_short,
@@ -2805,8 +2807,195 @@ fn test_archive_retention_prunes_oldest() {
 }
 
 // ============================================================================
-// PROTOCOL FEE TESTS (Issue #162)
+// USER ARCHIVED PARTICIPATION QUERY TESTS (Issue #164)
 // ============================================================================
+
+#[test]
+fn test_get_user_archived_participation_updown_win() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&alice);
+    client.mint_initial(&bob);
+
+    let start_price: u128 = 1_0000000;
+    client.create_round(&start_price, &None);
+    client.place_bet(&alice, &100_0000000, &BetSide::Up);
+    client.place_bet(&bob, &50_0000000, &BetSide::Down);
+
+    let round_id = resolve_active_round(&client, &env, 1_5000000, 1);
+
+    let alice_outcome = client
+        .get_user_archived_participation(&alice, &round_id)
+        .expect("alice must have an outcome record");
+    assert_eq!(alice_outcome.round_mode, 0);
+    assert_eq!(alice_outcome.prediction_side, 0);
+    assert_eq!(alice_outcome.stake, 100_0000000);
+    assert_eq!(alice_outcome.payout, 150_0000000);
+    assert_eq!(alice_outcome.outcome, UserOutcomeType::Win);
+
+    let bob_outcome = client
+        .get_user_archived_participation(&bob, &round_id)
+        .expect("bob must have an outcome record");
+    assert_eq!(bob_outcome.round_mode, 0);
+    assert_eq!(bob_outcome.prediction_side, 1);
+    assert_eq!(bob_outcome.stake, 50_0000000);
+    assert_eq!(bob_outcome.payout, 0);
+    assert_eq!(bob_outcome.outcome, UserOutcomeType::Loss);
+}
+
+#[test]
+fn test_get_user_archived_participation_updown_refund() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let alice = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&alice);
+
+    let start_price: u128 = 1_0000000;
+    client.create_round(&start_price, &None);
+    client.place_bet(&alice, &100_0000000, &BetSide::Up);
+
+    let round_id = resolve_active_round(&client, &env, start_price, 1);
+
+    let outcome = client
+        .get_user_archived_participation(&alice, &round_id)
+        .expect("alice must have an outcome record");
+    assert_eq!(outcome.round_mode, 0);
+    assert_eq!(outcome.prediction_side, 0);
+    assert_eq!(outcome.stake, 100_0000000);
+    assert_eq!(outcome.payout, 100_0000000);
+    assert_eq!(outcome.outcome, UserOutcomeType::Refund);
+}
+
+#[test]
+fn test_get_user_archived_participation_precision_win() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&alice);
+    client.mint_initial(&bob);
+
+    client.create_round(&2000, &Some(1));
+    client.place_precision_prediction(&alice, &100_0000000, &2297u128);
+    client.place_precision_prediction(&bob, &150_0000000, &2500u128);
+
+    let round_id = resolve_active_round(&client, &env, 2298, 1);
+
+    let alice_outcome = client
+        .get_user_archived_participation(&alice, &round_id)
+        .expect("alice must have an outcome record");
+    assert_eq!(alice_outcome.round_mode, 1);
+    assert_eq!(alice_outcome.prediction_side, 2);
+    assert_eq!(alice_outcome.predicted_price, 2297);
+    assert_eq!(alice_outcome.stake, 100_0000000);
+    assert_eq!(alice_outcome.payout, 250_0000000);
+    assert_eq!(alice_outcome.outcome, UserOutcomeType::Win);
+
+    let bob_outcome = client
+        .get_user_archived_participation(&bob, &round_id)
+        .expect("bob must have an outcome record");
+    assert_eq!(bob_outcome.round_mode, 1);
+    assert_eq!(bob_outcome.prediction_side, 2);
+    assert_eq!(bob_outcome.predicted_price, 2500);
+    assert_eq!(bob_outcome.stake, 150_0000000);
+    assert_eq!(bob_outcome.payout, 0);
+    assert_eq!(bob_outcome.outcome, UserOutcomeType::Loss);
+}
+
+#[test]
+fn test_get_user_archived_participation_cancel() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user);
+
+    let start_price: u128 = 1_0000000;
+    client.create_round(&start_price, &None);
+    client.place_bet(&user, &100_0000000, &BetSide::Up);
+    let round_id = client.get_active_round().unwrap().round_id;
+
+    client.cancel_round(&1u32);
+
+    let outcome = client
+        .get_user_archived_participation(&user, &round_id)
+        .expect("user must have an outcome record");
+    assert_eq!(outcome.round_mode, 0);
+    assert_eq!(outcome.prediction_side, 0);
+    assert_eq!(outcome.stake, 100_0000000);
+    assert_eq!(outcome.payout, 100_0000000);
+    assert_eq!(outcome.outcome, UserOutcomeType::Cancel);
+}
+
+#[test]
+fn test_get_user_archived_participation_missing_returns_none() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    assert!(client
+        .get_user_archived_participation(&user, &999)
+        .is_none());
+}
+
+#[test]
+fn test_get_user_archived_participation_min_participants_refund() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user);
+    client.set_min_participants(&Some(2u32));
+
+    let start_price: u128 = 1_0000000;
+    client.create_round(&start_price, &None);
+    client.place_bet(&user, &100_0000000, &BetSide::Up);
+
+    let round_id = resolve_active_round(&client, &env, 1_5000000, 1);
+
+    let outcome = client
+        .get_user_archived_participation(&user, &round_id)
+        .expect("user must have an outcome record");
+    assert_eq!(outcome.outcome, UserOutcomeType::Refund);
+    assert_eq!(outcome.payout, 100_0000000);
+}
 //
 // These tests exercise the optional protocol fee: default (ProtocolFeeBps
 // storage key absent) is byte-for-byte the pre-#162 behaviour; activating

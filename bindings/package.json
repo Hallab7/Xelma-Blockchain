@@ -16,6 +16,7 @@
     "lint": "./node_modules/.bin/tsc --noEmit",
     "test:parity": "node src/parity.js",
     "test:errors": "node tests/contract-error-parity.test.js",
+    "test:wasm": "vitest run tests/wasm-parity.test.js",
     "prepublishOnly": "npm run build && npm run test:parity && npm run test:errors"
   },
   "dependencies": {
@@ -23,6 +24,7 @@
     "buffer": "6.0.3"
   },
   "devDependencies": {
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.9"
   }
 }

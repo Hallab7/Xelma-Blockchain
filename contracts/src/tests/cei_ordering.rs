@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! CEI (Checks-Effects-Interactions) ordering regression tests.
 //!
 //! These tests verify that the two CEI fixes applied in issue #195 hold

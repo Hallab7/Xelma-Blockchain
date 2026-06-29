@@ -185,6 +185,23 @@ Emitted when a new user mints their one-time initial vXLM allocation.
 
 ---
 
+
+### `("config", "updated")`
+
+Emitted for every admin configuration mutation when a value is actually written, including immediate setters and timelocked changes when they are applied. This is the canonical audit event for reconstructing configuration history from events alone.
+
+| Position | Field       | Type                  | Description                                      |
+|----------|-------------|-----------------------|--------------------------------------------------|
+| 0        | `kind`      | `ConfigChangeKind`    | Configuration key that changed.                  |
+| 1        | `old_value` | `ConfigChangePayload` | Value observed immediately before the mutation.  |
+| 2        | `new_value` | `ConfigChangePayload` | Value written by the mutation.                   |
+
+Example payload for a windows update: `(Windows, Windows(6, 12), Windows(10, 20))`.
+
+`ConfigChangeKind` values currently include `Windows`, `MaxStake`, `MaxUserRoundExposure`, `MaxPendingWinnings`, `OracleStaleThreshold`, `OracleMaxDeviationBps`, `ProtocolFeeBps`, `MinParticipants`, `MaxPrecisionParticipants`, `MintLimit`, and `ArchiveRetention`.
+
+---
+
 ### `("windows", "updated")`
 
 Emitted when the admin reconfigures the bet and run window lengths.

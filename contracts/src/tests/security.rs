@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Security tests for Oracle data freshness and round validation.
 
 use super::config_helpers::{apply_oracle_max_deviation_bps, apply_oracle_stale_threshold};

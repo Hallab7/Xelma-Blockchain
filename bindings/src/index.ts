@@ -103,6 +103,16 @@ export enum RoundMode {
 }
 
 
+/**
+ * Lifecycle phase of an active round, derived from ledger windows.
+ */
+export enum RoundPhase {
+  Betting = 1,
+  Running = 2,
+  Resolvable = 3,
+}
+
+
 export interface UserStats {
   best_streak: u32;
   current_streak: u32;
@@ -587,6 +597,19 @@ export interface Client {
   get_active_round: (options?: MethodOptions) => Promise<AssembledTransaction<Option<Round>>>
 
   /**
+   * Construct and simulate a get_round_phase transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns the current lifecycle phase of the active round.
+   *
+   * Phase boundaries are deterministic:
+   * - `Betting` while `ledger < bet_end_ledger`
+   * - `Running` while `bet_end_ledger ≤ ledger < end_ledger`
+   * - `Resolvable` when `ledger ≥ end_ledger`
+   *
+   * Returns `NoActiveRound` when no round is active.
+   */
+  get_round_phase: (options?: MethodOptions) => Promise<AssembledTransaction<Result<RoundPhase>>>
+
+  /**
    * Construct and simulate a unpause_contract transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Unpauses the contract after recovery (admin only)
    */
@@ -942,6 +965,7 @@ export class Client extends ContractClient {
         is_oracle_live: this.txFromJSON<boolean>,
         pause_contract: this.txFromJSON<Result<void>>,
         get_active_round: this.txFromJSON<Option<Round>>,
+        get_round_phase: this.txFromJSON<Result<RoundPhase>>,
         unpause_contract: this.txFromJSON<Result<void>>,
         commit_prediction: this.txFromJSON<Result<void>>,
         get_last_round_id: this.txFromJSON<u64>,

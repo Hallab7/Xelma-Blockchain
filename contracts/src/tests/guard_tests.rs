@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for the single-active-round invariant guard (assert_no_active_round).
 //!
 //! Success path: no active round → create_round proceeds, storage updated.

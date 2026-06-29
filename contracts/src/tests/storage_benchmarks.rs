@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Benchmark-style tests for the indexed storage layout.
 //!
 //! These tests assert on the *operation count* of each core path

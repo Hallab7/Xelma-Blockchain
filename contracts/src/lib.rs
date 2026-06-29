@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #![no_std]
 //! # XLM Price Prediction Market
 //!
@@ -10,6 +11,9 @@
 //! - Checked arithmetic prevents overflow
 //! - Proportional payout distribution
 //! - Comprehensive error handling
+
+#[cfg(test)]
+extern crate std;
 
 mod contract;
 mod errors;

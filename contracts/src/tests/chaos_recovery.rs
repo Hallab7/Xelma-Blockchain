@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Chaos and recovery tests for interrupted lifecycle actions (Issue #122).
 //!
 //! Each scenario models a failure-like condition or unusual execution sequence and

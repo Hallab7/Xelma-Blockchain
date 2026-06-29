@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Type definitions for the XLM Price Prediction Market.
 
 use soroban_sdk::{contracttype, Address, BytesN};
@@ -9,6 +10,21 @@ use soroban_sdk::{contracttype, Address, BytesN};
 pub enum RoundMode {
     UpDown = 0,    // Simple up/down predictions
     Precision = 1, // Exact price predictions (Legends mode)
+}
+
+/// Lifecycle phase of an active round, derived from ledger windows.
+///
+/// Semantics (given `start_ledger`, `bet_end_ledger`, `end_ledger`):
+/// - `Betting`: `ledger < bet_end_ledger` — bets and precision predictions accepted
+/// - `Running`: `bet_end_ledger ≤ ledger < end_ledger` — reveal window (precision)
+/// - `Resolvable`: `ledger ≥ end_ledger` — round may be settled via oracle payload
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RoundPhase {
+    Betting = 1,
+    Running = 2,
+    Resolvable = 3,
 }
 
 /// Storage keys for contract data
@@ -81,6 +97,11 @@ pub enum DataKey {
     ArchivedRound(u64),
     /// Ordered round ids for archive retention (oldest at index 0).
     RecentArchivedRoundIds,
+    /// Per-user outcome record for a specific archived round (round_id, user).
+    /// Persisted at settlement for user history queries without event replay.
+    UserRoundOutcome(u64, Address),
+    /// Marker written by migrate_schema_v2_to_v3 to prove the migration ran.
+    MigratedToV3,
     /// Timelocked pending critical config change keyed by change kind.
     PendingConfigChange(ConfigChangeKind),
     /// Optional protocol settlement fee in basis points (1 bp = 0.01%).
@@ -113,6 +134,10 @@ pub enum ConfigChangeKind {
     /// Optional protocol settlement fee in bps (Issue #162).
     /// `None` disables the fee entirely, restoring pre-fee behaviour.
     ProtocolFeeBps = 6,
+    MinParticipants = 7,
+    MaxPrecisionParticipants = 8,
+    MintLimit = 9,
+    ArchiveRetention = 10,
 }
 
 /// Payload for a scheduled critical config change.
@@ -126,6 +151,10 @@ pub enum ConfigChangePayload {
     OracleStaleThreshold(u64),
     OracleMaxDeviationBps(Option<u32>),
     ProtocolFeeBps(Option<u32>),
+    MinParticipants(Option<u32>),
+    MaxPrecisionParticipants(u32),
+    MintLimit(u32),
+    ArchiveRetention(u32),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.

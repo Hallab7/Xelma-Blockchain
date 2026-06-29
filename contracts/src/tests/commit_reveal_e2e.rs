@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! End-to-end commit-reveal precision lifecycle integration suite (Issue #171).
 //!
 //! This module exercises the full **commit → reveal → resolve → claim**

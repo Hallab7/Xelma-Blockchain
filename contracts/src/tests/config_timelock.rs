@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for timelocked critical config changes (governance safety).
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};

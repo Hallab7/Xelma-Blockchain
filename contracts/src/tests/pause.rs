@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for emergency pause and recovery controls.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};

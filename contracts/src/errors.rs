@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Contract error types for the XLM Price Prediction Market.
 
 use soroban_sdk::contracterror;
@@ -13,10 +14,6 @@ pub enum ContractError {
     AdminNotSet = 2,
     /// Oracle address not set - call initialize first
     OracleNotSet = 3,
-    /// Only admin can perform this action
-    UnauthorizedAdmin = 4,
-    /// Only oracle can perform this action
-    UnauthorizedOracle = 5,
     /// Bet amount must be greater than zero
     InvalidBetAmount = 6,
     /// No active round exists
@@ -55,8 +52,6 @@ pub enum ContractError {
     FutureOracleData = 24,
     /// Arithmetic overflow in payout accumulation — no funds moved
     PayoutOverflow = 25,
-    /// Round has been cancelled and cannot be resolved
-    RoundCancelled = 26,
     /// Round cannot be cancelled (no active round or already resolved)
     RoundNotCancellable = 27,
     /// Bet amount exceeds the configured maximum stake
@@ -69,8 +64,6 @@ pub enum ContractError {
     InvalidStartPrice = 31,
     /// Oracle payload nonce was already consumed for this round (replay)
     OracleNonceReused = 33,
-    /// Round has fewer participants than the configured minimum for competitive settlement
-    InsufficientParticipants = 34,
     /// Minimum participants value is out of valid range (must be 1–10000)
     InvalidMinParticipants = 35,
     /// Oracle heartbeat status is out of range (must be 0, 1, or 2)

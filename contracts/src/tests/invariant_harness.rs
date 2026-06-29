@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Differential invariant test harness using a reference model.
 
 use proptest::prelude::*;

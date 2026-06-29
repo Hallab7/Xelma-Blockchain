@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for boundary conditions and unusual scenarios.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
