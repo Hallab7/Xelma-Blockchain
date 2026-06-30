@@ -15,8 +15,14 @@
 #[cfg(test)]
 extern crate std;
 
+mod admin;
+mod betting;
+pub mod common;
+mod config;
 mod contract;
 mod errors;
+mod queries;
+mod settlement;
 mod types;
 
 #[cfg(test)]

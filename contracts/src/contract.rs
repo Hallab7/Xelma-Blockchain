@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! Core contract implementation for the XLM Price Prediction Market.
 
-use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, symbol_short, Address, Bytes, BytesN, Env, Map,
-    Symbol, Vec,
+    contract, contractimpl, Address, BytesN, Env, Map, Symbol, Vec,
 };
 
 use crate::errors::ContractError;
@@ -76,6 +74,18 @@ const MIN_ARCHIVE_RETENTION: u32 = 1;
 const MAX_ARCHIVE_RETENTION: u32 = 10_000;
 /// Ledgers to wait before a scheduled critical config change may be applied (~2 hours).
 const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
+    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload,
+    OracleHeartbeatRecord, OraclePayload, PendingConfigChange,
+    PrecisionPrediction, ProtocolHealthStatus, Round, RoundPhase, RoundPoolStats,
+    UserPosition, UserRoundOutcome, UserStats,
+};
+
+use crate::admin;
+use crate::config;
+use crate::betting;
+use crate::settlement;
+use crate::queries;
+use crate::common;
 
 #[contract]
 pub struct VirtualTokenContract;
@@ -119,19 +129,15 @@ impl VirtualTokenContract {
         Self::_extend_persistent_ttl(&env, &DataKey::RunWindowLedgers);
 
         Ok(())
+        admin::initialize(env, admin, oracle)
     }
 
     /// Returns the stored schema version. If unset, returns legacy version 1.
     pub fn get_schema_version(env: Env) -> u32 {
-        let key = DataKey::SchemaVersion;
-        Self::_extend_persistent_ttl(&env, &key);
-        Self::_schema_version(&env).unwrap_or(1)
+        admin::get_schema_version(env)
     }
 
     /// Migrates legacy schema version 1 → version 2 (admin only).
-    ///
-    /// Guardrails:
-    /// - Must not have an active round (avoids partial state interpretation changes)
     pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
         let admin_key = DataKey::Admin;
         Self::_extend_persistent_ttl(&env, &admin_key);
@@ -181,120 +187,32 @@ impl VirtualTokenContract {
         );
 
         Ok(())
+        admin::migrate_schema_v1_to_v2(env)
     }
 
     /// Migrates schema version 2 → version 3 (admin only).
-    ///
-    /// Schema v3 adds per-user archived round outcome records so operators
-    /// can query user history without replaying events.
-    ///
-    /// Guardrails:
-    /// - Must not have an active round
     pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
-        let admin_key = DataKey::Admin;
-        Self::_extend_persistent_ttl(&env, &admin_key);
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&admin_key)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        Self::_ensure_not_paused(&env).map_err(|e| {
-            Self::_emit_action_rejected(&env, &admin, symbol_short!("migrate"), e);
-            e
-        })?;
-
-        if env.storage().persistent().has(&DataKey::ActiveRound) {
-            Self::_emit_action_rejected(
-                &env,
-                &admin,
-                symbol_short!("migrate"),
-                ContractError::MigrationActiveRound,
-            );
-            return Err(ContractError::MigrationActiveRound);
-        }
-
-        let from = Self::_schema_version(&env).unwrap_or(1);
-        const TARGET_VERSION: u32 = 3;
-        if from != 2 {
-            Self::_emit_action_rejected(
-                &env,
-                &admin,
-                symbol_short!("migrate"),
-                ContractError::InvalidMigrationPath,
-            );
-            return Err(ContractError::InvalidMigrationPath);
-        }
-
-        let schema_key = DataKey::SchemaVersion;
-        env.storage().persistent().set(&schema_key, &TARGET_VERSION);
-        Self::_extend_persistent_ttl(&env, &schema_key);
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::MigratedToV3, &true);
-
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("schema"), symbol_short!("migrated")),
-            (from, TARGET_VERSION),
-        );
-
-        Ok(())
+        admin::migrate_schema_v2_to_v3(env)
     }
 
     /// Returns whether the contract is currently paused
     pub fn is_paused(env: Env) -> bool {
-        let key = DataKey::Paused;
-        Self::_extend_persistent_ttl(&env, &key);
-        let mode = env
-            .storage()
-            .persistent()
-            .get::<_, RuntimeMode>(&key)
-            .unwrap_or(RuntimeMode::Normal);
-        mode == RuntimeMode::FullyPaused
+        admin::is_paused(env)
     }
 
     /// Pauses the contract for emergency recovery (admin only)
     pub fn pause_contract(env: Env) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-
-        admin.require_auth();
-        Self::_set_mode(&env, RuntimeMode::FullyPaused)?;
-
-        Ok(())
+        admin::pause_contract(env)
     }
 
     /// Unpauses the contract after recovery (admin only)
     pub fn unpause_contract(env: Env) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-
-        admin.require_auth();
-        Self::_set_mode(&env, RuntimeMode::Normal)?;
-
-        Ok(())
+        admin::unpause_contract(env)
     }
 
     /// Returns the current runtime mode (0 = Normal, 1 = ClaimsOnly, 2 = FullyPaused)
     pub fn get_runtime_mode(env: Env) -> u32 {
-        let key = DataKey::Paused;
-        Self::_extend_persistent_ttl(&env, &key);
-        let mode = env
-            .storage()
-            .persistent()
-            .get::<_, RuntimeMode>(&key)
-            .unwrap_or(RuntimeMode::Normal);
-        mode as u32
+        admin::get_runtime_mode(env)
     }
 
     /// Sets the runtime mode of the contract (admin only)
@@ -626,304 +544,81 @@ impl VirtualTokenContract {
     ) -> Option<UserRoundOutcome> {
         let key = DataKey::UserRoundOutcome(round_id, user);
         env.storage().persistent().get(&key)
+        admin::set_runtime_mode(env, mode)
     }
 
     pub fn get_admin(env: Env) -> Option<Address> {
-        let key = DataKey::Admin;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        admin::get_admin(env)
     }
 
     pub fn get_oracle(env: Env) -> Option<Address> {
-        let key = DataKey::Oracle;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        admin::get_oracle(env)
     }
 
-    /// Schedules a timelocked oracle deviation update (alias for [`Self::schedule_oracle_deviation_bps`]).
-    ///
-    /// - `None`: disables deviation guardrails
-    /// - `Some(bps)`: enables guardrails with a threshold in basis points (1 bp = 0.01%)
+    /// Schedules a timelocked oracle deviation update
     pub fn set_oracle_max_deviation_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
-        Self::schedule_oracle_deviation_bps(env, bps)
+        admin::set_oracle_max_deviation_bps(env, bps)
     }
 
     /// Returns the configured oracle max deviation bps, if set.
     pub fn get_oracle_max_deviation_bps(env: Env) -> Option<u32> {
-        let key = DataKey::OracleMaxDeviationBps;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        admin::get_oracle_max_deviation_bps(env)
     }
 
     /// Arms a one-shot override to bypass deviation checks for the next settlement (admin only).
-    /// The flag is automatically cleared after a settlement uses it.
     pub fn arm_oracle_deviation_override(env: Env) -> Result<(), ContractError> {
-        let admin_key = DataKey::Admin;
-        Self::_extend_persistent_ttl(&env, &admin_key);
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&admin_key)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        Self::_ensure_not_paused(&env).map_err(|e| {
-            Self::_emit_action_rejected(&env, &admin, symbol_short!("arm_ovr"), e);
-            e
-        })?;
-
-        let override_key = DataKey::OracleDeviationOverrideArmed;
-        env.storage().persistent().set(&override_key, &true);
-        Self::_extend_persistent_ttl(&env, &override_key);
-        Ok(())
+        admin::arm_oracle_deviation_override(env)
     }
+
     /// Sets the minimum oracle confidence threshold in basis points (admin only).
-    /// `None` disables confidence guardrails entirely. Valid range: 0–10000 bps.
     pub fn set_oracle_min_confidence_bps(
         env: Env,
         min_bps: Option<u32>,
     ) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        if let Some(bps) = min_bps {
-            if bps > 10_000 {
-                return Err(ContractError::InvalidOracleDeviationBps);
-            }
-        }
-        match min_bps {
-            None => env
-                .storage()
-                .persistent()
-                .remove(&DataKey::OracleMinConfidenceBps),
-            Some(bps) => {
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::OracleMinConfidenceBps, &bps);
-                Self::_extend_persistent_ttl(&env, &DataKey::OracleMinConfidenceBps);
-            }
-        }
-        Ok(())
+        admin::set_oracle_min_confidence_bps(env, min_bps)
     }
 
     /// Enables or disables strict mode for oracle confidence (admin only).
-    /// When enabled, payloads missing a confidence score are rejected.
     pub fn set_oracle_strict_mode(env: Env, enabled: bool) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&DataKey::OracleStrictMode, &enabled);
-        Self::_extend_persistent_ttl(&env, &DataKey::OracleStrictMode);
-        Ok(())
+        admin::set_oracle_strict_mode(env, enabled)
     }
 
     /// Returns the configured minimum oracle confidence bps, if set.
     pub fn get_oracle_min_confidence_bps(env: Env) -> Option<u32> {
-        let key = DataKey::OracleMinConfidenceBps;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        admin::get_oracle_min_confidence_bps(env)
     }
 
     /// Returns whether oracle strict mode is enabled.
     pub fn get_oracle_strict_mode(env: Env) -> bool {
-        let key = DataKey::OracleStrictMode;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key).unwrap_or(false)
+        admin::get_oracle_strict_mode(env)
     }
 
-    // ─── Oracle heartbeat and liveness (on-chain health tracking) ───────────
-
     /// Records an oracle heartbeat (oracle only).
-    /// `status`: 0 = active, 1 = degraded, 2 = offline.
-    /// Stores current ledger timestamp; emits `("oracle", "heartbeat")`.
     pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        if status > 2 {
-            Self::_extend_persistent_ttl(&env, &DataKey::Oracle);
-            if let Some(oracle) = env.storage().persistent().get::<_, Address>(&DataKey::Oracle) {
-                Self::_emit_action_rejected(
-                    &env,
-                    &oracle,
-                    symbol_short!("hbeat"),
-                    ContractError::InvalidOracleStatus,
-                );
-            }
-            return Err(ContractError::InvalidOracleStatus);
-        }
-        Self::_extend_persistent_ttl(&env, &DataKey::Oracle);
-        let oracle: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Oracle)
-            .ok_or(ContractError::OracleNotSet)?;
-        oracle.require_auth();
-
-        let ts = env.ledger().timestamp();
-        let record = OracleHeartbeatRecord {
-            timestamp: ts,
-            status,
-        };
-        env.storage()
-            .persistent()
-            .set(&DataKey::OracleHeartbeat, &record);
-        Self::_extend_persistent_ttl(&env, &DataKey::OracleHeartbeat);
-
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("oracle"), symbol_short!("hbeat")),
-            (ts, status),
-        );
-        Ok(())
+        admin::update_oracle_heartbeat(env, status)
     }
 
     /// Returns the most recent oracle heartbeat record, if any.
     pub fn get_oracle_heartbeat(env: Env) -> Option<OracleHeartbeatRecord> {
-        let key = DataKey::OracleHeartbeat;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        admin::get_oracle_heartbeat(env)
     }
 
     /// Returns `true` if the oracle has a non-stale heartbeat with status not offline (2).
-    /// Uses the configured stale threshold, defaulting to 3600 seconds.
     pub fn is_oracle_live(env: Env) -> bool {
-        let heartbeat_key = DataKey::OracleHeartbeat;
-        Self::_extend_persistent_ttl(&env, &heartbeat_key);
-        let record: OracleHeartbeatRecord = match env.storage().persistent().get(&heartbeat_key) {
-            Some(r) => r,
-            None => return false,
-        };
-        if record.status == 2 {
-            return false;
-        }
-        let threshold_key = DataKey::OracleStaleThreshold;
-        Self::_extend_persistent_ttl(&env, &threshold_key);
-        let threshold: u64 = env
-            .storage()
-            .persistent()
-            .get(&threshold_key)
-            .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD);
-        let current_time = env.ledger().timestamp();
-        current_time <= record.timestamp.saturating_add(threshold)
+        admin::is_oracle_live(env)
     }
 
-    /// Schedules a timelocked stale threshold update (alias for [`Self::schedule_oracle_stale_threshold`]).
-    /// Allowed range: 60–86400 seconds (1 minute to 24 hours).
+    /// Schedules a timelocked stale threshold update
     pub fn set_oracle_stale_threshold(env: Env, seconds: u64) -> Result<(), ContractError> {
-        Self::schedule_oracle_stale_threshold(env, seconds)
+        admin::set_oracle_stale_threshold(env, seconds)
     }
 
-    /// Returns a composite protocol health status aggregating pause state,
-    /// oracle liveness, active round phase, and schema version.
-    ///
-    /// Read-only and deterministic — no authentication required.
-    ///
-    /// ## Status code reference
-    ///
-    /// | code | meaning         | when returned                          |
-    /// |------|-----------------|----------------------------------------|
-    /// | 0    | HEALTHY         | All subsystems nominal                 |
-    /// | 1    | PAUSED          | Contract is emergency-paused           |
-    /// | 2    | ORACLE_STALE    | Oracle heartbeat is stale or offline   |
-    /// | 3    | ROUND_STALE     | Round resolvable but unresolved        |
-    /// | 4    | NO_ACTIVE_ROUND | No round active, oracle healthy        |
-    /// | 5    | MULTIPLE_ISSUES | Two or more simultaneous problems      |
+    /// Returns a composite protocol health status
     pub fn get_protocol_health(env: Env) -> ProtocolHealthStatus {
-        let ledger_sequence = env.ledger().sequence();
-        let ledger_timestamp = env.ledger().timestamp();
-
-        // ─── Pause state ────────────────────────────────────────────────────
-        let paused = Self::is_paused(env.clone());
-
-        // ─── Oracle liveness ────────────────────────────────────────────────
-        let heartbeat_key = DataKey::OracleHeartbeat;
-        Self::_extend_persistent_ttl(&env, &heartbeat_key);
-        let (oracle_live, oracle_status) = match env
-            .storage()
-            .persistent()
-            .get::<_, OracleHeartbeatRecord>(&heartbeat_key)
-        {
-            None => (false, 3u32),
-            Some(record) => {
-                if record.status == 2 {
-                    (false, record.status)
-                } else {
-                    let threshold_key = DataKey::OracleStaleThreshold;
-                    Self::_extend_persistent_ttl(&env, &threshold_key);
-                    let threshold: u64 = env
-                        .storage()
-                        .persistent()
-                        .get(&threshold_key)
-                        .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD);
-                    let live = ledger_timestamp <= record.timestamp.saturating_add(threshold);
-                    (live, record.status)
-                }
-            }
-        };
-
-        // ─── Active round phase ─────────────────────────────────────────────
-        let (has_active_round, active_round_phase) = match env
-            .storage()
-            .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
-        {
-            None => (false, 0u32),
-            Some(round) => {
-                let phase = Self::_derive_round_phase(ledger_sequence, &round);
-                (true, phase as u32)
-            }
-        };
-
-        // ─── Schema version ─────────────────────────────────────────────────
-        let schema_version = Self::_schema_version(&env).unwrap_or(1);
-
-        // ─── Composite status code ──────────────────────────────────────────
-        let mut issues: u32 = 0;
-        if paused {
-            issues += 1;
-        }
-        if !oracle_live {
-            issues += 1;
-        }
-        if has_active_round && active_round_phase == 3 {
-            issues += 1;
-        }
-
-        let status_code = if paused {
-            1u32 // PAUSED
-        } else if issues > 1 {
-            5u32 // MULTIPLE_ISSUES
-        } else if !oracle_live {
-            2u32 // ORACLE_STALE
-        } else if has_active_round && active_round_phase == 3 {
-            3u32 // ROUND_STALE
-        } else if !has_active_round {
-            4u32 // NO_ACTIVE_ROUND
-        } else {
-            0u32 // HEALTHY
-        };
-
-        ProtocolHealthStatus {
-            paused,
-            oracle_live,
-            oracle_status,
-            has_active_round,
-            active_round_phase,
-            schema_version,
-            ledger_sequence,
-            ledger_timestamp,
-            status_code,
-        }
+        admin::get_protocol_health(env)
     }
 
+    /// Returns the configured oracle stale threshold, or the default if not set.
     /// Returns the global status of the protocol.
     ///
     /// This is the canonical single-call status endpoint for frontends and
@@ -1013,12 +708,7 @@ impl VirtualTokenContract {
 
     /// Returns the configured oracle stale threshold, or the default (3600 s) if not set.
     pub fn get_oracle_stale_threshold(env: Env) -> u64 {
-        let key = DataKey::OracleStaleThreshold;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD)
+        admin::get_oracle_stale_threshold(env)
     }
 
     // ─── Oracle rotation (two-step with expiry) ─────────────────────────────
@@ -1169,179 +859,85 @@ impl VirtualTokenContract {
     /// bet_ledgers: Number of ledgers users can place bets
     /// run_ledgers: Total number of ledgers before round can be resolved
     pub fn set_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
-        Self::schedule_windows(env, bet_ledgers, run_ledgers)
+        config::set_windows(env, bet_ledgers, run_ledgers)
     }
 
-    // ─── Economic controls (Issue #113) ─────────────────────────────────────
-
-    /// Schedules a timelocked max stake update (alias for [`Self::schedule_max_stake`]).
-    /// Pass `None` to disable the cap.
     pub fn set_max_stake(env: Env, max_amount: Option<i128>) -> Result<(), ContractError> {
-        Self::schedule_max_stake(env, max_amount)
+        config::set_max_stake(env, max_amount)
     }
 
-    /// Returns the current maximum stake cap, if set.
     pub fn get_max_stake(env: Env) -> Option<i128> {
-        let key = DataKey::MaxStake;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        config::get_max_stake(env)
     }
 
-    /// Schedules a timelocked exposure cap update (alias for [`Self::schedule_max_user_exposure`]).
-    /// Pass `None` to disable the cap.
     pub fn set_max_user_exposure(
         env: Env,
         max_exposure: Option<i128>,
     ) -> Result<(), ContractError> {
-        Self::schedule_max_user_exposure(env, max_exposure)
+        config::set_max_user_exposure(env, max_exposure)
     }
 
-    /// Returns the current per-user round exposure cap, if set.
     pub fn get_max_user_exposure(env: Env) -> Option<i128> {
-        let key = DataKey::MaxUserRoundExposure;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        config::get_max_user_exposure(env)
     }
 
-    // ─── Accounting safety (Issue #120) ─────────────────────────────────────
-
-    /// Schedules a timelocked pending winnings cap update (alias for [`Self::schedule_max_pending_winnings`]).
-    /// Pass `None` to disable the cap.
     pub fn set_max_pending_winnings(
         env: Env,
         max_pending: Option<i128>,
     ) -> Result<(), ContractError> {
-        Self::schedule_max_pending_winnings(env, max_pending)
+        config::set_max_pending_winnings(env, max_pending)
     }
 
-    // ─── Timelocked critical config (governance safety) ─────────────────────
-
-    /// Schedules a timelocked update to betting and execution windows (admin only).
-    /// The change is stored pending until `apply_scheduled_changes` is called after the delay.
     pub fn schedule_windows(
         env: Env,
         bet_ledgers: u32,
         run_ledgers: u32,
     ) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        Self::_validate_windows(bet_ledgers, run_ledgers)?;
-        Self::_schedule_config_change(
-            &env,
-            ConfigChangeKind::Windows,
-            ConfigChangePayload::Windows(bet_ledgers, run_ledgers),
-        )
+        config::schedule_windows(env, bet_ledgers, run_ledgers)
     }
 
-    /// Schedules a timelocked update to the maximum stake cap (admin only).
     pub fn schedule_max_stake(env: Env, max_amount: Option<i128>) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        Self::_validate_max_stake(max_amount)?;
-        Self::_schedule_config_change(
-            &env,
-            ConfigChangeKind::MaxStake,
-            ConfigChangePayload::MaxStake(max_amount),
-        )
+        config::schedule_max_stake(env, max_amount)
     }
 
-    /// Schedules a timelocked update to the per-user round exposure cap (admin only).
     pub fn schedule_max_user_exposure(
         env: Env,
         max_exposure: Option<i128>,
     ) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        Self::_validate_max_stake(max_exposure)?;
-        Self::_schedule_config_change(
-            &env,
-            ConfigChangeKind::MaxUserRoundExposure,
-            ConfigChangePayload::MaxUserRoundExposure(max_exposure),
-        )
+        config::schedule_max_user_exposure(env, max_exposure)
     }
 
-    /// Schedules a timelocked update to the pending winnings cap (admin only).
     pub fn schedule_max_pending_winnings(
         env: Env,
         max_pending: Option<i128>,
     ) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        Self::_validate_max_stake(max_pending)?;
-        Self::_schedule_config_change(
-            &env,
-            ConfigChangeKind::MaxPendingWinnings,
-            ConfigChangePayload::MaxPendingWinnings(max_pending),
-        )
+        config::schedule_max_pending_winnings(env, max_pending)
     }
 
-    /// Schedules a timelocked update to the oracle stale threshold (admin only).
     pub fn schedule_oracle_stale_threshold(env: Env, seconds: u64) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        Self::_validate_oracle_stale_threshold(seconds)?;
-        Self::_schedule_config_change(
-            &env,
-            ConfigChangeKind::OracleStaleThreshold,
-            ConfigChangePayload::OracleStaleThreshold(seconds),
-        )
+        config::schedule_oracle_stale_threshold(env, seconds)
     }
 
-    /// Schedules a timelocked update to the oracle max deviation threshold (admin only).
     pub fn schedule_oracle_deviation_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        Self::_validate_oracle_max_deviation_bps(bps)?;
-        Self::_schedule_config_change(
-            &env,
-            ConfigChangeKind::OracleMaxDeviationBps,
-            ConfigChangePayload::OracleMaxDeviationBps(bps),
-        )
+        config::schedule_oracle_deviation_bps(env, bps)
     }
 
-    // ─── Protocol fee (Issue #162) ─────────────────────────────────────────
-
-    /// Schedules a timelocked update to the optional protocol settlement fee
-    /// (admin only). Pass `None` to disable fee collection entirely
-    /// (preserves pre-issue-#162 behaviour byte-for-byte: no fee ever
-    /// collected, treasury stays at 0, no fee events emitted).
-    /// Pass `Some(bps)` to enable a fee of `bps / 10_000` (capped at
-    /// `MAX_PROTOCOL_FEE_BPS`) of the round's total pot, deducted on every
-    /// competitive settlement and routed to the on-chain treasury.
     pub fn schedule_protocol_fee_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        Self::_validate_protocol_fee_bps(bps)?;
-        Self::_schedule_config_change(
-            &env,
-            ConfigChangeKind::ProtocolFeeBps,
-            ConfigChangePayload::ProtocolFeeBps(bps),
-        )
+        config::schedule_protocol_fee_bps(env, bps)
     }
 
-    /// Alias for [`Self::schedule_protocol_fee_bps`]. Mirrors the
-    /// `set_max_stake` / `set_windows` naming convention.
     pub fn set_protocol_fee_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
-        Self::schedule_protocol_fee_bps(env, bps)
+        config::set_protocol_fee_bps(env, bps)
     }
 
-    /// Returns the configured protocol fee in bps, if enabled.
-    /// `None` (key absent) means fee disabled — no behaviour change.
     pub fn get_protocol_fee_bps(env: Env) -> Option<u32> {
-        let key = DataKey::ProtocolFeeBps;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        config::get_protocol_fee_bps(env)
     }
 
-    /// Returns the accumulated, on-chain protocol fee treasury balance
-    /// (stroops). Starts at 0; grows monotonically with every competitive
-    /// settlement when the fee is enabled. Only the admin can drain it
-    /// via [`Self::withdraw_protocol_fee`].
     pub fn get_protocol_fee_treasury(env: Env) -> i128 {
-        let key = DataKey::ProtocolFeeTreasury;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key).unwrap_or(0)
+        config::get_protocol_fee_treasury(env)
     }
 
-    /// Withdraws `amount` stroops from the protocol fee treasury to
-    /// `recipient` (admin only). The transfer uses the existing
-    /// per-user balance ledger; the recipient must already exist
-    /// (`mint_initial` first or already have a balance from prior activity).
-    /// Errors with `FeeTreasuryUnderflow` if `amount` exceeds the
-    /// accumulated treasury.
     pub fn withdraw_protocol_fee(
         env: Env,
         recipient: Address,
@@ -1385,458 +981,78 @@ impl VirtualTokenContract {
         );
 
         Ok(amount)
+        config::withdraw_protocol_fee(env, recipient, amount)
     }
 
-    /// Returns a pending timelocked config change for the given kind, if any.
     pub fn get_pending_config_change(
         env: Env,
         kind: ConfigChangeKind,
     ) -> Option<PendingConfigChange> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::PendingConfigChange(kind))
+        config::get_pending_config_change(env, kind)
     }
 
-    /// Applies a scheduled critical config change after its activation ledger (any caller).
     pub fn apply_scheduled_changes(env: Env, kind: ConfigChangeKind) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        Self::_ensure_normal_mode(&env)?;
-
-        let key = DataKey::PendingConfigChange(kind.clone());
-        let pending: PendingConfigChange = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .ok_or(ContractError::CommitmentNotFound)?;
-
-        let current_ledger = env.ledger().sequence();
-        if current_ledger < pending.activation_ledger {
-            return Err(ContractError::RoundNotEnded);
-        }
-
-        Self::_apply_config_payload(&env, &kind, &pending.payload)?;
-        env.storage().persistent().remove(&key);
-
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("config"), symbol_short!("applied")),
-            (kind, pending.activation_ledger),
-        );
-
-        Ok(())
+        config::apply_scheduled_changes(env, kind)
     }
 
-    /// Cancels a pending timelocked config change before activation (admin only).
     pub fn cancel_config_change(env: Env, kind: ConfigChangeKind) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        Self::_ensure_not_paused(&env).map_err(|e| {
-            Self::_emit_action_rejected(&env, &admin, symbol_short!("cncl_cfg"), e);
-            e
-        })?;
-
-        let key = DataKey::PendingConfigChange(kind.clone());
-        let pending: PendingConfigChange = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .ok_or(ContractError::CommitmentNotFound)?;
-
-        if env.ledger().sequence() >= pending.activation_ledger {
-            Self::_emit_action_rejected(
-                &env,
-                &admin,
-                symbol_short!("cncl_cfg"),
-                ContractError::RoundNotCancellable,
-            );
-            return Err(ContractError::RoundNotCancellable);
-        }
-
-        let cancelled_at = env.ledger().sequence();
-
-        env.storage().persistent().remove(&key);
-
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("config"), symbol_short!("cancel")),
-            (kind, cancelled_at),
-        );
-
-        Ok(())
+        config::cancel_config_change(env, kind)
     }
 
-    /// Returns the current maximum pending winnings cap, if set.
     pub fn get_max_pending_winnings(env: Env) -> Option<i128> {
-        let key = DataKey::MaxPendingWinnings;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        config::get_max_pending_winnings(env)
     }
 
-    // ─── Minimum participants (competitive settlement integrity) ─────────────
-
-    /// Sets the minimum participant count required for competitive settlement (admin only).
-    /// Rounds that end below this threshold are refunded to all participants.
-    /// Pass `None` to disable the threshold.
     pub fn set_min_participants(env: Env, min: Option<u32>) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        Self::_ensure_not_paused(&env).map_err(|e| {
-            Self::_emit_action_rejected(&env, &admin, symbol_short!("min_par"), e);
-            e
-        })?;
-
-        let key = DataKey::MinParticipants;
-        let old_min: Option<u32> = env.storage().persistent().get(&key);
-        if let Some(v) = min {
-            if v == 0 || v > MAX_MIN_PARTICIPANTS {
-                Self::_emit_action_rejected(
-                    &env,
-                    &admin,
-                    symbol_short!("min_par"),
-                    ContractError::InvalidMinParticipants,
-                );
-                return Err(ContractError::InvalidMinParticipants);
-            }
-            env.storage().persistent().set(&key, &v);
-            Self::_extend_persistent_ttl(&env, &key);
-        } else {
-            env.storage().persistent().remove(&key);
-        }
-        Self::_emit_config_updated(
-            &env,
-            ConfigChangeKind::MinParticipants,
-            ConfigChangePayload::MinParticipants(old_min),
-            ConfigChangePayload::MinParticipants(min),
-        );
-        Ok(())
+        config::set_min_participants(env, min)
     }
 
-    /// Returns the current minimum participant threshold, if set.
     pub fn get_min_participants(env: Env) -> Option<u32> {
-        let key = DataKey::MinParticipants;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key)
+        config::get_min_participants(env)
     }
 
-    /// Sets the maximum participant count for Precision rounds (admin only).
-    /// The value must be in the range 1..=10_000. Unset contracts use the
-    /// protocol default of 1_000 participants.
     pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), ContractError> {
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        Self::_ensure_not_paused(&env).map_err(|e| {
-            Self::_emit_action_rejected(&env, &admin, symbol_short!("max_prec"), e);
-            e
-        })?;
-
-        if max == 0 || max > MAX_PRECISION_PARTICIPANTS_LIMIT {
-            Self::_emit_action_rejected(
-                &env,
-                &admin,
-                symbol_short!("max_prec"),
-                ContractError::InvalidPrecisionParticipantCap,
-            );
-            return Err(ContractError::InvalidPrecisionParticipantCap);
-        }
-
-        let key = DataKey::MaxPrecisionParticipants;
-        let old_max: u32 = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(DEFAULT_MAX_PRECISION_PARTICIPANTS);
-        env.storage().persistent().set(&key, &max);
-        Self::_extend_persistent_ttl(&env, &key);
-        Self::_emit_config_updated(
-            &env,
-            ConfigChangeKind::MaxPrecisionParticipants,
-            ConfigChangePayload::MaxPrecisionParticipants(old_max),
-            ConfigChangePayload::MaxPrecisionParticipants(max),
-        );
-        Ok(())
+        config::set_max_precision_participants(env, max)
     }
 
-    /// Returns the configured Precision participant cap, or the default if unset.
     pub fn get_max_precision_participants(env: Env) -> u32 {
-        let key = DataKey::MaxPrecisionParticipants;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(DEFAULT_MAX_PRECISION_PARTICIPANTS)
+        config::get_max_precision_participants(env)
     }
 
-    /// Sets the maximum number of mints allowed per ledger (admin only).
-    /// Pass 0 to disable the limit.
     pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        Self::_ensure_not_paused(&env).map_err(|e| {
-            Self::_emit_action_rejected(&env, &admin, symbol_short!("mint_lim"), e);
-            e
-        })?;
-
-        let old_limit: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::MintLimitConfig)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::MintLimitConfig, &limit);
-        Self::_emit_config_updated(
-            &env,
-            ConfigChangeKind::MintLimit,
-            ConfigChangePayload::MintLimit(old_limit),
-            ConfigChangePayload::MintLimit(limit),
-        );
-        Ok(())
+        config::set_mint_limit(env, limit)
     }
 
-    /// Returns the configured mint limit per ledger, or 0 if disabled.
     pub fn get_mint_limit(env: Env) -> u32 {
-        env.storage()
-            .instance()
-            .get(&DataKey::MintLimitConfig)
-            .unwrap_or(0)
+        config::get_mint_limit(env)
     }
 
-    /// Sets the archive retention limit — the maximum number of ArchivedRound
-    /// entries retained on-chain before the oldest are pruned (FIFO) (admin only).
-    ///
-    /// Valid range: `MIN_ARCHIVE_RETENTION..=MAX_ARCHIVE_RETENTION` (1..=10_000).
-    /// Changes apply to future archive writes; existing entries are not
-    /// retroactively pruned on config change.
     pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-        admin.require_auth();
-        Self::_ensure_not_paused(&env).map_err(|e| {
-            Self::_emit_action_rejected(&env, &admin, symbol_short!("set_arch"), e);
-            e
-        })?;
-
-        if limit < MIN_ARCHIVE_RETENTION || limit > MAX_ARCHIVE_RETENTION {
-            Self::_emit_action_rejected(
-                &env,
-                &admin,
-                symbol_short!("set_arch"),
-                ContractError::InvalidArchiveRetention,
-            );
-            return Err(ContractError::InvalidArchiveRetention);
-        }
-
-        let key = DataKey::ArchiveRetention;
-        let old_limit: u32 = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(DEFAULT_ARCHIVE_RETENTION);
-        env.storage().persistent().set(&key, &limit);
-        Self::_extend_persistent_ttl(&env, &key);
-
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("archive"), symbol_short!("retention")),
-            (limit,),
-        );
-        Self::_emit_config_updated(
-            &env,
-            ConfigChangeKind::ArchiveRetention,
-            ConfigChangePayload::ArchiveRetention(old_limit),
-            ConfigChangePayload::ArchiveRetention(limit),
-        );
-
-        Ok(())
+        config::set_archive_retention(env, limit)
     }
 
-    /// Returns the configured archive retention limit, or the protocol default (128) if unset.
     pub fn get_archive_retention(env: Env) -> u32 {
-        let key = DataKey::ArchiveRetention;
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(DEFAULT_ARCHIVE_RETENTION)
+        config::get_archive_retention(env)
     }
 
-    /// Returns user statistics (wins, losses, streaks)
-    pub fn get_user_stats(env: Env, user: Address) -> UserStats {
-        let key = DataKey::UserStats(user);
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key).unwrap_or(UserStats {
-            total_wins: 0,
-            total_losses: 0,
-            current_streak: 0,
-            best_streak: 0,
-        })
+    /// Creates a new prediction round (admin only)
+    pub fn create_round(
+        env: Env,
+        start_price: u128,
+        mode: Option<u32>,
+    ) -> Result<(), ContractError> {
+        betting::create_round(env, start_price, mode)
     }
 
-    /// Returns user's claimable winnings
-    pub fn get_pending_winnings(env: Env, user: Address) -> i128 {
-        let key = DataKey::PendingWinnings(user);
-        Self::_extend_persistent_ttl(&env, &key);
-        env.storage().persistent().get(&key).unwrap_or(0)
-    }
-
-    /// Places a bet on the active round (Up/Down mode only).
-    ///
-    /// Storage layout: each participant's position is stored under its own
-    /// composite key `DataKey::Position(round_id, user)` — O(1) read/write
-    /// regardless of how many other participants exist. An ordered participant
-    /// list `DataKey::RoundParticipants(round_id)` is maintained for O(n)
-    /// iteration at resolution time only.
     pub fn place_bet(
         env: Env,
         user: Address,
         amount: i128,
         side: BetSide,
     ) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        user.require_auth();
-        Self::_ensure_normal_mode(&env)?;
-
-        if amount <= 0 {
-            return Err(ContractError::InvalidBetAmount);
-        }
-
-        // Enforce max stake cap (Issue #113)
-        if let Some(max_stake) = env
-            .storage()
-            .persistent()
-            .get::<_, i128>(&DataKey::MaxStake)
-        {
-            if amount > max_stake {
-                return Err(ContractError::StakeExceedsMax);
-            }
-        }
-
-        // Single read of the active round — cache in call scope
-        let mut round: Round = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ActiveRound)
-            .ok_or(ContractError::NoActiveRound)?;
-
-        // Enforce per-user round exposure cap (Issue #113)
-        if let Some(max_exposure) = env
-            .storage()
-            .persistent()
-            .get::<_, i128>(&DataKey::MaxUserRoundExposure)
-        {
-            if amount > max_exposure {
-                return Err(ContractError::ExposureCapExceeded);
-            }
-        }
-
-        // Verify round is in Up/Down mode
-        if round.mode != RoundMode::UpDown {
-            return Err(ContractError::WrongModeForPrediction);
-        }
-
-        let current_ledger = env.ledger().sequence();
-        if current_ledger >= round.bet_end_ledger {
-            return Err(ContractError::RoundEnded);
-        }
-
-        let user_balance = Self::balance(env.clone(), user.clone());
-        if user_balance < amount {
-            return Err(ContractError::InsufficientBalance);
-        }
-
-        // O(1) duplicate-bet check — read one small key, not the full map
-        let pos_key = DataKey::Position(round.round_id, user.clone());
-        if env.storage().persistent().has(&pos_key) {
-            return Err(ContractError::AlreadyBet);
-        }
-
-        // Deduct balance
-        let new_balance = user_balance
-            .checked_sub(amount)
-            .ok_or(ContractError::Overflow)?;
-        Self::_set_balance(&env, user.clone(), new_balance);
-
-        // Write single-user position key — O(1), constant-size entry
-        let position = UserPosition {
-            amount,
-            side: side.clone(),
-        };
-        env.storage().persistent().set(&pos_key, &position);
-
-        // Append to participant list (needed for O(n) resolution iteration)
-        let participants_key = DataKey::RoundParticipants(round.round_id);
-        let mut participants: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&participants_key)
-            .unwrap_or(Vec::new(&env));
-        participants.push_back(user.clone());
-        env.storage()
-            .persistent()
-            .set(&participants_key, &participants);
-
-        // Update cached round pools and write once
-        match side {
-            BetSide::Up => {
-                round.pool_up = round
-                    .pool_up
-                    .checked_add(amount)
-                    .ok_or(ContractError::Overflow)?;
-            }
-            BetSide::Down => {
-                round.pool_down = round
-                    .pool_down
-                    .checked_add(amount)
-                    .ok_or(ContractError::Overflow)?;
-            }
-        }
-        env.storage()
-            .persistent()
-            .set(&DataKey::ActiveRound, &round);
-
-        // Emit bet placed event
-        // Topic: ("bet", "placed")
-        // Payload: (user: Address, round_id: u64, amount: i128, side: u32 where 0=Up, 1=Down)
-        let side_value: u32 = match side {
-            BetSide::Up => 0,
-            BetSide::Down => 1,
-        };
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("bet"), symbol_short!("placed")),
-            (user, round.round_id, amount, side_value),
-        );
-
-        Ok(())
+        betting::place_bet(env, user, amount, side)
     }
 
-    /// Places a precision prediction on the active round (Precision/Legends mode only)
-    /// predicted_price: price scaled to 4 decimals (e.g., 0.2297 → 2297)
-    ///
-    /// Per-user key `DataKey::PrecisionPosition(round_id, user)` gives O(1)
-    /// write cost independent of participant count.
     pub fn place_precision_prediction(
         env: Env,
         user: Address,
@@ -1950,429 +1166,134 @@ impl VirtualTokenContract {
         );
 
         Ok(())
+        betting::place_precision_prediction(env, user, amount, predicted_price)
     }
 
-    /// Alias for place_precision_prediction - allows users to submit exact price predictions
-    /// guessed_price: price scaled to 4 decimals (e.g., 0.2297 → 2297)
     pub fn predict_price(
         env: Env,
         user: Address,
         guessed_price: u128,
         amount: i128,
     ) -> Result<(), ContractError> {
-        Self::place_precision_prediction(env, user, amount, guessed_price)
+        betting::predict_price(env, user, guessed_price, amount)
     }
 
-    /// Commits a hashed prediction and stake amount (Precision mode only)
     pub fn commit_prediction(
         env: Env,
         user: Address,
         hash: BytesN<32>,
         amount: i128,
     ) -> Result<(), ContractError> {
-        user.require_auth();
-        Self::_ensure_normal_mode(&env)?;
-
-        if amount <= 0 {
-            return Err(ContractError::InvalidBetAmount);
-        }
-
-        // Enforce max stake cap
-        if let Some(max_stake) = env
-            .storage()
-            .persistent()
-            .get::<_, i128>(&DataKey::MaxStake)
-        {
-            if amount > max_stake {
-                return Err(ContractError::StakeExceedsMax);
-            }
-        }
-
-        // Single read of the active round
-        let round: Round = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ActiveRound)
-            .ok_or(ContractError::NoActiveRound)?;
-
-        // Enforce per-user round exposure cap
-        if let Some(max_exposure) = env
-            .storage()
-            .persistent()
-            .get::<_, i128>(&DataKey::MaxUserRoundExposure)
-        {
-            if amount > max_exposure {
-                return Err(ContractError::ExposureCapExceeded);
-            }
-        }
-
-        // Verify round is in Precision mode
-        if round.mode != RoundMode::Precision {
-            return Err(ContractError::WrongModeForPrediction);
-        }
-
-        let current_ledger = env.ledger().sequence();
-        if current_ledger >= round.bet_end_ledger {
-            return Err(ContractError::RoundEnded);
-        }
-
-        let user_balance = Self::balance(env.clone(), user.clone());
-        if user_balance < amount {
-            return Err(ContractError::InsufficientBalance);
-        }
-
-        // Check duplicate bet or commitment
-        let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-        let commit_key = DataKey::PrecisionCommitment(round.round_id, user.clone());
-        if env.storage().persistent().has(&pred_key) || env.storage().persistent().has(&commit_key)
-        {
-            return Err(ContractError::AlreadyBet);
-        }
-
-        // Deduct balance
-        let new_balance = user_balance
-            .checked_sub(amount)
-            .ok_or(ContractError::Overflow)?;
-        Self::_set_balance(&env, user.clone(), new_balance);
-
-        // Store commitment
-        let commitment = PrecisionCommitment {
-            hash: hash.clone(),
-            amount,
-            revealed: false,
-        };
-        env.storage().persistent().set(&commit_key, &commitment);
-
-        // Append to shared participant list
-        let participants_key = DataKey::RoundParticipants(round.round_id);
-        let mut participants: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&participants_key)
-            .unwrap_or(Vec::new(&env));
-        participants.push_back(user.clone());
-        env.storage()
-            .persistent()
-            .set(&participants_key, &participants);
-
-        // Emit commit prediction event
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("commit"), symbol_short!("predict")),
-            (user, round.round_id, hash, amount),
-        );
-
-        Ok(())
+        betting::commit_prediction(env, user, hash, amount)
     }
 
-    /// Reveals a previously committed prediction (Precision mode only)
     pub fn reveal_prediction(
         env: Env,
         user: Address,
         predicted_price: u128,
         salt: BytesN<32>,
     ) -> Result<(), ContractError> {
-        user.require_auth();
-        Self::_ensure_normal_mode(&env)?;
-
-        // Single read of the active round
-        let round: Round = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ActiveRound)
-            .ok_or(ContractError::NoActiveRound)?;
-
-        // Verify round is in Precision mode
-        if round.mode != RoundMode::Precision {
-            return Err(ContractError::WrongModeForPrediction);
-        }
-
-        // Enforce reveal window: bet_end_ledger <= ledger < end_ledger
-        let current_ledger = env.ledger().sequence();
-        if current_ledger < round.bet_end_ledger || current_ledger >= round.end_ledger {
-            return Err(ContractError::InvalidRevealWindow);
-        }
-
-        // Retrieve commitment
-        let commit_key = DataKey::PrecisionCommitment(round.round_id, user.clone());
-        let mut commitment: PrecisionCommitment = env
-            .storage()
-            .persistent()
-            .get(&commit_key)
-            .ok_or(ContractError::CommitmentNotFound)?;
-
-        if commitment.revealed {
-            return Err(ContractError::AlreadyRevealed);
-        }
-
-        // Verify hash
-        let mut preimage = Bytes::new(&env);
-        preimage.append(&predicted_price.to_xdr(&env));
-        preimage.append(&salt.to_xdr(&env));
-        let computed_hash = env.crypto().sha256(&preimage);
-        let computed_hash_bytes: BytesN<32> = computed_hash.into();
-
-        if computed_hash_bytes != commitment.hash {
-            return Err(ContractError::HashMismatch);
-        }
-
-        // Mark revealed and write
-        commitment.revealed = true;
-        env.storage().persistent().set(&commit_key, &commitment);
-
-        // Store prediction for resolution
-        let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-        let prediction = PrecisionPrediction {
-            user: user.clone(),
-            predicted_price,
-            amount: commitment.amount,
-        };
-        env.storage().persistent().set(&pred_key, &prediction);
-
-        // Emit reveal prediction event
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("reveal"), symbol_short!("predict")),
-            (user, round.round_id, predicted_price, commitment.amount),
-        );
-
-        Ok(())
+        betting::reveal_prediction(env, user, predicted_price, salt)
     }
 
-    /// Returns user's position in the current round (Up/Down mode).
-    ///
-    /// Reads a single composite key `DataKey::Position(round_id, user)` — O(1).
-    /// Falls back to legacy `UpDownPositions` / `Positions` map blobs for
-    /// one-time migration compatibility.
+    /// Mints 1000 vXLM for new users (one-time only)
+    pub fn mint_initial(env: Env, user: Address) -> i128 {
+        betting::mint_initial(env, user)
+    }
+
+    pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractError> {
+        settlement::resolve_round(env, payload)
+    }
+
+    pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
+        settlement::cancel_round(env, reason)
+    }
+
+    pub fn is_round_cancelled(env: Env, round_id: u64) -> bool {
+        settlement::is_round_cancelled(env, round_id)
+    }
+
+    pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
+        settlement::claim_winnings(env, user)
+    }
+
+    pub fn get_active_round(env: Env) -> Option<Round> {
+        queries::get_active_round(env)
+    }
+
+    pub fn get_round_pool_stats(env: Env) -> Option<RoundPoolStats> {
+        queries::get_round_pool_stats(env)
+    }
+
+    pub fn get_round_phase(env: Env) -> Result<RoundPhase, ContractError> {
+        queries::get_round_phase(env)
+    }
+
+    pub fn get_last_round_id(env: Env) -> u64 {
+        queries::get_last_round_id(env)
+    }
+
+    pub fn get_archived_round(env: Env, round_id: u64) -> Option<ArchivedRoundSummary> {
+        queries::get_archived_round(env, round_id)
+    }
+
+    pub fn get_recent_archived_rounds(env: Env, limit: u32) -> Vec<ArchivedRoundSummary> {
+        queries::get_recent_archived_rounds(env, limit)
+    }
+
+    pub fn get_user_archived_participation(
+        env: Env,
+        user: Address,
+        round_id: u64,
+    ) -> Option<UserRoundOutcome> {
+        queries::get_user_archived_participation(env, user, round_id)
+    }
+
+    pub fn get_user_stats(env: Env, user: Address) -> UserStats {
+        queries::get_user_stats(env, user)
+    }
+
+    pub fn get_pending_winnings(env: Env, user: Address) -> i128 {
+        queries::get_pending_winnings(env, user)
+    }
+
     pub fn get_user_position(env: Env, user: Address) -> Option<UserPosition> {
-        if let Some(round) = env
-            .storage()
-            .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
-        {
-            let pos_key = DataKey::Position(round.round_id, user.clone());
-            if let Some(pos) = env.storage().persistent().get(&pos_key) {
-                return Some(pos);
-            }
-        }
-
-        // Legacy read-only fallback for migration data
-        let legacy_updown: Map<Address, UserPosition> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::UpDownPositions)
-            .unwrap_or(Map::new(&env));
-        if let Some(p) = legacy_updown.get(user.clone()) {
-            return Some(p);
-        }
-        let legacy_positions: Map<Address, UserPosition> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Positions)
-            .unwrap_or(Map::new(&env));
-        legacy_positions.get(user)
+        queries::get_user_position(env, user)
     }
 
-    /// Returns user's precision prediction in the current round (Precision mode).
-    ///
-    /// Reads a single composite key `DataKey::PrecisionPosition(round_id, user)` — O(1).
-    /// Falls back to legacy `PrecisionPositions` map for migration compatibility.
     pub fn get_user_precision_prediction(env: Env, user: Address) -> Option<PrecisionPrediction> {
-        if let Some(round) = env
-            .storage()
-            .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
-        {
-            let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-            if let Some(p) = env
-                .storage()
-                .persistent()
-                .get::<_, PrecisionPrediction>(&pred_key)
-            {
-                return Some(p);
-            }
-        }
-        let legacy: Map<Address, PrecisionPrediction> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::PrecisionPositions)
-            .unwrap_or(Map::new(&env));
-        legacy.get(user)
+        queries::get_user_precision_prediction(env, user)
     }
 
-    /// Returns all precision predictions for the current round.
-    ///
-    /// Reads the participant list once, then fetches each prediction individually.
-    /// Total reads: 1 (participant list) + N (predictions) instead of 1 large map blob.
     pub fn get_precision_predictions(env: Env) -> Vec<PrecisionPrediction> {
-        let round = match env
-            .storage()
-            .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
-        {
-            Some(r) => r,
-            None => return Vec::new(&env),
-        };
-
-        let participants: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::RoundParticipants(round.round_id))
-            .unwrap_or(Vec::new(&env));
-
-        let mut result: Vec<PrecisionPrediction> = Vec::new(&env);
-        for i in 0..participants.len() {
-            if let Some(user) = participants.get(i) {
-                let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-                if let Some(pred) = env.storage().persistent().get(&pred_key) {
-                    result.push_back(pred);
-                }
-            }
-        }
-
-        // Legacy fallback: pre-migration data lives in the bulk map
-        if result.is_empty() {
-            let legacy: Map<Address, PrecisionPrediction> = env
-                .storage()
-                .persistent()
-                .get(&DataKey::PrecisionPositions)
-                .unwrap_or(Map::new(&env));
-            return legacy.values();
-        }
-        result
+        queries::get_precision_predictions(env)
     }
 
-    /// Returns all Up/Down positions for the current round.
-    ///
-    /// Reads the participant list once, then fetches each position individually.
     pub fn get_updown_positions(env: Env) -> Map<Address, UserPosition> {
-        let round = match env
-            .storage()
-            .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
-        {
-            Some(r) => r,
-            None => return Map::new(&env),
-        };
-
-        let participants: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::RoundParticipants(round.round_id))
-            .unwrap_or(Vec::new(&env));
-
-        let mut result: Map<Address, UserPosition> = Map::new(&env);
-        for i in 0..participants.len() {
-            if let Some(user) = participants.get(i) {
-                let pos_key = DataKey::Position(round.round_id, user.clone());
-                if let Some(pos) = env.storage().persistent().get(&pos_key) {
-                    result.set(user, pos);
-                }
-            }
-        }
-
-        // Legacy fallback: pre-migration data lives in the bulk map
-        if result.is_empty() {
-            return env
-                .storage()
-                .persistent()
-                .get(&DataKey::UpDownPositions)
-                .unwrap_or(Map::new(&env));
-        }
-        result
+        queries::get_updown_positions(env)
     }
-    // ─── Pagination (Issue #139) ─────────────────────────────────────────────
 
-    /// Returns a deterministic slice of Precision-mode predictions for the
-    /// active round, ordered by ascending participant address (the same
-    /// canonical order used internally for payout-remainder assignment).
-    ///
-    /// `offset` is the zero-based index into the ordered participant list.
-    /// `limit` is the maximum number of entries to return and is capped at
-    /// `MAX_PAGE_SIZE` to bound gas/read costs regardless of caller input.
-    ///
-    /// Returns an empty `Vec` if there is no active round, if `offset` is
-    /// beyond the number of available entries, or if `limit` is zero — this
-    /// is not an error condition, matching standard pagination semantics
-    /// (asking past the end of a list yields an empty page, not a fault).
-    ///
-    /// This does not replace [`Self::get_precision_predictions`], which
-    /// remains available unchanged for full-set reads on small rounds.
     pub fn get_precision_predictions_page(
         env: Env,
         offset: u32,
         limit: u32,
     ) -> Vec<PrecisionPrediction> {
-        let limit = limit.min(MAX_PAGE_SIZE);
-        if limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let round = match env
-            .storage()
-            .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
-        {
-            Some(r) => r,
-            None => return Vec::new(&env),
-        };
-
-        let participants: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::RoundParticipants(round.round_id))
-            .unwrap_or(Vec::new(&env));
-        let participants = Self::sort_addresses(participants);
-
-        let total = participants.len();
-        if offset >= total {
-            return Vec::new(&env);
-        }
-
-        let end = offset.saturating_add(limit).min(total);
-
-        let mut result: Vec<PrecisionPrediction> = Vec::new(&env);
-        for i in offset..end {
-            if let Some(user) = participants.get(i) {
-                let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-                if let Some(pred) = env.storage().persistent().get(&pred_key) {
-                    result.push_back(pred);
-                }
-            }
-        }
-
-        result
+        queries::get_precision_predictions_page(env, offset, limit)
     }
 
-    /// Returns a deterministic slice of Up/Down positions for the active
-    /// round, ordered by ascending participant address, as `(Address,
-    /// UserPosition)` pairs.
-    ///
-    /// A `Vec` of pairs is used instead of a `Map` because pagination over a
-    /// `Map` has no stable, caller-controllable slice semantics in Soroban —
-    /// pairs preserve the exact offset/limit window the caller requested.
-    ///
-    /// See [`Self::get_precision_predictions_page`] for the offset/limit/empty-page
-    /// contract, which is identical here. This does not replace
-    /// [`Self::get_updown_positions`], which remains available unchanged.
     pub fn get_updown_positions_page(
         env: Env,
         offset: u32,
         limit: u32,
     ) -> Vec<(Address, UserPosition)> {
-        let limit = limit.min(MAX_PAGE_SIZE);
-        if limit == 0 {
-            return Vec::new(&env);
-        }
+        queries::get_updown_positions_page(env, offset, limit)
+    }
 
-        let round = match env
-            .storage()
-            .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
-        {
-            Some(r) => r,
-            None => return Vec::new(&env),
-        };
+    /// Returns user's vXLM balance
+    pub fn balance(env: Env, user: Address) -> i128 {
+        common::balance(env, user)
+    }
+}
 
         let participants: Vec<Address> = env
             .storage()
@@ -4533,23 +3454,12 @@ impl VirtualTokenContract {
                 .persistent()
                 .extend_ttl(key, TTL_BUMP_THRESHOLD, TTL_BUMP_AMOUNT);
         }
+impl VirtualTokenContract {
+    pub fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> {
+        settlement::_update_stats_win(env, user)
     }
 
-    fn sort_addresses(addresses: Vec<Address>) -> Vec<Address> {
-        let mut sorted = Vec::new(addresses.env());
-        for addr in addresses.iter() {
-            let mut inserted = false;
-            for i in 0..sorted.len() {
-                if addr < sorted.get_unchecked(i) {
-                    sorted.insert(i, addr.clone());
-                    inserted = true;
-                    break;
-                }
-            }
-            if !inserted {
-                sorted.push_back(addr);
-            }
-        }
-        sorted
+    pub fn _update_stats_loss(env: &Env, user: Address) -> Result<(), ContractError> {
+        settlement::_update_stats_loss(env, user)
     }
 }
