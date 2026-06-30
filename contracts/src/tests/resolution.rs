@@ -3,14 +3,16 @@
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{BetSide, DataKey, OraclePayload, PrecisionPrediction, Round, UserOutcomeType, UserPosition};
-use crate::types::{BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, OraclePayload, PrecisionPrediction, Round, UserPosition};
-use crate::types::{RoundArchiveStatus, RoundMode};
+use crate::types::{
+    BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, OraclePayload, PrecisionPrediction, Round,
+    RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
+};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
     Address, Env, Map, TryIntoVal, Vec,
 };
+use std::string::ToString;
 
 #[test]
 fn test_resolve_round_price_unchanged() {
@@ -2196,7 +2198,7 @@ fn count_outcome_loss_events(env: &Env) -> u32 {
 /// Helper: collects every decoded loss event payload for assertions.
 fn collect_outcome_loss_events(
     env: &Env,
-) -> Vec<(soroban_sdk::Address, u64, u32, soroban_sdk::I128, u32, u128)> {
+) -> Vec<(soroban_sdk::Address, u64, u32, i128, u32, u128)> {
     env.events()
         .all()
         .iter()
@@ -2208,15 +2210,8 @@ fn collect_outcome_loss_events(
             {
                 return None;
             }
-            data.try_into_val::<(
-                soroban_sdk::Address,
-                u64,
-                u32,
-                soroban_sdk::I128,
-                u32,
-                u128,
-            )>(env)
-            .ok()
+            let res: Result<(soroban_sdk::Address, u64, u32, i128, u32, u128), _> = data.try_into_val(env);
+            res.ok()
         })
         .collect()
 }
@@ -2277,13 +2272,13 @@ fn test_outcome_loss_event_updown_indexed_path() {
     }
 
     // Verify both losers are represented, each with their losing side.
-    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (soroban_sdk::I128, u32)> =
+    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (i128, u32)> =
         std::collections::HashMap::new();
     for (user, _round_id, _mode, amount, side, _price) in &losses {
-        by_addr.insert(user.to_string(), (*amount, *side));
+        by_addr.insert(user.to_string().to_string(), (*amount, *side));
     }
-    assert_eq!(by_addr[&charlie.to_string()], (150_0000000i128, 1u32));
-    assert_eq!(by_addr[&diana.to_string()], (50_0000000i128, 1u32));
+    assert_eq!(by_addr[&charlie.to_string().to_string()], (150_0000000i128, 1u32));
+    assert_eq!(by_addr[&diana.to_string().to_string()], (50_0000000i128, 1u32));
 }
 
 #[test]
@@ -2358,12 +2353,12 @@ fn test_outcome_loss_event_updown_legacy_path() {
     let losses = collect_outcome_loss_events(&env);
     assert_eq!(losses.len(), 1);
     let (user, round_id, mode, amount, side, predicted_price) = losses.get(0).unwrap();
-    assert_eq!(user, bob);
-    assert_eq!(round_id, 1u64);
-    assert_eq!(mode, 0u32);
-    assert_eq!(amount, 50_0000000i128);
-    assert_eq!(side, 1u32, "Bob bet Down → losing side is Down (1)");
-    assert_eq!(predicted_price, 0u128);
+    assert_eq!(*user, bob);
+    assert_eq!(*round_id, 1u64);
+    assert_eq!(*mode, 0u32);
+    assert_eq!(*amount, 50_0000000i128);
+    assert_eq!(*side, 1u32, "Bob bet Down → losing side is Down (1)");
+    assert_eq!(*predicted_price, 0u128);
 }
 
 #[test]
@@ -2425,20 +2420,20 @@ fn test_outcome_loss_event_precision_indexed_path() {
     assert_eq!(losses.len(), 2);
 
     for (_user, round_id, mode, _amount, side, _predicted_price) in &losses {
-        assert_eq!(round_id, 1u64);
+        assert_eq!(*round_id, 1u64);
         assert_eq!(*mode, 1u32, "Precision loss events must carry mode=1");
         assert_eq!(*side, 0u32, "`side` is unused in Precision mode");
     }
 
-    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (soroban_sdk::I128, u128)> =
+    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (i128, u128)> =
         std::collections::HashMap::new();
     for (user, _, _, amount, _, price) in &losses {
-        by_addr.insert(user.to_string(), (*amount, *price));
+        by_addr.insert(user.to_string().to_string(), (*amount, *price));
     }
     // Bob revealed 2500.
-    assert_eq!(by_addr[&bob.to_string()], (150_0000000i128, 2500u128));
+    assert_eq!(by_addr[&bob.to_string().to_string()], (150_0000000i128, 2500u128));
     // Charlie never revealed → predicted_price = 0 (unknown on-chain).
-    assert_eq!(by_addr[&charlie.to_string()], (80_0000000i128, 0u128));
+    assert_eq!(by_addr[&charlie.to_string().to_string()], (80_0000000i128, 0u128));
 }
 
 #[test]
@@ -2510,10 +2505,10 @@ fn test_outcome_loss_event_precision_legacy_path() {
 
     // 2 losers => 2 loss events.
     assert_eq!(count_outcome_loss_events(&env), 2);
-    let losses: std::collections::HashMap<soroban_sdk::String, (soroban_sdk::I128, u128)> =
+    let losses: std::collections::HashMap<soroban_sdk::String, (i128, u128)> =
         collect_outcome_loss_events(&env)
             .iter()
-            .map(|(u, _, _, amount, _, price)| (u.to_string(), (*amount, *price)))
+            .map(|(u, _, _, amount, _, price)| (u.to_string().to_string(), (*amount, *price)))
             .collect();
     assert_eq!(
         losses.len(),
@@ -2523,18 +2518,18 @@ fn test_outcome_loss_event_precision_legacy_path() {
     // Per-user explicit assertions make regress failures far more diagnostic
     // than a generic loop+panic.
     assert_eq!(
-        losses[&bob.to_string()],
+        losses[&bob.to_string().to_string()],
         (150_0000000i128, 2500u128),
         "bob loss event must carry his revealed guess",
     );
     assert_eq!(
-        losses[&charlie.to_string()],
+        losses[&charlie.to_string().to_string()],
         (50_0000000i128, 5000u128),
         "charlie loss event must carry his revealed guess",
     );
     // Winner (alice, predicted_price=2297) MUST NOT appear in any loss event.
     assert!(
-        !losses.contains_key(&alice.to_string()),
+        !losses.contains_key(&alice.to_string().to_string()),
         "winner must never emit loss events",
     );
 }
@@ -3012,7 +3007,7 @@ fn test_get_user_archived_participation_min_participants_refund() {
 
 fn collect_protocol_fee_events(
     env: &Env,
-) -> Vec<(u64, soroban_sdk::I128, soroban_sdk::I128, u32)> {
+) -> Vec<(u64, i128, i128, u32)> {
     env.events()
         .all()
         .iter()
@@ -3020,12 +3015,12 @@ fn collect_protocol_fee_events(
             let (_contract, topics, data) = e;
             if topics.len() != 2
                 || topics.get(0).unwrap().try_into_val(env) != Ok(symbol_short!("protocol"))
-                || topics.get(1).unwrap().try_into_val(env) != Ok(symbol_short!("fee_collected"))
+                || topics.get(1).unwrap().try_into_val(env) != Ok(symbol_short!("fee_coll"))
             {
                 return None;
             }
-            data.try_into_val::<(u64, soroban_sdk::I128, soroban_sdk::I128, u32)>(env)
-                .ok()
+            let res: Result<(u64, i128, i128, u32), _> = data.try_into_val(env);
+            res.ok()
         })
         .collect()
 }
@@ -3038,14 +3033,14 @@ fn count_protocol_fee_events(env: &Env) -> u32 {
             let (_contract, topics, _data) = e;
             topics.len() == 2
                 && topics.get(0).unwrap().try_into_val(env) == Ok(symbol_short!("protocol"))
-                && topics.get(1).unwrap().try_into_val(env) == Ok(symbol_short!("fee_collected"))
+                && topics.get(1).unwrap().try_into_val(env) == Ok(symbol_short!("fee_coll"))
         })
         .count() as u32
 }
 
 /// Build a deterministic Vector of user-side pre-resolution `("outcome","loss")` events
 /// helper to keep the conservation-test bodies short.
-fn sum_pending_payouts(env: &Env, users: &[soroban_sdk::Address]) -> soroban_sdk::I128 {
+fn sum_pending_payouts(env: &Env, users: &[soroban_sdk::Address]) -> i128 {
     let mut total: i128 = 0;
     env.as_contract(&env.current_contract_address(), || {
         for u in users {
@@ -3161,7 +3156,7 @@ fn test_protocol_fee_updown_indexed_conservation() {
 
     // Conservation invariant.
     let total_pot: i128 = 150_000_0000i128;
-    assert_eq!(payouts + treasury.into(), total_pot.into(),
+    assert_eq!(payouts + treasury, total_pot,
         "conservation: payouts + treasury must equal total_pot");
 
     // One round -> one fee_collected event.
@@ -3230,7 +3225,7 @@ fn test_protocol_fee_updown_legacy_conservation() {
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 7_000_0000i128);
     // Conservation.
-    assert_eq!(payouts + treasury.into(), 150_000_0000i128);
+    assert_eq!(payouts + treasury, 150_000_0000i128);
 }
 
 #[test]
@@ -3278,7 +3273,7 @@ fn test_protocol_fee_precision_indexed_conservation() {
     assert_eq!(payouts, 270_000_0000i128);
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 30_000_0000i128);
-    assert_eq!(payouts + treasury.into(), 300_000_0000i128,
+    assert_eq!(payouts + treasury, 300_000_0000i128,
         "conservation invariant must hold for Precision indexed path");
 }
 
@@ -3333,7 +3328,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
     assert_eq!(payouts, 297_000_0000i128);
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 3_000_0000i128);
-    assert_eq!(payouts + treasury.into(), 300_000_0000i128,
+    assert_eq!(payouts + treasury, 300_000_0000i128,
         "conservation invariant must hold for Precision legacy path");
 }
 
@@ -3391,7 +3386,7 @@ fn test_protocol_fee_thin_losing_pool_updown() {
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 100_000_0000i128,
         "full fee still collected: 1 (from losing) + 99 (from winning spillover) = 100");
-    assert_eq!(payouts + treasury.into(), 1001_000_0000i128,
+    assert_eq!(payouts + treasury, 1001_000_0000i128,
         "conservation invariant holds even when losing_pool is thin");
 }
 
@@ -3400,7 +3395,7 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
     // Price-unchanged refunds must NOT deduct the fee from treasury even when
     // the fee is enabled. The user's stake is returned 100%; no fee events
     // are emitted on any refund path.
-    struct Case { up: bool; }
+    struct Case { up: bool, }
     let _cases = [Case { up: true }, Case { up: false }];
     let env = Env::default();
     let contract_id = env.register(VirtualTokenContract, ());

@@ -72,6 +72,7 @@ fn test_guard_passes_after_round_resolved() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert!(client.get_active_round().is_none());
@@ -159,3 +160,5 @@ fn test_guard_repeated_rejections_do_not_corrupt_state() {
     assert_eq!(round_after.price_start, original_round.price_start);
     assert_eq!(client.get_last_round_id(), 1);
 }
+
+

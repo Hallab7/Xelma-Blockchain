@@ -12,6 +12,16 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Runtime mode for the contract lifecycle
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RuntimeMode {
+    Normal = 0,
+    ClaimsOnly = 1,
+    FullyPaused = 2,
+}
+
 /// Lifecycle phase of an active round, derived from ledger windows.
 ///
 /// Semantics (given `start_ledger`, `bet_end_ledger`, `end_ledger`):
@@ -93,6 +103,11 @@ pub enum DataKey {
     /// One-shot admin override allowing the next settlement to bypass deviation checks.
     /// Automatically cleared after use.
     OracleDeviationOverrideArmed,
+    /// Minimum oracle confidence threshold in basis points (0–10000).
+    /// If unset, confidence guardrails are disabled.
+    OracleMinConfidenceBps,
+    /// When true, payloads with missing confidence are rejected in strict mode.
+    OracleStrictMode,
     /// Compact post-settlement summary keyed by round id for historical queries.
     ArchivedRound(u64),
     /// Ordered round ids for archive retention (oldest at index 0).
@@ -228,6 +243,10 @@ pub struct OraclePayload {
     /// Contract address this payload is intended for.
     /// Validated against `env.current_contract_address()` to prevent cross-contract replay.
     pub contract_addr: Address,
+    /// Optional confidence score from the price feed (0–10000 bps, where 10000 = 100%).
+    /// When `None`, the payload is treated as a legacy submission.
+    /// When strict mode is enabled, `None` is rejected.
+    pub confidence: Option<u32>,
 }
 
 /// Oracle liveness record, updated by the oracle service on each heartbeat call.
@@ -250,6 +269,30 @@ pub struct Round {
     pub pool_up: i128,       // Total vXLM bet on UP
     pub pool_down: i128,     // Total vXLM bet on DOWN
     pub mode: RoundMode,     // Round mode: UpDown (0) or Precision (1)
+}
+
+/// Aggregated active-round pool composition for frontend transparency.
+///
+/// Up/Down rounds populate the up/down pools, counts, and stake ratios.
+/// Precision rounds populate the precision totals and participant counters while
+/// leaving side-specific Up/Down fields at zero. Ratios are basis points of
+/// the mode's total visible stake (10_000 = 100%).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoundPoolStats {
+    pub round_id: u64,
+    pub mode: RoundMode,
+    pub total_up_stake: i128,
+    pub total_down_stake: i128,
+    pub up_participant_count: u32,
+    pub down_participant_count: u32,
+    pub up_stake_ratio_bps: u32,
+    pub down_stake_ratio_bps: u32,
+    pub precision_total_stake: i128,
+    pub precision_participant_count: u32,
+    pub precision_prediction_count: u32,
+    pub precision_commitment_count: u32,
+    pub precision_revealed_count: u32,
 }
 
 /// Terminal outcome recorded when a round leaves the active state.
@@ -350,4 +393,82 @@ pub struct OracleRotationProposal {
     pub new_oracle: Address,
     pub proposed_at: u64,
     pub expires_at: u64,
+}
+
+/// Global status of the protocol, returned by `get_protocol_status`.
+///
+/// Designed for frontend state machines that need a single, stable code
+/// instead of combining multiple boolean flags.
+///
+/// ## Status codes
+///
+/// | value | variant      | description                                                             |
+/// |-------|--------------|-------------------------------------------------------------------------|
+/// | 0     | `Active`     | Not paused; a round is currently active (bets open or running).          |
+/// | 1     | `Paused`     | Emergency-paused by the admin; no mutations accepted except unpause.     |
+/// | 2     | `ClaimsOnly` | Not paused; no active round. Only `claim_winnings` is meaningful.        |
+///
+/// ## Transition rules
+///
+/// - `ClaimsOnly` → `Active` when `create_round()` succeeds.
+/// - `Active` → `ClaimsOnly` when `resolve_round()` or `cancel_round()` completes.
+/// - Any state → `Paused` when `pause_contract()` is called.
+/// - `Paused` → `Active` when `unpause_contract()` is called *and* an active round still exists.
+/// - `Paused` → `ClaimsOnly` when `unpause_contract()` is called *and* no active round exists.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum ProtocolStatus {
+    /// The contract is not paused and has a currently active round.
+    Active = 0,
+    /// The contract is emergency-paused by the admin.
+    Paused = 1,
+    /// The contract is not paused, but no round is active.
+    /// Mutating actions are limited to claiming pending winnings.
+    ClaimsOnly = 2,
+}
+
+/// Status of a specific round, returned by `get_round_status(round_id)`.
+///
+/// Queries a round by its monotonic `round_id`. Covers all lifecycle
+/// stages from creation through terminal settlement.
+///
+/// ## Status codes
+///
+/// | value | variant          | description                                                                      |
+/// |-------|------------------|-----------------------------------------------------------------------------------|
+/// | 0     | `Unknown`        | Round does not exist or has been pruned from the on-chain archive.               |
+/// | 1     | `Betting`        | Round is active; bets and predictions accepted (`ledger < bet_end_ledger`).      |
+/// | 2     | `Running`        | Betting closed; reveal window open (`bet_end_ledger ≤ ledger < end_ledger`).    |
+/// | 3     | `AwaitingResolve`| Round ended; awaiting oracle settlement (`ledger ≥ end_ledger`).                |
+/// | 4     | `Resolved`       | Oracle settled the round; pot distributed to winners.                            |
+/// | 5     | `Cancelled`      | Admin cancelled the round; all stakes refunded.                                  |
+/// | 6     | `FallbackRefund` | Insufficient participants at settlement; all stakes refunded.                    |
+///
+/// ## Transition rules
+///
+/// - `Unknown` → `Betting` when `create_round()` succeeds.
+/// - `Betting` → `Running` when `ledger ≥ bet_end_ledger` (derived; no on-chain write).
+/// - `Running` → `AwaitingResolve` when `ledger ≥ end_ledger` (derived; no on-chain write).
+/// - `{Betting | Running | AwaitingResolve}` → `Cancelled` when `cancel_round()` is called.
+/// - `AwaitingResolve` → `Resolved` when `resolve_round()` settles with enough participants.
+/// - `AwaitingResolve` → `FallbackRefund` when `resolve_round()` finds fewer than `min_participants`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum RoundStatus {
+    /// Round does not exist or has been pruned from the on-chain archive.
+    Unknown = 0,
+    /// Round is active; bets and predictions accepted (`ledger < bet_end_ledger`).
+    Betting = 1,
+    /// Betting is closed; reveal window is open (`bet_end_ledger ≤ ledger < end_ledger`).
+    Running = 2,
+    /// Round has ended and is waiting for oracle settlement (`ledger ≥ end_ledger`).
+    AwaitingResolve = 3,
+    /// Oracle settled the round normally; pot distributed to winners.
+    Resolved = 4,
+    /// Admin cancelled the round; all stakes refunded.
+    Cancelled = 5,
+    /// Settlement triggered but insufficient participants; all stakes refunded.
+    FallbackRefund = 6,
 }
