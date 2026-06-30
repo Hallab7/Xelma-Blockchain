@@ -479,7 +479,7 @@ fn test_oracle_heartbeat_event_emitted() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("oracle"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("heartbeat"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("hbeat"))
     });
     assert!(
         hb_event.is_some(),
@@ -931,6 +931,9 @@ fn test_protocol_health_no_heartbeat_unknown_oracle() {
     client.initialize(&admin, &oracle);
 
     // No heartbeat recorded → oracle_status=3, oracle_live=false
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 1;
+    });
     let health = client.get_protocol_health();
     assert_eq!(health.oracle_status, 3); // unknown
     assert!(!health.oracle_live);
@@ -1026,7 +1029,7 @@ fn test_protocol_health_schema_version_present() {
     client.initialize(&admin, &oracle);
 
     let health = client.get_protocol_health();
-    assert_eq!(health.schema_version, 2);
+    assert_eq!(health.schema_version, 3);
 }
 
 #[test]
