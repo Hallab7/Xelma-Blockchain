@@ -37,6 +37,11 @@ const DEFAULT_RUN_WINDOW_LEDGERS: u32 = 12;
 const MAX_BET_WINDOW_LEDGERS: u32 = 1_440;
 const MAX_RUN_WINDOW_LEDGERS: u32 = 2_880;
 
+const ROUND_MODE_UPDOWN: u32 = 0;
+const ROUND_MODE_PRECISION: u32 = 1;
+const PAYOUT_OUTCOME_LOSS: u32 = 0;
+const PAYOUT_OUTCOME_WIN: u32 = 1;
+const PAYOUT_OUTCOME_REFUND: u32 = 2;
 // ─── Oracle deviation guardrails ─────────────────────────────────────────────
 /// Maximum allowed basis points for oracle deviation is bounded to avoid absurd configs.
 /// 100_000 bp = 1000% deviation (effectively "off", but still explicit).
@@ -261,7 +266,7 @@ impl VirtualTokenContract {
             return Err(ContractError::InvalidMode);
         }
 
-        let round_mode = if mode_value == 0 {
+        let round_mode = if mode_value == ROUND_MODE_UPDOWN {
             RoundMode::UpDown
         } else {
             RoundMode::Precision
@@ -1637,8 +1642,8 @@ impl VirtualTokenContract {
         // Topic: ("round", "resolved")
         // Payload: (round_id: u64, final_price: u128, mode: u32 where 0=UpDown, 1=Precision)
         let mode_value: u32 = match round.mode {
-            RoundMode::UpDown => 0,
-            RoundMode::Precision => 1,
+            RoundMode::UpDown => ROUND_MODE_UPDOWN,
+            RoundMode::Precision => ROUND_MODE_PRECISION,
         };
         #[allow(deprecated)]
         env.events().publish(
@@ -1762,6 +1767,14 @@ impl VirtualTokenContract {
                         position.amount,
                         UserOutcomeType::Refund,
                     );
+                    Self::_emit_payout_outcome(
+                        env,
+                        round_id,
+                        ROUND_MODE_UPDOWN,
+                        user,
+                        position.amount,
+                        PAYOUT_OUTCOME_REFUND,
+                    );
                 }
             }
         }
@@ -1782,6 +1795,21 @@ impl VirtualTokenContract {
         losing_pool: i128,
     ) -> Result<(), ContractError> {
         if winning_pool == 0 {
+            let keys: Vec<Address> = positions.keys();
+            for i in 0..keys.len() {
+                if let Some(user) = keys.get(i) {
+                    if positions.get(user.clone()).is_some() {
+                        Self::_emit_payout_outcome(
+                            env,
+                            round_id,
+                            ROUND_MODE_UPDOWN,
+                            user,
+                            0,
+                            PAYOUT_OUTCOME_LOSS,
+                        );
+                    }
+                }
+            }
             return Ok(());
         }
 
@@ -1817,6 +1845,14 @@ impl VirtualTokenContract {
                             payout,
                             UserOutcomeType::Win,
                         );
+                        Self::_emit_payout_outcome(
+                            env,
+                            round_id,
+                            ROUND_MODE_UPDOWN,
+                            user,
+                            payout,
+                            PAYOUT_OUTCOME_WIN,
+                        );
                     } else {
                         // Emit outcome loss event for UpDown loser (Issue #168).
                         // Topic: ("outcome", "loss")
@@ -1851,6 +1887,14 @@ impl VirtualTokenContract {
                             position.amount,
                             0,
                             UserOutcomeType::Loss,
+                        );
+                        Self::_emit_payout_outcome(
+                            env,
+                            round_id,
+                            ROUND_MODE_UPDOWN,
+                            user,
+                            0,
+                            PAYOUT_OUTCOME_LOSS,
                         );
                     }
                 }
@@ -2024,6 +2068,14 @@ impl VirtualTokenContract {
                         payout,
                         UserOutcomeType::Win,
                     );
+                    Self::_emit_payout_outcome(
+                        env,
+                        round_id,
+                        ROUND_MODE_PRECISION,
+                        winner.user,
+                        payout,
+                        PAYOUT_OUTCOME_WIN,
+                    );
                 }
             }
 
@@ -2082,6 +2134,14 @@ impl VirtualTokenContract {
                             stake,
                             0,
                             UserOutcomeType::Loss,
+                        );
+                        Self::_emit_payout_outcome(
+                            env,
+                            round_id,
+                            ROUND_MODE_PRECISION,
+                            user,
+                            0,
+                            PAYOUT_OUTCOME_LOSS,
                         );
                     }
                 }
@@ -2182,6 +2242,14 @@ impl VirtualTokenContract {
                         payout,
                         UserOutcomeType::Win,
                     );
+                    Self::_emit_payout_outcome(
+                        env,
+                        round_id,
+                        ROUND_MODE_PRECISION,
+                        winner.user,
+                        payout,
+                        PAYOUT_OUTCOME_WIN,
+                    );
                 }
             }
 
@@ -2216,6 +2284,14 @@ impl VirtualTokenContract {
                             pred.amount,
                             0,
                             UserOutcomeType::Loss,
+                        );
+                        Self::_emit_payout_outcome(
+                            env,
+                            round_id,
+                            ROUND_MODE_PRECISION,
+                            pred.user,
+                            0,
+                            PAYOUT_OUTCOME_LOSS,
                         );
                     }
                 }
@@ -2438,6 +2514,14 @@ impl VirtualTokenContract {
                         position.amount,
                         UserOutcomeType::Refund,
                     );
+                    Self::_emit_payout_outcome(
+                        env,
+                        round_id,
+                        ROUND_MODE_UPDOWN,
+                        user,
+                        position.amount,
+                        PAYOUT_OUTCOME_REFUND,
+                    );
                 }
             }
         }
@@ -2461,6 +2545,21 @@ impl VirtualTokenContract {
         losing_pool: i128,
     ) -> Result<(), ContractError> {
         if winning_pool == 0 {
+            for i in 0..participants.len() {
+                if let Some(user) = participants.get(i) {
+                    let pos_key = DataKey::Position(round_id, user.clone());
+                    if env.storage().persistent().has(&pos_key) {
+                        Self::_emit_payout_outcome(
+                            env,
+                            round_id,
+                            ROUND_MODE_UPDOWN,
+                            user,
+                            0,
+                            PAYOUT_OUTCOME_LOSS,
+                        );
+                    }
+                }
+            }
             return Ok(());
         }
 
@@ -2741,6 +2840,14 @@ impl VirtualTokenContract {
                                 pos.amount,
                                 UserOutcomeType::Refund,
                             );
+                            Self::_emit_payout_outcome(
+                                env,
+                                round_id,
+                                ROUND_MODE_UPDOWN,
+                                user,
+                                pos.amount,
+                                PAYOUT_OUTCOME_REFUND,
+                            );
                         }
                     }
                 }
@@ -2765,6 +2872,14 @@ impl VirtualTokenContract {
                                 pred.amount,
                                 pred.amount,
                                 UserOutcomeType::Refund,
+                            );
+                            Self::_emit_payout_outcome(
+                                env,
+                                round_id,
+                                ROUND_MODE_PRECISION,
+                                user,
+                                pred.amount,
+                                PAYOUT_OUTCOME_REFUND,
                             );
                         }
                     }
@@ -3010,6 +3125,21 @@ impl VirtualTokenContract {
     #[inline(always)]
     fn payout_mul(a: i128, b: i128) -> Result<i128, ContractError> {
         a.checked_mul(b).ok_or(ContractError::PayoutOverflow)
+    }
+
+    fn _emit_payout_outcome(
+        env: &Env,
+        round_id: u64,
+        mode: u32,
+        user: Address,
+        gross_payout: i128,
+        outcome_type: u32,
+    ) {
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("payout"), symbol_short!("outcome")),
+            (round_id, mode, user, gross_payout, outcome_type),
+        );
     }
 
     /// Accumulates `amount` into a user's pending winnings, enforcing the cap if set (Issue #120).
