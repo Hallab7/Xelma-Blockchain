@@ -32,6 +32,6 @@ pub use contract::VirtualTokenContract;
 pub use errors::ContractError;
 pub use types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    PendingConfigChange, PrecisionCommitment, PrecisionPrediction, ProtocolHealthStatus, Round,
-    RoundArchiveStatus, RoundMode, RoundPhase, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    OracleRotationProposal, PendingConfigChange, PrecisionCommitment, PrecisionPrediction,
+    ProtocolHealthStatus, Round, RoundArchiveStatus, UserPosition, UserStats,
 };

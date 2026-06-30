@@ -5,7 +5,7 @@ use soroban_sdk::contracterror;
 
 /// Contract error types
 #[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
     /// Contract has already been initialized
@@ -36,16 +36,14 @@ pub enum ContractError {
     WrongModeForPrediction = 15,
     /// Round has not reached end_ledger yet
     RoundNotEnded = 16,
-    /// Invalid price scale (must represent 4 decimal places)
-    InvalidPriceScale = 17,
+
     /// Oracle data is too old (STALE)
     StaleOracleData = 18,
     /// Oracle payload round_id doesn't match ActiveRound
     InvalidOracleRound = 19,
     /// An active round already exists and cannot be overwritten
     RoundAlreadyActive = 20,
-    /// Admin and Oracle addresses cannot be identical
-    AdminIsOracle = 21,
+
     /// Contract is paused for emergency recovery
     ContractPaused = 22,
     /// One or more window values exceed configured maximum bounds
@@ -62,10 +60,8 @@ pub enum ContractError {
     ExposureCapExceeded = 29,
     /// Pending winnings accumulation would exceed the configured cap
     PendingWinningsCapExceeded = 30,
-    /// Start price is below the minimum allowed value
-    StartPriceTooLow = 31,
-    /// Start price exceeds the maximum allowed value
-    StartPriceTooHigh = 32,
+    /// Start price is outside the allowed range
+    InvalidStartPrice = 31,
     /// Oracle payload nonce was already consumed for this round (replay)
     OracleNonceReused = 33,
     /// Minimum participants value is out of valid range (must be 1–10000)
@@ -84,8 +80,7 @@ pub enum ContractError {
     OracleDeviationExceeded = 41,
     /// Stored schema version is unknown or unsupported by this contract build
     UnsupportedSchemaVersion = 42,
-    /// Migration path is invalid for the stored schema version
-    InvalidMigrationPath = 43,
+
     /// Migration cannot run while a round is active
     MigrationActiveRound = 44,
     /// Commitment for precision prediction not found
@@ -102,10 +97,11 @@ pub enum ContractError {
     OracleContractMismatch = 50,
     /// Protocol fee bps is outside the allowed range (must be in `1..=MAX_PROTOCOL_FEE_BPS`)
     InvalidProtocolFeeBps = 51,
-    /// Treasury withdrawal would underflow the accumulated treasury balance
-    FeeTreasuryUnderflow = 52,
+
     /// Rate limit for minting in the current ledger has been exceeded
     MintLimitExceeded = 53,
-    /// Archive retention limit is outside the allowed range
-    InvalidArchiveRetention = 54,
+    /// No pending oracle rotation proposal to accept or cancel
+    NoPendingRotation = 54,
+    /// Pending oracle rotation proposal has expired; submit a fresh proposal
+    RotationExpired = 55,
 }
