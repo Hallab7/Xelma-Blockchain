@@ -1,22 +1,25 @@
+extern crate std;
 // SPDX-License-Identifier: MIT
 //! Simplified reference model for contract state used in invariant testing.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::string::{String, ToString};
+use std::vec::Vec;
 use soroban_sdk::Address;
 
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct ReferenceModel {
     /// Balances of each user (including pending winnings).
-    pub balances: HashMap<Address, i128>,
+    pub balances: BTreeMap<Address, i128>,
     /// Total pool amount for the current round.
     pub total_pool: i128,
     /// Pending winnings per user.
-    pub pending_winnings: HashMap<Address, i128>,
+    pub pending_winnings: BTreeMap<Address, i128>,
     /// Recorded outcomes for diagnostics.
     pub outcomes: Vec<bool>,
     // New fields for extended actions
     pub paused: bool,
-    pub config: HashMap<String, String>,
+    pub config: BTreeMap<String, String>,
 }
 
 impl ReferenceModel {
@@ -26,12 +29,12 @@ impl ReferenceModel {
     }
     /// Deposit tokens for a user.
     pub fn deposit(&mut self, user: &Address, amount: i128) {
-        *self.balances.entry(user.clone()).or_default() += amount;
+        *self.balances.entry(user.to_string().to_string()).or_default() += amount;
     }
 
     /// Withdraw tokens for a user (ensures non‑negative balance).
     pub fn withdraw(&mut self, user: &Address, amount: i128) {
-        let entry = self.balances.entry(user.clone()).or_default();
+        let entry = self.balances.entry(user.to_string().to_string()).or_default();
         *entry = entry.saturating_sub(amount);
     }
 
@@ -42,7 +45,7 @@ impl ReferenceModel {
     }
 
     /// Resolve a round. `winners` maps each winning user to the payout they should receive.
-    pub fn resolve(&mut self, winners: &HashMap<Address, i128>) {
+    pub fn resolve(&mut self, winners: &BTreeMap<Address, i128>) {
         for (user, payout) in winners {
             *self.pending_winnings.entry(user.clone()).or_default() += *payout;
             self.total_pool = self.total_pool.saturating_sub(*payout);
@@ -52,8 +55,8 @@ impl ReferenceModel {
 
     /// Claim pending winnings for a user (moves to balance).
     pub fn claim(&mut self, user: &Address) {
-        if let Some(w) = self.pending_winnings.remove(user) {
-            *self.balances.entry(user.clone()).or_default() += w;
+        if let Some(w) = self.pending_winnings.remove(&user.to_string().to_string()) {
+            *self.balances.entry(user.to_string().to_string()).or_default() += w;
         }
     }
 
@@ -99,3 +102,6 @@ impl ReferenceModel {
         violations
     }
 }
+
+
+
