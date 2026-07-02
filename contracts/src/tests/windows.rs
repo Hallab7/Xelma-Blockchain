@@ -456,7 +456,7 @@ fn test_create_round_rejects_zero_start_price() {
     client.initialize(&admin, &oracle);
 
     let result = client.try_create_round(&0u128, &None);
-    assert_eq!(result, Err(Ok(ContractError::StartPriceTooLow)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidStartPrice)));
 }
 
 #[test]
@@ -472,7 +472,7 @@ fn test_create_round_rejects_price_above_max() {
 
     // MAX_START_PRICE = 1_000_000_000_000_000_000; one above must fail
     let result = client.try_create_round(&1_000_000_000_000_000_001u128, &None);
-    assert_eq!(result, Err(Ok(ContractError::StartPriceTooHigh)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidStartPrice)));
 }
 
 #[test]

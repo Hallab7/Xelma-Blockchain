@@ -15,8 +15,14 @@
 #[cfg(test)]
 extern crate std;
 
+mod admin;
+mod betting;
+pub mod common;
+mod config;
 mod contract;
 mod errors;
+mod queries;
+mod settlement;
 mod types;
 
 #[cfg(test)]
@@ -26,6 +32,6 @@ pub use contract::VirtualTokenContract;
 pub use errors::ContractError;
 pub use types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    PendingConfigChange, PrecisionCommitment, PrecisionPrediction, ProtocolHealthStatus, Round,
-    RoundArchiveStatus, RoundMode, RoundPhase, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    OracleRotationProposal, PendingConfigChange, PrecisionCommitment, PrecisionPrediction,
+    ProtocolHealthStatus, Round, RoundArchiveStatus, UserPosition, UserStats,
 };
