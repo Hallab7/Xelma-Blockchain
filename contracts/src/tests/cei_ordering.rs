@@ -73,7 +73,7 @@ fn test_claim_winnings_cei_pending_cleared_after_claim() {
         round_id: round.start_ledger,
         nonce: 1,
         network_id: env.ledger().network_id(),
-        contract_addr: env.current_contract_address(),
+        contract_addr: client.address.clone(),
         confidence: None,
     };
     client.resolve_round(&payload);
