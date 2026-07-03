@@ -11,10 +11,10 @@ use crate::common::{
     _emit_action_rejected, balance, _set_balance,
     MIN_CAP_VALUE, MAX_MIN_PARTICIPANTS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
     MAX_PRECISION_PARTICIPANTS_LIMIT, MAX_BET_WINDOW_LEDGERS, MAX_RUN_WINDOW_LEDGERS,
-    MAX_ORACLE_DEVIATION_BPS, MAX_PROTOCOL_FEE_BPS, BPS_DENOMINATOR,
+    MAX_CLOSE_BUFFER_LEDGERS, MAX_ORACLE_DEVIATION_BPS, MAX_PROTOCOL_FEE_BPS, BPS_DENOMINATOR,
     DEFAULT_ORACLE_STALE_THRESHOLD, MIN_ORACLE_STALE_THRESHOLD, MAX_ORACLE_STALE_THRESHOLD,
     CONFIG_TIMELOCK_LEDGERS, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS,
-    DEFAULT_ARCHIVE_RETENTION, MIN_ARCHIVE_RETENTION, MAX_ARCHIVE_RETENTION,
+    DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_ARCHIVE_RETENTION, MIN_ARCHIVE_RETENTION, MAX_ARCHIVE_RETENTION,
 };
 use crate::admin::{_require_supported_schema, _ensure_not_paused, _ensure_normal_mode};
 
@@ -275,6 +275,48 @@ pub fn get_max_pending_winnings(env: Env) -> Option<i128> {
     env.storage().persistent().get(&key)
 }
 
+pub fn set_close_buffer_ledgers(env: Env, buffer_ledgers: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).map_err(|e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("closebuf"), e);
+        e
+    })?;
+
+    _validate_close_buffer_ledgers(buffer_ledgers)?;
+
+    let key = DataKey::CloseBufferLedgers;
+    let old_buffer: u32 = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS);
+    env.storage().persistent().set(&key, &buffer_ledgers);
+    _extend_persistent_ttl(&env, &key);
+
+    _emit_config_updated(
+        &env,
+        ConfigChangeKind::CloseBufferLedgers,
+        ConfigChangePayload::CloseBufferLedgers(old_buffer),
+        ConfigChangePayload::CloseBufferLedgers(buffer_ledgers),
+    );
+    Ok(())
+}
+
+pub fn get_close_buffer_ledgers(env: Env) -> u32 {
+    let key = DataKey::CloseBufferLedgers;
+    _extend_persistent_ttl(&env, &key);
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS)
+}
+
 pub fn set_min_participants(env: Env, min: Option<u32>) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     let admin: Address = env
@@ -475,6 +517,13 @@ pub fn _validate_windows(bet_ledgers: u32, run_ledgers: u32) -> Result<(), Contr
     Ok(())
 }
 
+pub fn _validate_close_buffer_ledgers(buffer_ledgers: u32) -> Result<(), ContractError> {
+    if buffer_ledgers > MAX_CLOSE_BUFFER_LEDGERS {
+        return Err(ContractError::WindowOutOfRange);
+    }
+    Ok(())
+}
+
 pub fn _validate_max_stake(max_amount: Option<i128>) -> Result<(), ContractError> {
     if let Some(v) = max_amount {
         if v < MIN_CAP_VALUE {
@@ -665,6 +714,12 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKey::ArchiveRetention)
                 .unwrap_or(DEFAULT_ARCHIVE_RETENTION),
         ),
+        ConfigChangeKind::CloseBufferLedgers => ConfigChangePayload::CloseBufferLedgers(
+            env.storage()
+                .persistent()
+                .get(&DataKey::CloseBufferLedgers)
+                .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
+        ),
     }
 }
 
@@ -749,6 +804,12 @@ pub fn _apply_config_payload(
             } else {
                 env.storage().persistent().remove(&key);
             }
+        }
+        (ConfigChangeKind::CloseBufferLedgers, ConfigChangePayload::CloseBufferLedgers(buffer)) => {
+            _validate_close_buffer_ledgers(*buffer)?;
+            let key = DataKey::CloseBufferLedgers;
+            env.storage().persistent().set(&key, buffer);
+            _extend_persistent_ttl(env, &key);
         }
         (
             ConfigChangeKind::MaxUserRoundExposure,

@@ -183,6 +183,59 @@ fn test_set_windows_does_not_mutate_state_on_validation_failure() {
 }
 
 #[test]
+fn test_set_close_buffer_ledgers_rejects_out_of_range() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    let result = client.try_set_close_buffer_ledgers(&(MAX_BET_WINDOW_LEDGERS + 1));
+    assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
+}
+
+#[test]
+fn test_close_buffer_rejects_bets_in_final_window() {
+    let env = Env::default();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 0;
+    });
+
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user_a);
+    client.mint_initial(&user_b);
+
+    apply_windows(&env, &client, 6, 12);
+    client.set_close_buffer_ledgers(&2);
+    client.create_round(&1_0000000, &None);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 3;
+    });
+    client.place_bet(&user_a, &50_0000000, &BetSide::Up);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 4;
+    });
+    let result = client.try_place_bet(&user_b, &50_0000000, &BetSide::Down);
+    assert_eq!(result, Err(Ok(ContractError::RoundEnded)));
+}
+
+#[test]
 fn test_create_round_uses_configured_windows() {
     let env = Env::default();
     env.ledger().with_mut(|li| {

@@ -69,6 +69,7 @@ pub enum DataKey {
     Paused,
     BetWindowLedgers,
     RunWindowLedgers,
+    CloseBufferLedgers,
     LastRoundId,
     /// Per-user UpDown position: (round_id, address) → UserPosition
     Position(u64, Address),
@@ -153,6 +154,7 @@ pub enum ConfigChangeKind {
     MaxPrecisionParticipants = 8,
     MintLimit = 9,
     ArchiveRetention = 10,
+    CloseBufferLedgers = 11,
 }
 
 /// Payload for a scheduled critical config change.
@@ -170,6 +172,7 @@ pub enum ConfigChangePayload {
     MaxPrecisionParticipants(u32),
     MintLimit(u32),
     ArchiveRetention(u32),
+    CloseBufferLedgers(u32),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.

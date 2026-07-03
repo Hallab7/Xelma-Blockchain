@@ -19,8 +19,10 @@ pub const MAX_ORACLE_STALE_THRESHOLD: u64 = 86_400; // 24 hours
 
 pub const DEFAULT_BET_WINDOW_LEDGERS: u32 = 6;
 pub const DEFAULT_RUN_WINDOW_LEDGERS: u32 = 12;
+pub const DEFAULT_CLOSE_BUFFER_LEDGERS: u32 = 0;
 pub const MAX_BET_WINDOW_LEDGERS: u32 = 1_440;
 pub const MAX_RUN_WINDOW_LEDGERS: u32 = 2_880;
+pub const MAX_CLOSE_BUFFER_LEDGERS: u32 = 1_440;
 
 // ─── Oracle deviation guardrails ─────────────────────────────────────────────
 pub const MAX_ORACLE_DEVIATION_BPS: u32 = 100_000;

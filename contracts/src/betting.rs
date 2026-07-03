@@ -177,7 +177,16 @@ pub fn place_bet(
     }
 
     let current_ledger = env.ledger().sequence();
-    if current_ledger >= round.bet_end_ledger {
+    let close_buffer_ledgers = env
+        .storage()
+        .persistent()
+        .get::<_, u32>(&DataKey::CloseBufferLedgers)
+        .unwrap_or(0);
+    let close_ledger = round
+        .bet_end_ledger
+        .checked_sub(close_buffer_ledgers)
+        .unwrap_or(0);
+    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
 
@@ -302,7 +311,16 @@ pub fn place_precision_prediction(
     }
 
     let current_ledger = env.ledger().sequence();
-    if current_ledger >= round.bet_end_ledger {
+    let close_buffer_ledgers = env
+        .storage()
+        .persistent()
+        .get::<_, u32>(&DataKey::CloseBufferLedgers)
+        .unwrap_or(0);
+    let close_ledger = round
+        .bet_end_ledger
+        .checked_sub(close_buffer_ledgers)
+        .unwrap_or(0);
+    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
 
@@ -414,7 +432,16 @@ pub fn commit_prediction(
     }
 
     let current_ledger = env.ledger().sequence();
-    if current_ledger >= round.bet_end_ledger {
+    let close_buffer_ledgers = env
+        .storage()
+        .persistent()
+        .get::<_, u32>(&DataKey::CloseBufferLedgers)
+        .unwrap_or(0);
+    let close_ledger = round
+        .bet_end_ledger
+        .checked_sub(close_buffer_ledgers)
+        .unwrap_or(0);
+    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
 
