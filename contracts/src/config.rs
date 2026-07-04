@@ -159,7 +159,7 @@ pub fn withdraw_protocol_fee(
     let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
     let new_treasury = current
         .checked_sub(amount)
-        .ok_or(ContractError::FeeTreasuryUnderflow)?;
+        .ok_or(ContractError::InsufficientBalance)?;
     env.storage().persistent().set(&treasury_key, &new_treasury);
     _extend_persistent_ttl(&env, &treasury_key);
 
@@ -518,7 +518,7 @@ pub fn _validate_max_stake(max_amount: Option<i128>) -> Result<(), ContractError
 
 pub fn _validate_oracle_stale_threshold(seconds: u64) -> Result<(), ContractError> {
     if !(MIN_ORACLE_STALE_THRESHOLD..=MAX_ORACLE_STALE_THRESHOLD).contains(&seconds) {
-        return Err(ContractError::InvalidStaleThreshold);
+        return Err(ContractError::InvalidDuration);
     }
     Ok(())
 }
@@ -526,7 +526,7 @@ pub fn _validate_oracle_stale_threshold(seconds: u64) -> Result<(), ContractErro
 pub fn _validate_oracle_max_deviation_bps(bps: Option<u32>) -> Result<(), ContractError> {
     if let Some(v) = bps {
         if v == 0 || v > MAX_ORACLE_DEVIATION_BPS {
-            return Err(ContractError::InvalidOracleDeviationBps);
+            return Err(ContractError::WindowOutOfRange);
         }
     }
     Ok(())

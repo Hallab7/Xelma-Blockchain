@@ -450,7 +450,7 @@ fn test_action_rejected_oracle_heartbeat_invalid_status() {
     });
 
     let result = client.try_update_oracle_heartbeat(&3u32);
-    assert_eq!(result, Err(Ok(ContractError::InvalidOracleStatus)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidMode)));
 
     // Note: event checks on client failure calls are omitted since Soroban SDK v20+ rolls back failed calls and discards events.
 }
@@ -578,10 +578,7 @@ fn test_action_rejected_set_max_precision_participants_invalid() {
     let (env, _, _, admin, client) = setup();
 
     let result = client.try_set_max_precision_participants(&0);
-    assert_eq!(
-        result,
-        Err(Ok(ContractError::InvalidPrecisionCap))
-    );
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrecisionCap)));
 
     assert_last_action_rejected(
         &env,

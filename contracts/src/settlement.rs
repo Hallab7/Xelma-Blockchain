@@ -230,9 +230,9 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
             &env,
             &oracle,
             symbol_short!("resolve"),
-            ContractError::OracleContractMismatch,
+            ContractError::OracleNetworkMismatch,
         );
-        return Err(ContractError::OracleContractMismatch);
+        return Err(ContractError::OracleNetworkMismatch);
     }
 
     // Verify data freshness (max 300 seconds / 5 minutes old)

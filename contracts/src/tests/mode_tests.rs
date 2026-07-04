@@ -937,10 +937,7 @@ fn test_custom_precision_participant_cap_boundary_and_over_cap() {
     client.place_precision_prediction(&user2, &100_0000000, &2298u128);
 
     let result = client.try_place_precision_prediction(&user3, &100_0000000, &2299u128);
-    assert_eq!(
-        result,
-        Err(Ok(ContractError::PrecisionCapExceeded))
-    );
+    assert_eq!(result, Err(Ok(ContractError::PrecisionCapExceeded)));
     assert_eq!(client.balance(&user3), 1000_0000000);
     assert!(client.get_user_precision_prediction(&user3).is_none());
 }
@@ -961,10 +958,7 @@ fn test_set_max_precision_participants_validation() {
     assert_eq!(zero, Err(Ok(ContractError::InvalidPrecisionCap)));
 
     let too_high = client.try_set_max_precision_participants(&10_001u32);
-    assert_eq!(
-        too_high,
-        Err(Ok(ContractError::InvalidPrecisionCap))
-    );
+    assert_eq!(too_high, Err(Ok(ContractError::InvalidPrecisionCap)));
 
     client.set_max_precision_participants(&3u32);
     assert_eq!(client.get_max_precision_participants(), 3u32);

@@ -371,7 +371,7 @@ fn test_oracle_heartbeat_invalid_status_rejected() {
     client.initialize(&admin, &oracle);
 
     let result = client.try_update_oracle_heartbeat(&3u32);
-    assert_eq!(result, Err(Ok(ContractError::InvalidOracleStatus)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidMode)));
 }
 
 #[test]
@@ -525,11 +525,11 @@ fn test_set_oracle_stale_threshold_validation() {
 
     // Below minimum (< 60)
     let result = client.try_set_oracle_stale_threshold(&59u64);
-    assert_eq!(result, Err(Ok(ContractError::InvalidStaleThreshold)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidDuration)));
 
     // Above maximum (> 86400)
     let result = client.try_set_oracle_stale_threshold(&86_401u64);
-    assert_eq!(result, Err(Ok(ContractError::InvalidStaleThreshold)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidDuration)));
 
     // Valid value
     apply_oracle_stale_threshold(&env, &client, 1800u64);
@@ -847,7 +847,7 @@ fn test_resolve_round_wrong_contract_addr_rejected() {
         contract_addr: wrong_contract,
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleContractMismatch)));
+    assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
 }
 
 #[test]

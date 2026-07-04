@@ -12,7 +12,7 @@ pub fn initialize(env: Env, admin: Address, oracle: Address) -> Result<(), Contr
     admin.require_auth();
 
     if admin == oracle {
-        return Err(ContractError::AdminIsOracle);
+        return Err(ContractError::OracleNetworkMismatch);
     }
 
     if env.storage().persistent().has(&DataKey::Admin) {
@@ -85,9 +85,9 @@ pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
             &env,
             &admin,
             symbol_short!("migrate"),
-            ContractError::InvalidMigrationPath,
+            ContractError::UnsupportedSchemaVersion,
         );
-        return Err(ContractError::InvalidMigrationPath);
+        return Err(ContractError::UnsupportedSchemaVersion);
     }
 
     let schema_key = DataKey::SchemaVersion;
@@ -135,9 +135,9 @@ pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
             &env,
             &admin,
             symbol_short!("migrate"),
-            ContractError::InvalidMigrationPath,
+            ContractError::UnsupportedSchemaVersion,
         );
-        return Err(ContractError::InvalidMigrationPath);
+        return Err(ContractError::UnsupportedSchemaVersion);
     }
 
     let schema_key = DataKey::SchemaVersion;
@@ -290,7 +290,7 @@ pub fn set_oracle_min_confidence_bps(env: Env, min_bps: Option<u32>) -> Result<(
     admin.require_auth();
     if let Some(bps) = min_bps {
         if bps > 10_000 {
-            return Err(ContractError::InvalidOracleDeviationBps);
+            return Err(ContractError::WindowOutOfRange);
         }
     }
     match min_bps {
@@ -352,10 +352,10 @@ pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractErro
                 &env,
                 &oracle,
                 symbol_short!("hbeat"),
-                ContractError::InvalidOracleStatus,
+                ContractError::InvalidMode,
             );
         }
-        return Err(ContractError::InvalidOracleStatus);
+        return Err(ContractError::InvalidMode);
     }
     _extend_persistent_ttl(&env, &DataKey::Oracle);
     let oracle: Address = env

@@ -16,10 +16,10 @@ use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec};
 pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     if start_price < MIN_START_PRICE {
-        return Err(ContractError::StartPriceTooLow);
+        return Err(ContractError::InvalidStartPrice);
     }
     if start_price > MAX_START_PRICE {
-        return Err(ContractError::StartPriceTooHigh);
+        return Err(ContractError::InvalidStartPrice);
     }
 
     // Default to Up/Down mode (0) if not specified
@@ -277,7 +277,7 @@ pub fn place_precision_prediction(
     }
 
     if predicted_price > 99_999_999 {
-        return Err(ContractError::InvalidPriceScale);
+        return Err(ContractError::InvalidPrice);
     }
 
     // Single read of the active round

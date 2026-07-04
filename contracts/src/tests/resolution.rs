@@ -12,7 +12,7 @@ use soroban_sdk::{
     testutils::{Address as _, Events, Ledger as _},
     Address, Env, Map, TryIntoVal, Vec,
 };
-use std::string::ToString;
+use std::string::{String, ToString};
 
 fn payout_outcome_events(env: &Env) -> std::vec::Vec<(u64, u32, Address, i128, u32)> {
     env.events()
@@ -108,6 +108,7 @@ fn test_resolve_round_price_unchanged() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Check pending winnings (not claimed yet)
@@ -212,6 +213,7 @@ fn test_resolve_round_price_went_up() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Check pending winnings
@@ -308,6 +310,7 @@ fn test_resolve_round_price_went_down() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Check pending winnings
@@ -407,6 +410,7 @@ fn test_resolve_round_without_active_round() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
     assert_eq!(result, Err(Ok(ContractError::NoActiveRound)));
 }
@@ -490,6 +494,7 @@ fn test_resolve_precision_closest_guess_wins() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Alice should win the entire pot (100 + 150 + 50 = 300)
@@ -585,6 +590,7 @@ fn test_resolve_precision_tie_splits_pot() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Total pot is 300, split evenly between Alice and Bob (150 each)
@@ -663,6 +669,7 @@ fn test_resolve_precision_exact_match() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(client.get_pending_winnings(&alice), 200_0000000); // Wins entire pot
@@ -696,6 +703,7 @@ fn test_resolve_precision_no_predictions() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Round should be cleared
@@ -772,6 +780,7 @@ fn test_resolve_precision_three_way_tie() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Total pot is 400, split 3 ways = 133.33... each
@@ -832,6 +841,7 @@ fn test_resolve_precision_single_prediction() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(client.get_pending_winnings(&alice), 100_0000000);
@@ -896,6 +906,7 @@ fn test_resolve_precision_large_differences() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(client.get_pending_winnings(&alice), 200_0000000);
@@ -973,6 +984,7 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Total pot: 100_0000000, Winner count: 3
@@ -1086,6 +1098,7 @@ fn test_precision_remainder_5way_tie() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Total pot: 103_0000000, Winner count: 5
@@ -1165,6 +1178,7 @@ fn test_precision_no_remainder() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Total pot: 100, Winner count: 2
@@ -1206,6 +1220,7 @@ fn test_round_resolved_event_emitted() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Verify resolved event was emitted
@@ -1254,6 +1269,9 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
         timestamp: env.ledger().timestamp(),
         round_id: 0,
         nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let outcomes = payout_outcome_events(&env);
@@ -1310,6 +1328,9 @@ fn test_unchanged_price_resolution_emits_refund_outcomes() {
         timestamp: env.ledger().timestamp(),
         round_id: 0,
         nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let outcomes = payout_outcome_events(&env);
@@ -1369,6 +1390,9 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
         timestamp: env.ledger().timestamp(),
         round_id: 0,
         nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let outcomes = payout_outcome_events(&env);
@@ -1456,6 +1480,7 @@ fn test_claim_winnings_event_emitted() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Claim winnings
@@ -1585,6 +1610,7 @@ fn test_precision_payout_deterministic_same_inputs() {
             nonce: 1u64,
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
+            confidence: None,
         });
 
         (
@@ -1666,6 +1692,7 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let alice_payout = client.get_pending_winnings(&alice);
@@ -1719,6 +1746,7 @@ fn test_min_participants_blocks_settlement_updown() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Stake refunded to pending winnings, not claimed yet
@@ -1760,6 +1788,7 @@ fn test_min_participants_allows_settlement_at_threshold() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(client.get_pending_winnings(&user1), 200_0000000);
@@ -1796,6 +1825,7 @@ fn test_min_participants_fallback_refunds_precision_mode() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Precision bet refunded
@@ -1831,6 +1861,7 @@ fn test_min_participants_fallback_event_emitted() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let events = env.events().all();
@@ -1904,6 +1935,7 @@ fn test_no_min_participants_threshold_resolves_normally() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Price went up but winning_pool (Up) = 100, losing_pool (Down) = 0 → payout = 100 + 0 = 100
@@ -1979,6 +2011,7 @@ fn test_precision_payout_conservation_large_tie_set() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let users = [u0, u1, u2, u3, u4, u5, u6, u7, u8, u9];
@@ -2057,6 +2090,7 @@ fn test_precision_commit_reveal_resolution_payout_with_unrevealed_participants()
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Total pot is 250 (Alice 100 + Bob 150)
@@ -2142,6 +2176,7 @@ fn test_precision_remainder_goes_to_lexicographically_lowest_winner() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Total pot = 200_0000001
@@ -2171,6 +2206,7 @@ fn resolve_active_round(
         nonce,
         network_id: env.ledger().network_id(),
         contract_addr: client.address.clone(),
+        confidence: None,
     });
     round_id
 }
@@ -2396,7 +2432,7 @@ fn count_outcome_loss_events(env: &Env) -> u32 {
 /// Helper: collects every decoded loss event payload for assertions.
 fn collect_outcome_loss_events(
     env: &Env,
-) -> Vec<(soroban_sdk::Address, u64, u32, i128, u32, u128)> {
+) -> std::vec::Vec<(soroban_sdk::Address, u64, u32, i128, u32, u128)> {
     env.events()
         .all()
         .iter()
@@ -2452,6 +2488,7 @@ fn test_outcome_loss_event_updown_indexed_path() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Two losers => exactly two loss events.
@@ -2463,21 +2500,20 @@ fn test_outcome_loss_event_updown_indexed_path() {
 
     let losses = collect_outcome_loss_events(&env);
     assert_eq!(losses.len(), 2);
-
-    for (_user, round_id, mode, _amount, _side, predicted_price) in &losses {
-        assert_eq!(*mode, 0u32, "UpDown loss events must carry mode=0");
-        assert_eq!(*round_id, 1u64);
+    for (_user, round_id, mode, _amount, _side, predicted_price) in losses.clone() {
+        assert_eq!(mode, 0u32, "UpDown loss events must carry mode=0");
+        assert_eq!(round_id, 1u64);
         assert_eq!(
-            *predicted_price, 0u128,
+            predicted_price, 0u128,
             "`predicted_price` is unused in UpDown mode"
         );
     }
 
     // Verify both losers are represented, each with their losing side.
-    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (i128, u32)> =
+    let mut by_addr: std::collections::HashMap<String, (i128, u32)> =
         std::collections::HashMap::new();
-    for (user, _round_id, _mode, amount, side, _price) in &losses {
-        by_addr.insert(user.to_string().to_string(), (*amount, *side));
+    for (user, _round_id, _mode, amount, side, _price) in losses.clone() {
+        by_addr.insert(user.to_string().to_string(), (amount, side));
     }
     assert_eq!(
         by_addr[&charlie.to_string().to_string()],
@@ -2553,6 +2589,7 @@ fn test_outcome_loss_event_updown_legacy_path() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // One loser (bob) => exactly one loss event.
@@ -2560,13 +2597,13 @@ fn test_outcome_loss_event_updown_legacy_path() {
 
     let losses = collect_outcome_loss_events(&env);
     assert_eq!(losses.len(), 1);
-    let (user, round_id, mode, amount, side, predicted_price) = losses.get(0).unwrap();
-    assert_eq!(*user, bob);
-    assert_eq!(*round_id, 1u64);
-    assert_eq!(*mode, 0u32);
-    assert_eq!(*amount, 50_0000000i128);
-    assert_eq!(*side, 1u32, "Bob bet Down → losing side is Down (1)");
-    assert_eq!(*predicted_price, 0u128);
+    let (user, round_id, mode, amount, side, predicted_price) = losses[0].clone();
+    assert_eq!(user, bob);
+    assert_eq!(round_id, 1u64);
+    assert_eq!(mode, 0u32);
+    assert_eq!(amount, 50_0000000i128);
+    assert_eq!(side, 1u32, "Bob bet Down → losing side is Down (1)");
+    assert_eq!(predicted_price, 0u128);
 }
 
 #[test]
@@ -2615,6 +2652,7 @@ fn test_outcome_loss_event_precision_indexed_path() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Two losers => two loss events (includes the unrevealed-commitment loser).
@@ -2626,17 +2664,16 @@ fn test_outcome_loss_event_precision_indexed_path() {
 
     let losses = collect_outcome_loss_events(&env);
     assert_eq!(losses.len(), 2);
-
-    for (_user, round_id, mode, _amount, side, _predicted_price) in &losses {
-        assert_eq!(*round_id, 1u64);
-        assert_eq!(*mode, 1u32, "Precision loss events must carry mode=1");
-        assert_eq!(*side, 0u32, "`side` is unused in Precision mode");
+    for (_user, round_id, mode, _amount, side, _predicted_price) in losses.clone() {
+        assert_eq!(round_id, 1u64);
+        assert_eq!(mode, 1u32, "Precision loss events must carry mode=1");
+        assert_eq!(side, 0u32, "`side` is unused in Precision mode");
     }
 
-    let mut by_addr: std::collections::HashMap<soroban_sdk::String, (i128, u128)> =
+    let mut by_addr: std::collections::HashMap<String, (i128, u128)> =
         std::collections::HashMap::new();
-    for (user, _, _, amount, _, price) in &losses {
-        by_addr.insert(user.to_string().to_string(), (*amount, *price));
+    for (user, _, _, amount, _, price) in losses.clone() {
+        by_addr.insert(user.to_string().to_string(), (amount, price));
     }
     // Bob revealed 2500.
     assert_eq!(
@@ -2715,15 +2752,15 @@ fn test_outcome_loss_event_precision_legacy_path() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // 2 losers => 2 loss events.
     assert_eq!(count_outcome_loss_events(&env), 2);
-    let losses: std::collections::HashMap<soroban_sdk::String, (i128, u128)> =
-        collect_outcome_loss_events(&env)
-            .iter()
-            .map(|(u, _, _, amount, _, price)| (u.to_string().to_string(), (*amount, *price)))
-            .collect();
+    let losses: std::collections::HashMap<String, (i128, u128)> = collect_outcome_loss_events(&env)
+        .iter()
+        .map(|(u, _, _, amount, _, price)| (u.to_string().to_string(), (*amount, *price)))
+        .collect();
     assert_eq!(
         losses.len(),
         2,
@@ -2808,6 +2845,7 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(
@@ -2845,6 +2883,7 @@ fn test_outcome_loss_event_not_emitted_on_min_participants_fallback() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Fallback refunds the user; no loss event should be emitted.
@@ -2920,6 +2959,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let updown_count = count_outcome_loss_events(&env);
@@ -2945,6 +2985,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
         nonce: 2u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let total_after_precision = count_outcome_loss_events(&env);
@@ -2956,8 +2997,8 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
 
     // Sanity: winner (u_a, who won the Precision round) never gets a loss event.
     let losses = collect_outcome_loss_events(&env);
-    for (user, _, _, _, _, _) in &losses {
-        assert_ne!(user, &u_a, "winners must never emit loss events");
+    for (user, _, _, _, _, _) in losses.clone() {
+        assert_ne!(user, u_a, "winners must never emit loss events");
     }
 
     // Ordering invariant: in this fixture the UpDown round was resolved
@@ -2966,17 +3007,17 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
     // This guards against accidental batched-replay re-orderings pooling
     // loss events across rounds.
     let mut first_precision_idx = None::<u32>;
-    for (idx, (_user, _round_id, mode, _, _, _)) in losses.iter().enumerate() {
-        if *mode == 1u32 && first_precision_idx.is_none() {
+    for (idx, (_user, _round_id, mode, _, _, _)) in losses.clone().into_iter().enumerate() {
+        if mode == 1u32 && first_precision_idx.is_none() {
             first_precision_idx = Some(idx as u32);
         }
     }
     if let Some(idx) = first_precision_idx {
         // UpDown losses (mode=0) must all be ordered before the first Precision (mode=1) loss event.
-        for (other_idx, (_, _, mode, _, _, _)) in losses.iter().enumerate() {
+        for (other_idx, (_, _, mode, _, _, _)) in losses.clone().into_iter().enumerate() {
             if (other_idx as u32) < idx {
                 assert_eq!(
-                    *mode, 0u32,
+                    mode, 0u32,
                     "UpDown loss event must appear before any Precision loss event",
                 );
             }
@@ -3221,7 +3262,7 @@ fn test_get_user_archived_participation_min_participants_refund() {
 // The 10% hard cap is enforced at schedule time; timelock semantics tested
 // in `config_timelock.rs::test_protocol_fee_timelock_*`.
 
-fn collect_protocol_fee_events(env: &Env) -> Vec<(u64, i128, i128, u32)> {
+fn collect_protocol_fee_events(env: &Env) -> std::vec::Vec<(u64, i128, i128, u32)> {
     env.events()
         .all()
         .iter()
@@ -3301,6 +3342,7 @@ fn test_protocol_fee_disabled_default_is_no_behaviour_change() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Pre-#162 UpDown formula: payout_alice = 100 + 100 * 50 / 100 = 150 stroops.
@@ -3353,6 +3395,7 @@ fn test_protocol_fee_updown_indexed_conservation() {
         nonce: 2u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // total_pot = 150; fee = floor(150 * 200 / 10_000) = 3.
@@ -3381,10 +3424,10 @@ fn test_protocol_fee_updown_indexed_conservation() {
     // One round -> one fee_collected event.
     assert_eq!(count_protocol_fee_events(&env), 1);
     let events = collect_protocol_fee_events(&env);
-    let (round_id, fee, _treasury_after, bps) = events.get(0).unwrap();
-    assert_eq!(*round_id, 2u64);
-    assert_eq!(*fee, 3_000_0000i128);
-    assert_eq!(*bps, 200u32);
+    let (round_id, fee, _treasury_after, bps) = events[0];
+    assert_eq!(round_id, 2u64);
+    assert_eq!(fee, 3_000_0000i128);
+    assert_eq!(bps, 200u32);
 }
 
 #[test]
@@ -3452,6 +3495,7 @@ fn test_protocol_fee_updown_legacy_conservation() {
         nonce: 3u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // total_pot = 150; fee = floor(150 * 500 / 10_000) = 7.
@@ -3500,6 +3544,7 @@ fn test_protocol_fee_precision_indexed_conservation() {
         nonce: 4u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // total_pot = 100 + 150 + 50 = 300. fee = 300 * 1000 / 10_000 = 30.
@@ -3579,6 +3624,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
         nonce: 5u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // total_pot = 300; fee = 300 * 100 / 10_000 = 3.
@@ -3636,6 +3682,7 @@ fn test_protocol_fee_thin_losing_pool_updown() {
         nonce: 6u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
@@ -3725,6 +3772,7 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
         nonce: 7u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     // Refund: no fee event, treasury still 0.
@@ -3807,6 +3855,7 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
         nonce: 9u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     assert_eq!(
@@ -3861,6 +3910,7 @@ fn test_protocol_fee_withdrawal_to_recipient() {
         nonce: 8u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
     // total_pot = 150; fee = 15; distributable_losing = 35.
     // payout = 100 + 100 * 35 / 100 = 135.
