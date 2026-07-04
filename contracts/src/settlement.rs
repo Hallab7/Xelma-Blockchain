@@ -503,8 +503,11 @@ pub fn _resolve_updown_mode(
     let price_went_down = final_price < round.price_start;
     let price_unchanged = final_price == round.price_start;
 
-    let is_one_sided = (price_went_up && round.pool_down == 0 && round.pool_up > 0)
-        || (price_went_down && round.pool_up == 0 && round.pool_down > 0);
+    // One-sided: exactly one pool is empty (XOR).  Regardless of which way
+    // price moved, if the winning-side pool is 0 there are no winners to pay,
+    // and if the losing-side pool is 0 there is nothing to distribute — in
+    // both cases every participant gets a full refund.
+    let is_one_sided = (round.pool_up == 0) != (round.pool_down == 0);
 
     if !participants.is_empty() {
         if price_unchanged || is_one_sided {
@@ -605,17 +608,19 @@ pub fn _record_winnings_legacy(
         return Ok(());
     }
 
-    let (winning_pool, losing_pool, _fee_amount) =
+    let original_winning_pool = winning_pool;
+    let (dist_winning, dist_losing, _fee_amount) =
         _apply_protocol_fee_updown(env, round_id, winning_pool, losing_pool)?;
+    // Proportional share of ALL distributable funds (handles fee spillover from winning pool).
+    let total_distributable = payout_add(dist_winning, dist_losing)?;
 
     let keys: Vec<Address> = positions.keys();
     for i in 0..keys.len() {
         if let Some(user) = keys.get(i) {
             if let Some(position) = positions.get(user.clone()) {
                 if position.side == winning_side {
-                    let share_numerator = payout_mul(position.amount, losing_pool)?;
-                    let share = share_numerator / winning_pool;
-                    let payout = payout_add(position.amount, share)?;
+                    let payout =
+                        payout_mul(position.amount, total_distributable)? / original_winning_pool;
 
                     _accumulate_pending(env, user.clone(), payout)?;
                     _update_stats_win(env, user.clone())?;
@@ -1002,17 +1007,19 @@ pub fn _record_winnings_indexed(
         return Ok(());
     }
 
-    let (winning_pool, losing_pool, _fee_amount) =
+    let original_winning_pool = winning_pool;
+    let (dist_winning, dist_losing, _fee_amount) =
         _apply_protocol_fee_updown(env, round_id, winning_pool, losing_pool)?;
+    // Proportional share of ALL distributable funds (handles fee spillover from winning pool).
+    let total_distributable = payout_add(dist_winning, dist_losing)?;
 
     for i in 0..participants.len() {
         if let Some(user) = participants.get(i) {
             let pos_key = DataKey::Position(round_id, user.clone());
             if let Some(position) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
                 if position.side == winning_side {
-                    let share_numerator = payout_mul(position.amount, losing_pool)?;
-                    let share = share_numerator / winning_pool;
-                    let payout = payout_add(position.amount, share)?;
+                    let payout =
+                        payout_mul(position.amount, total_distributable)? / original_winning_pool;
 
                     _accumulate_pending(env, user.clone(), payout)?;
                     _update_stats_win(env, user.clone())?;

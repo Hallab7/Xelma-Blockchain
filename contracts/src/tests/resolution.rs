@@ -3518,10 +3518,19 @@ fn test_protocol_fee_updown_indexed_conservation() {
         confidence: None,
     });
 
-    // total_pot = 150; fee = floor(150 * 200 / 10_000) = 3.
+    // total_pot = 150; fee = floor(150_000_0000 * 200 / 10_000) = 3_000_0000.
     // fee_from_losing = min(3, 50) = 3; fee_from_winning = 0.
-    // distributable_winning = 100, distributable_losing = 47.
-    // alice payout = 100 + 100 * 47 / 100 = 147.
+    // distributable_winning = 100_000_0000, distributable_losing = 47_000_0000.
+    // alice payout = 100_000_0000 * (100+47)_000_0000 / 100_000_0000 = 147_000_0000.
+
+    // Check fee event immediately after resolve_round (before client calls may reset event log).
+    assert_eq!(count_protocol_fee_events(&env), 1);
+    let events = collect_protocol_fee_events(&env);
+    let (ev_round_id, fee, _treasury_after, bps) = events[0];
+    assert_eq!(ev_round_id, 1u64); // round_id = 1 (first round created)
+    assert_eq!(fee, 3_000_0000i128);
+    assert_eq!(bps, 200u32);
+
     let payouts = sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]);
     assert_eq!(
         payouts, 147_000_0000i128,
@@ -3540,14 +3549,6 @@ fn test_protocol_fee_updown_indexed_conservation() {
         total_pot,
         "conservation: payouts + treasury must equal total_pot"
     );
-
-    // One round -> one fee_collected event.
-    assert_eq!(count_protocol_fee_events(&env), 1);
-    let events = collect_protocol_fee_events(&env);
-    let (round_id, fee, _treasury_after, bps) = events[0];
-    assert_eq!(round_id, 2u64);
-    assert_eq!(fee, 3_000_0000i128);
-    assert_eq!(bps, 200u32);
 }
 
 #[test]
@@ -3621,13 +3622,13 @@ fn test_protocol_fee_updown_legacy_conservation() {
         confidence: None,
     });
 
-    // total_pot = 150; fee = floor(150 * 500 / 10_000) = 7.
-    // distributable_winning = 100, distributable_losing = 43.
-    // alice payout = 100 + 100 * 43 / 100 = 143.
+    // total_pot = 150; fee = floor(150_000_0000 * 500 / 10_000) = 7_500_0000 (7.5 tokens).
+    // distributable_winning = 100_000_0000, distributable_losing = 42_500_0000.
+    // alice payout = 100_000_0000 * (100_000_0000 + 42_500_0000) / 100_000_0000 = 142_500_0000.
     let payouts = sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]);
-    assert_eq!(payouts, 143_000_0000i128);
+    assert_eq!(payouts, 142_500_0000i128);
     let treasury = client.get_protocol_fee_treasury();
-    assert_eq!(treasury, 7_000_0000i128);
+    assert_eq!(treasury, 7_500_0000i128);
     // Conservation.
     assert_eq!(payouts + treasury, 150_000_0000i128);
 }
@@ -3825,21 +3826,25 @@ fn test_protocol_fee_thin_losing_pool_updown() {
         confidence: None,
     });
 
+    // winning_pool = 1000_000_0000, losing_pool = 1_000_0000.
+    // total_pot = 10_010_000_000; fee = 10_010_000_000 * 1000 / 10_000 = 1_001_000_000.
+    // fee_from_losing = min(1_001_000_000, 10_000_000) = 10_000_000.
+    // fee_from_winning = 991_000_000; dist_winning = 9_009_000_000; dist_losing = 0.
+    // alice payout = 10_000_000_000 * 9_009_000_000 / 10_000_000_000 = 9_009_000_000.
+    // Conservation: 9_009_000_000 + 1_001_000_000 = 10_010_000_000.
     let payouts = sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]);
-    // alice gets her principal minus the spillover (= 1000 - 99 = 901)
-    // (since distributable_losing = 0, the share numerator is 0; payout = amount).
     assert_eq!(
-        payouts, 1000_000_0000i128,
-        "loser has 0 distributable_losing so winners only get principal back"
+        payouts, 9_009_000_000i128,
+        "winner payout reduced by winning-pool spillover"
     );
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(
-        treasury, 100_000_0000i128,
-        "full fee still collected: 1 (from losing) + 99 (from winning spillover) = 100"
+        treasury, 1_001_000_000i128,
+        "full fee still collected: 10_000_000 (from losing) + 991_000_000 (from winning spillover)"
     );
     assert_eq!(
         payouts + treasury,
-        1001_000_0000i128,
+        10_010_000_000i128,
         "conservation invariant holds even when losing_pool is thin"
     );
 }
@@ -4082,7 +4087,8 @@ fn test_protocol_fee_schedule_validation_rejects_zero_and_over_cap() {
     let r0 = client.try_schedule_protocol_fee_bps(&Some(0u32));
     assert!(r0.is_err(), "Some(0) is not a valid bps value");
     run_to_activation(&env);
-    client.cancel_config_change(&crate::types::ConfigChangeKind::ProtocolFeeBps);
+    // No pending change (schedule failed), so cancel is a no-op; use try variant.
+    let _ = client.try_cancel_config_change(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     // Over cap rejected.
     let r_max = client.try_schedule_protocol_fee_bps(&Some(1_001u32));
@@ -4091,7 +4097,8 @@ fn test_protocol_fee_schedule_validation_rejects_zero_and_over_cap() {
         "1_001 bps exceeds MAX_PROTOCOL_FEE_BPS=1000"
     );
     run_to_activation(&env);
-    client.cancel_config_change(&crate::types::ConfigChangeKind::ProtocolFeeBps);
+    // Same: no pending change, discard error.
+    let _ = client.try_cancel_config_change(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     // Cap (1_000) accepted.
     let r_top = client.try_schedule_protocol_fee_bps(&Some(1_000u32));

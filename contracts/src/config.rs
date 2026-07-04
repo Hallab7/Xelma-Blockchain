@@ -227,10 +227,11 @@ pub fn cancel_config_change(env: Env, kind: ConfigChangeKind) -> Result<(), Cont
     })?;
 
     let key = DataKey::PendingConfigChange(kind.clone());
-    let pending: PendingConfigChange = match env.storage().persistent().get(&key) {
-        Some(p) => p,
-        None => return Ok(()),
-    };
+    let pending: PendingConfigChange = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(ContractError::CommitmentNotFound)?;
 
     if env.ledger().sequence() >= pending.activation_ledger {
         _emit_action_rejected(
