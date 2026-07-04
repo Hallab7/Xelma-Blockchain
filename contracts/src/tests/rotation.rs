@@ -246,6 +246,7 @@ fn test_accept_after_expiry_emits_expired_event() {
     });
 
     let _ = client.try_accept_oracle_rotation();
+    let _ = client.get_oracle_rotation_proposal();
 
     let events = env.events().all();
     assert!(

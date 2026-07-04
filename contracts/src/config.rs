@@ -157,6 +157,9 @@ pub fn withdraw_protocol_fee(
 
     let treasury_key = DataKey::ProtocolFeeTreasury;
     let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
+    if amount > current {
+        return Err(ContractError::InsufficientBalance);
+    }
     let new_treasury = current
         .checked_sub(amount)
         .ok_or(ContractError::InsufficientBalance)?;
@@ -224,11 +227,14 @@ pub fn cancel_config_change(env: Env, kind: ConfigChangeKind) -> Result<(), Cont
     })?;
 
     let key = DataKey::PendingConfigChange(kind.clone());
-    let pending: PendingConfigChange = env
+    let pending: PendingConfigChange = match env
         .storage()
         .persistent()
         .get(&key)
-        .ok_or(ContractError::CommitmentNotFound)?;
+    {
+        Some(p) => p,
+        None => return Ok(()),
+    };
 
     if env.ledger().sequence() >= pending.activation_ledger {
         _emit_action_rejected(

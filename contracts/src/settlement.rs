@@ -1226,8 +1226,8 @@ pub fn _persist_user_outcome(
     _extend_persistent_ttl(env, &key);
 
     let outcome_type_u32 = match outcome {
-        UserOutcomeType::Win => 0u32,
-        UserOutcomeType::Loss => 1u32,
+        UserOutcomeType::Win => 1u32,
+        UserOutcomeType::Loss => 0u32,
         UserOutcomeType::Refund => 2u32,
         UserOutcomeType::Cancel => 3u32,
     };

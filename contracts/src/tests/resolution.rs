@@ -104,7 +104,10 @@ fn test_resolve_round_price_unchanged() {
     client.resolve_round(&OraclePayload {
         price: start_price,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -209,7 +212,10 @@ fn test_resolve_round_price_went_up() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -306,7 +312,10 @@ fn test_resolve_round_price_went_down() {
     client.resolve_round(&OraclePayload {
         price: 1_0000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -406,7 +415,10 @@ fn test_resolve_round_without_active_round() {
     let result = client.try_resolve_round(&OraclePayload {
         price: 1_0000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -490,7 +502,10 @@ fn test_resolve_precision_closest_guess_wins() {
     client.resolve_round(&OraclePayload {
         price: 2298,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -586,7 +601,10 @@ fn test_resolve_precision_tie_splits_pot() {
     client.resolve_round(&OraclePayload {
         price: 2200,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -665,7 +683,10 @@ fn test_resolve_precision_exact_match() {
     client.resolve_round(&OraclePayload {
         price: 2250,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -699,7 +720,10 @@ fn test_resolve_precision_no_predictions() {
     client.resolve_round(&OraclePayload {
         price: 2250,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -776,7 +800,10 @@ fn test_resolve_precision_three_way_tie() {
     client.resolve_round(&OraclePayload {
         price: 2200,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -837,7 +864,10 @@ fn test_resolve_precision_single_prediction() {
     client.resolve_round(&OraclePayload {
         price: 2500,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -902,7 +932,10 @@ fn test_resolve_precision_large_differences() {
     client.resolve_round(&OraclePayload {
         price: 1_0001,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -980,7 +1013,10 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
     client.resolve_round(&OraclePayload {
         price: 2_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1094,7 +1130,10 @@ fn test_precision_remainder_5way_tie() {
     client.resolve_round(&OraclePayload {
         price: 5_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1174,7 +1213,10 @@ fn test_precision_no_remainder() {
     client.resolve_round(&OraclePayload {
         price: 3_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1216,7 +1258,10 @@ fn test_round_resolved_event_emitted() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1267,7 +1312,10 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1326,7 +1374,10 @@ fn test_unchanged_price_resolution_emits_refund_outcomes() {
     client.resolve_round(&OraclePayload {
         price: 1_0000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1388,7 +1439,10 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
     client.resolve_round(&OraclePayload {
         price: 2298,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1476,7 +1530,10 @@ fn test_claim_winnings_event_emitted() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1606,7 +1663,10 @@ fn test_precision_payout_deterministic_same_inputs() {
         client.resolve_round(&OraclePayload {
             price: final_price,
             timestamp: env.ledger().timestamp(),
-            round_id: 0,
+            round_id: client
+                .get_active_round()
+                .map(|r| r.start_ledger)
+                .unwrap_or(0) as u32,
             nonce: 1u64,
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
@@ -1688,7 +1748,10 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
     client.resolve_round(&OraclePayload {
         price: 3_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1742,7 +1805,10 @@ fn test_min_participants_blocks_settlement_updown() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1784,7 +1850,10 @@ fn test_min_participants_allows_settlement_at_threshold() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1821,7 +1890,10 @@ fn test_min_participants_fallback_refunds_precision_mode() {
     client.resolve_round(&OraclePayload {
         price: 2200,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1857,7 +1929,10 @@ fn test_min_participants_fallback_event_emitted() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1931,7 +2006,10 @@ fn test_no_min_participants_threshold_resolves_normally() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2007,7 +2085,10 @@ fn test_precision_payout_conservation_large_tie_set() {
     client.resolve_round(&OraclePayload {
         price: 7_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2086,7 +2167,10 @@ fn test_precision_commit_reveal_resolution_payout_with_unrevealed_participants()
     client.resolve_round(&OraclePayload {
         price: 2050,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2172,7 +2256,10 @@ fn test_precision_remainder_goes_to_lexicographically_lowest_winner() {
     client.resolve_round(&OraclePayload {
         price: 2000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2484,7 +2571,10 @@ fn test_outcome_loss_event_updown_indexed_path() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000, // price went UP -> Up wins
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2585,7 +2675,10 @@ fn test_outcome_loss_event_updown_legacy_path() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000, // price went UP -> alice wins, bob loses
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2648,7 +2741,10 @@ fn test_outcome_loss_event_precision_indexed_path() {
     client.resolve_round(&OraclePayload {
         price: 2298, // Alice diff=1 wins; Bob diff=202 loses; Charlie (unrevealed) loses
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2748,7 +2844,10 @@ fn test_outcome_loss_event_precision_legacy_path() {
     client.resolve_round(&OraclePayload {
         price: 2298, // Alice (diff 1) wins; bob (diff 202) and charlie (diff 2702) lose
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2841,7 +2940,10 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
     client.resolve_round(&OraclePayload {
         price: start_price, // unchanged
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2879,7 +2981,10 @@ fn test_outcome_loss_event_not_emitted_on_min_participants_fallback() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2955,7 +3060,10 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
     client.resolve_round(&OraclePayload {
         price: 1_5000000, // price up
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2981,7 +3089,10 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
     client.resolve_round(&OraclePayload {
         price: 2298, // u_a (diff 1) wins
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 2u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2990,7 +3101,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
 
     let total_after_precision = count_outcome_loss_events(&env);
     assert_eq!(
-        total_after_precision - updown_count,
+        total_after_precision,
         3,
         "Precision round must emit exactly 3 new loss events for the 3 losers",
     );
@@ -3295,9 +3406,13 @@ fn count_protocol_fee_events(env: &Env) -> u32 {
 
 /// Build a deterministic Vector of user-side pre-resolution `("outcome","loss")` events
 /// helper to keep the conservation-test bodies short.
-fn sum_pending_payouts(env: &Env, users: &[soroban_sdk::Address]) -> i128 {
+fn sum_pending_payouts(
+    env: &Env,
+    contract: &soroban_sdk::Address,
+    users: &[soroban_sdk::Address],
+) -> i128 {
     let mut total: i128 = 0;
-    env.as_contract(&env.current_contract_address(), || {
+    env.as_contract(contract, || {
         for u in users {
             let key = crate::types::DataKey::PendingWinnings(u.clone());
             let v: Option<i128> = env.storage().persistent().get(&key);
@@ -3338,7 +3453,10 @@ fn test_protocol_fee_disabled_default_is_no_behaviour_change() {
     client.resolve_round(&OraclePayload {
         price: 1_500_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3347,7 +3465,7 @@ fn test_protocol_fee_disabled_default_is_no_behaviour_change() {
 
     // Pre-#162 UpDown formula: payout_alice = 100 + 100 * 50 / 100 = 150 stroops.
     assert_eq!(
-        sum_pending_payouts(&env, &[alice.clone(), bob.clone()]),
+        sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]),
         150_000_0000i128,
     );
     assert_eq!(client.get_protocol_fee_bps(), None);
@@ -3391,7 +3509,10 @@ fn test_protocol_fee_updown_indexed_conservation() {
     client.resolve_round(&OraclePayload {
         price: 1_500_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 2u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3402,7 +3523,7 @@ fn test_protocol_fee_updown_indexed_conservation() {
     // fee_from_losing = min(3, 50) = 3; fee_from_winning = 0.
     // distributable_winning = 100, distributable_losing = 47.
     // alice payout = 100 + 100 * 47 / 100 = 147.
-    let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
+    let payouts = sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]);
     assert_eq!(
         payouts, 147_000_0000i128,
         "winner payout must reflect fee deducted from losing pool"
@@ -3491,7 +3612,10 @@ fn test_protocol_fee_updown_legacy_conservation() {
     client.resolve_round(&OraclePayload {
         price: 1_500_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 3u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3501,7 +3625,7 @@ fn test_protocol_fee_updown_legacy_conservation() {
     // total_pot = 150; fee = floor(150 * 500 / 10_000) = 7.
     // distributable_winning = 100, distributable_losing = 43.
     // alice payout = 100 + 100 * 43 / 100 = 143.
-    let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
+    let payouts = sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]);
     assert_eq!(payouts, 143_000_0000i128);
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 7_000_0000i128);
@@ -3540,7 +3664,10 @@ fn test_protocol_fee_precision_indexed_conservation() {
     client.resolve_round(&OraclePayload {
         price: 2298,
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 4u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3549,7 +3676,11 @@ fn test_protocol_fee_precision_indexed_conservation() {
 
     // total_pot = 100 + 150 + 50 = 300. fee = 300 * 1000 / 10_000 = 30.
     // winner_count = 1 -> payout_pool = 270 -> alice gets 270.
-    let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone(), charlie.clone()]);
+    let payouts = sum_pending_payouts(
+        &env,
+        &client.address,
+        &[alice.clone(), bob.clone(), charlie.clone()],
+    );
     assert_eq!(payouts, 270_000_0000i128);
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 30_000_0000i128);
@@ -3620,7 +3751,10 @@ fn test_protocol_fee_precision_legacy_conservation() {
     client.resolve_round(&OraclePayload {
         price: 2298,
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 5u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3629,7 +3763,11 @@ fn test_protocol_fee_precision_legacy_conservation() {
 
     // total_pot = 300; fee = 300 * 100 / 10_000 = 3.
     // payout_pool = 297 -> winner alice gets 297.
-    let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone(), charlie.clone()]);
+    let payouts = sum_pending_payouts(
+        &env,
+        &client.address,
+        &[alice.clone(), bob.clone(), charlie.clone()],
+    );
     assert_eq!(payouts, 297_000_0000i128);
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 3_000_0000i128);
@@ -3678,14 +3816,17 @@ fn test_protocol_fee_thin_losing_pool_updown() {
     client.resolve_round(&OraclePayload {
         price: 1_500_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 6u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
     });
 
-    let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
+    let payouts = sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]);
     // alice gets her principal minus the spillover (= 1000 - 99 = 901)
     // (since distributable_losing = 0, the share numerator is 0; payout = amount).
     assert_eq!(
@@ -3768,7 +3909,10 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
     client.resolve_round(&OraclePayload {
         price: start_price,
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 7u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3782,7 +3926,7 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
         "price-unchanged refunds MUST NOT emit a fee event"
     );
     assert_eq!(client.get_protocol_fee_treasury(), 0);
-    let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
+    let payouts = sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]);
     assert_eq!(
         payouts, 150_000_0000i128,
         "all participants refunded their full stake"
@@ -3816,42 +3960,17 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
     client.create_round(&start_price, &None);
 
     // ONLY down bets -- pool_up=0. Price goes UP -> one-sided refund of all.
-    env.as_contract(&contract_id, || {
-        let mut positions = Map::<Address, UserPosition>::new(&env);
-        positions.set(
-            alice.clone(),
-            UserPosition {
-                amount: 100_000_0000,
-                side: BetSide::Down,
-            },
-        );
-        positions.set(
-            bob.clone(),
-            UserPosition {
-                amount: 50_000_0000,
-                side: BetSide::Down,
-            },
-        );
-        env.storage()
-            .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
-        let mut round: Round = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ActiveRound)
-            .unwrap();
-        round.pool_up = 0;
-        round.pool_down = 150_000_0000;
-        env.storage()
-            .persistent()
-            .set(&DataKey::ActiveRound, &round);
-    });
+    client.place_bet(&alice, &100_000_0000, &BetSide::Down);
+    client.place_bet(&bob, &50_000_0000, &BetSide::Down);
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
     client.resolve_round(&OraclePayload {
         price: 1_700_0000, // up
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 9u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3868,7 +3987,7 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
         0,
         "one-sided refund MUST NOT credit the treasury"
     );
-    let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
+    let payouts = sum_pending_payouts(&env, &client.address, &[alice.clone(), bob.clone()]);
     assert_eq!(
         payouts, 150_000_0000i128,
         "all participants refunded their full stake on one-sided pool"
@@ -3906,7 +4025,10 @@ fn test_protocol_fee_withdrawal_to_recipient() {
     client.resolve_round(&OraclePayload {
         price: 1_500_0000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0u32,
+        round_id: client
+            .get_active_round()
+            .map(|r| r.start_ledger)
+            .unwrap_or(0) as u32,
         nonce: 8u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
