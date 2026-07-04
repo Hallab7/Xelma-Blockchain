@@ -694,6 +694,8 @@ export ORACLE_ADDRESS="G..."
 - [ ] Post-deployment: configure round windows with `set_windows()`
 - [ ] Post-deployment: verify with `get_admin()` and `get_oracle()`
 
+For the full staged deployment and incident response playbook, see [docs/DEPLOYMENT_RUNBOOK.md](./docs/DEPLOYMENT_RUNBOOK.md). Operators can execute the machine-checkable checklist with `python3 scripts/check_release_checklist.py --network mainnet --strict`.
+
 ### Deployment Script
 
 `scripts/deploy_testnet.sh` performs the following steps:
@@ -720,6 +722,7 @@ We welcome contributions from the community! Start with the maintainer workflow 
 - [GOVERNANCE.md](./GOVERNANCE.md)
 - [SUPPORT.md](./SUPPORT.md)
 - [COMPATIBILITY_POLICY.md](./COMPATIBILITY_POLICY.md) — ABI/storage/event versioning rules
+- [docs/CONTRIBUTOR_MAP.md](./docs/CONTRIBUTOR_MAP.md) — protocol areas, files, tests, and starter tasks
 - [CODEOWNERS](./.github/CODEOWNERS)
 
 Here's how you can help:
