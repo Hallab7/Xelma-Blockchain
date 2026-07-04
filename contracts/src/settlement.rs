@@ -1220,10 +1220,22 @@ pub fn _persist_user_outcome(
         predicted_price,
         stake,
         payout,
-        outcome,
+        outcome: outcome.clone(),
     };
     env.storage().persistent().set(&key, &record);
     _extend_persistent_ttl(env, &key);
+
+    let outcome_type_u32 = match outcome {
+        UserOutcomeType::Win => 0u32,
+        UserOutcomeType::Loss => 1u32,
+        UserOutcomeType::Refund => 2u32,
+        UserOutcomeType::Cancel => 3u32,
+    };
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("payout"), symbol_short!("outcome")),
+        (round_id, round_mode, user.clone(), payout, outcome_type_u32),
+    );
 }
 
 pub fn _refund_under_threshold(

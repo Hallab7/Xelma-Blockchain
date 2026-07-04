@@ -280,6 +280,7 @@ fn test_propose_requires_admin_auth() {
 
     let (_admin, _oracle, new_oracle) = init(&env, &client);
 
+    env.mock_auths(&[]);
     let result = client.try_propose_oracle_rotation(&new_oracle, &3600);
     assert!(result.is_err(), "non-admin should not be able to propose");
 }
