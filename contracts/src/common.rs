@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
-use soroban_sdk::{
-    symbol_short, Address, Env, Symbol, Vec,
-};
 use crate::errors::ContractError;
-use crate::types::{DataKey, ConfigChangeKind, ConfigChangePayload, RoundPhase, Round};
+use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKey, Round, RoundPhase};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 // ─── Economic control limits ─────────────────────────────────────────────────
 pub const MIN_CAP_VALUE: i128 = 1;
@@ -107,7 +105,6 @@ pub fn _accumulate_pending(env: &Env, user: Address, amount: i128) -> Result<(),
 }
 
 pub fn _emit_action_rejected(env: &Env, actor: &Address, action: Symbol, reason: ContractError) {
-    std::println!("_emit_action_rejected called: actor={:?}, action={:?}, reason={:?}", actor, action, reason);
     #[allow(deprecated)]
     env.events().publish(
         (symbol_short!("action"), symbol_short!("rejct")),

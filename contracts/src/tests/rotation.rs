@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for two-step oracle rotation with expiry.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
@@ -20,7 +21,11 @@ fn init(env: &Env, client: &VirtualTokenContractClient) -> (Address, Address, Ad
 }
 
 fn has_event_with_topic(
-    events: &soroban_sdk::Vec<(Address, soroban_sdk::Vec<soroban_sdk::Val>, soroban_sdk::Val)>,
+    events: &soroban_sdk::Vec<(
+        Address,
+        soroban_sdk::Vec<soroban_sdk::Val>,
+        soroban_sdk::Val,
+    )>,
     env: &Env,
     topic: soroban_sdk::Symbol,
 ) -> bool {
@@ -277,8 +282,5 @@ fn test_propose_requires_admin_auth() {
 
     env.mock_all_auths_allowing_non_root_auth();
     let result = client.try_propose_oracle_rotation(&new_oracle, &3600);
-    assert!(
-        result.is_err(),
-        "non-admin should not be able to propose"
-    );
+    assert!(result.is_err(), "non-admin should not be able to propose");
 }

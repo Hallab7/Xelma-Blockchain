@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: MIT
-use soroban_sdk::{
-    symbol_short, Address, Env, Symbol,
+use crate::common::{
+    _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, CURRENT_SCHEMA_VERSION,
+    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
 };
 use crate::errors::ContractError;
-use crate::types::{
-    DataKey, OracleHeartbeatRecord, ProtocolHealthStatus, RuntimeMode, Round,
-};
-use crate::common::{
-    _extend_persistent_ttl, _derive_round_phase, _emit_action_rejected,
-    CURRENT_SCHEMA_VERSION, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_BET_WINDOW_LEDGERS,
-    DEFAULT_RUN_WINDOW_LEDGERS
-};
+use crate::types::{DataKey, OracleHeartbeatRecord, ProtocolHealthStatus, Round, RuntimeMode};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 /// Initializes the contract with admin and oracle addresses (one-time only)
 pub fn initialize(env: Env, admin: Address, oracle: Address) -> Result<(), ContractError> {
@@ -285,10 +280,7 @@ pub fn arm_oracle_deviation_override(env: Env) -> Result<(), ContractError> {
 }
 
 /// Sets the minimum oracle confidence threshold in basis points (admin only).
-pub fn set_oracle_min_confidence_bps(
-    env: Env,
-    min_bps: Option<u32>,
-) -> Result<(), ContractError> {
+pub fn set_oracle_min_confidence_bps(env: Env, min_bps: Option<u32>) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     let admin: Address = env
         .storage()
@@ -351,7 +343,11 @@ pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractErro
     _require_supported_schema(&env)?;
     if status > 2 {
         _extend_persistent_ttl(&env, &DataKey::Oracle);
-        if let Some(oracle) = env.storage().persistent().get::<_, Address>(&DataKey::Oracle) {
+        if let Some(oracle) = env
+            .storage()
+            .persistent()
+            .get::<_, Address>(&DataKey::Oracle)
+        {
             _emit_action_rejected(
                 &env,
                 &oracle,

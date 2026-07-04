@@ -427,5 +427,3 @@ fn test_two_sided_pool_does_not_emit_onesided_event() {
         "normal two-sided round must not emit one-sided event"
     );
 }
-
-

@@ -20,16 +20,12 @@ mod mode_tests;
 mod overflow_tests;
 mod pause;
 mod property_invariants;
-mod rotation;
 mod reference_model;
 mod resolution;
+mod rotation;
 // mod reference_model; // upstream bug: uses std HashMap in no_std context
 // mod resolution; // upstream bug: duplicate type imports
 mod security;
 mod storage_benchmarks;
 mod ttl_tests;
 mod windows;
-
-
-
-

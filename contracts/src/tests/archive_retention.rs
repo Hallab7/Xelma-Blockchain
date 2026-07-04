@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{ArchivedRoundSummary, DataKey, OraclePayload};

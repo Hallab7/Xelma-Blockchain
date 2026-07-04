@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: MIT
-use soroban_sdk::{
-    symbol_short, Address, Env, Symbol, Vec, Map,
+use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema, _set_mode};
+use crate::common::{
+    _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
+    payout_add, payout_mul, sort_addresses, BPS_DENOMINATOR, DEFAULT_ARCHIVE_RETENTION,
 };
+use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
-    DataKey, Round, RoundMode, BetSide, UserPosition, PrecisionPrediction, PrecisionCommitment,
-    RoundArchiveStatus, UserOutcomeType, UserRoundOutcome, ArchivedRoundSummary, OraclePayload, UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, OraclePayload, PrecisionCommitment,
+    PrecisionPrediction, Round, RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
+    UserRoundOutcome, UserStats,
 };
-use crate::common::{
-    _extend_persistent_ttl, payout_add, payout_mul, _accumulate_pending, _emit_action_rejected,
-    balance, _set_balance, sort_addresses,
-    DEFAULT_ARCHIVE_RETENTION, BPS_DENOMINATOR,
-};
-use crate::admin::{_require_supported_schema, _ensure_not_paused, _ensure_normal_mode, _set_mode};
-use crate::config::{_apply_protocol_fee_updown, _apply_protocol_fee_precision};
+use soroban_sdk::{symbol_short, Address, Env, Map, Symbol, Vec};
 
 /// Cancels the active round and deterministically refunds all participant stakes.
 pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
@@ -53,9 +51,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
             for i in 0..participants.len() {
                 if let Some(user) = participants.get(i) {
                     let pos_key = DataKey::Position(round_id, user.clone());
-                    if let Some(pos) =
-                        env.storage().persistent().get::<_, UserPosition>(&pos_key)
-                    {
+                    if let Some(pos) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
                         _accumulate_pending(&env, user.clone(), pos.amount)?;
                         let prediction_side = match pos.side {
                             BetSide::Up => 0,
@@ -779,8 +775,7 @@ pub fn _resolve_precision_mode(
     }
 
     if !winners.is_empty() && total_pot > 0 {
-        let (payout_pool, _fee_amount) =
-            _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        let (payout_pool, _fee_amount) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
         let winner_count = winners.len() as i128;
         let payout_per_winner = payout_pool / winner_count;
         let remainder = payout_pool % winner_count;
@@ -897,8 +892,7 @@ pub fn _resolve_precision_legacy(
     }
 
     if !winners.is_empty() && total_pot > 0 {
-        let (payout_pool, _fee_amount) =
-            _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        let (payout_pool, _fee_amount) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
         let winner_count = winners.len() as i128;
         let payout_per_winner = payout_pool / winner_count;
         let remainder = payout_pool % winner_count;
@@ -1124,8 +1118,7 @@ pub fn _archive_round(
                 for i in 0..participants.len() {
                     if let Some(user) = participants.get(i) {
                         let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-                        let commit_key =
-                            DataKey::PrecisionCommitment(round.round_id, user.clone());
+                        let commit_key = DataKey::PrecisionCommitment(round.round_id, user.clone());
 
                         let pred_opt = env
                             .storage()
@@ -1248,9 +1241,7 @@ pub fn _refund_under_threshold(
             for i in 0..participants.len() {
                 if let Some(user) = participants.get(i) {
                     let pos_key = DataKey::Position(round_id, user.clone());
-                    if let Some(pos) =
-                        env.storage().persistent().get::<_, UserPosition>(&pos_key)
-                    {
+                    if let Some(pos) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
                         _accumulate_pending(env, user.clone(), pos.amount)?;
                         let prediction_side = match pos.side {
                             BetSide::Up => 0,

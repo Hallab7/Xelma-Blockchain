@@ -4,8 +4,8 @@
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{
-    BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, OraclePayload, PrecisionPrediction, Round,
-    RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
+    BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, OraclePayload, PrecisionPrediction,
+    Round, RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
 };
 use soroban_sdk::{
     symbol_short,
@@ -2408,7 +2408,8 @@ fn collect_outcome_loss_events(
             {
                 return None;
             }
-            let res: Result<(soroban_sdk::Address, u64, u32, i128, u32, u128), _> = data.try_into_val(env);
+            let res: Result<(soroban_sdk::Address, u64, u32, i128, u32, u128), _> =
+                data.try_into_val(env);
             res.ok()
         })
         .collect()
@@ -2466,7 +2467,10 @@ fn test_outcome_loss_event_updown_indexed_path() {
     for (_user, round_id, mode, _amount, _side, predicted_price) in &losses {
         assert_eq!(*mode, 0u32, "UpDown loss events must carry mode=0");
         assert_eq!(*round_id, 1u64);
-        assert_eq!(*predicted_price, 0u128, "`predicted_price` is unused in UpDown mode");
+        assert_eq!(
+            *predicted_price, 0u128,
+            "`predicted_price` is unused in UpDown mode"
+        );
     }
 
     // Verify both losers are represented, each with their losing side.
@@ -2475,8 +2479,14 @@ fn test_outcome_loss_event_updown_indexed_path() {
     for (user, _round_id, _mode, amount, side, _price) in &losses {
         by_addr.insert(user.to_string().to_string(), (*amount, *side));
     }
-    assert_eq!(by_addr[&charlie.to_string().to_string()], (150_0000000i128, 1u32));
-    assert_eq!(by_addr[&diana.to_string().to_string()], (50_0000000i128, 1u32));
+    assert_eq!(
+        by_addr[&charlie.to_string().to_string()],
+        (150_0000000i128, 1u32)
+    );
+    assert_eq!(
+        by_addr[&diana.to_string().to_string()],
+        (50_0000000i128, 1u32)
+    );
 }
 
 #[test]
@@ -2629,9 +2639,15 @@ fn test_outcome_loss_event_precision_indexed_path() {
         by_addr.insert(user.to_string().to_string(), (*amount, *price));
     }
     // Bob revealed 2500.
-    assert_eq!(by_addr[&bob.to_string().to_string()], (150_0000000i128, 2500u128));
+    assert_eq!(
+        by_addr[&bob.to_string().to_string()],
+        (150_0000000i128, 2500u128)
+    );
     // Charlie never revealed → predicted_price = 0 (unknown on-chain).
-    assert_eq!(by_addr[&charlie.to_string().to_string()], (80_0000000i128, 0u128));
+    assert_eq!(
+        by_addr[&charlie.to_string().to_string()],
+        (80_0000000i128, 0u128)
+    );
 }
 
 #[test]
@@ -2907,7 +2923,10 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
     });
 
     let updown_count = count_outcome_loss_events(&env);
-    assert_eq!(updown_count, 2, "UpDown round must emit exactly 2 loss events");
+    assert_eq!(
+        updown_count, 2,
+        "UpDown round must emit exactly 2 loss events"
+    );
 
     // ─── Precision round: 4 participants, 1 winner, 3 losers ────────────────
     client.create_round(&2000, &Some(1));
@@ -3202,10 +3221,7 @@ fn test_get_user_archived_participation_min_participants_refund() {
 // The 10% hard cap is enforced at schedule time; timelock semantics tested
 // in `config_timelock.rs::test_protocol_fee_timelock_*`.
 
-
-fn collect_protocol_fee_events(
-    env: &Env,
-) -> Vec<(u64, i128, i128, u32)> {
+fn collect_protocol_fee_events(env: &Env) -> Vec<(u64, i128, i128, u32)> {
     env.events()
         .all()
         .iter()
@@ -3279,13 +3295,13 @@ fn test_protocol_fee_disabled_default_is_no_behaviour_change() {
 
     env.ledger().with_mut(|li| li.sequence_number = 12);
     client.resolve_round(&OraclePayload {
-                    price: 1_500_0000,
-                    timestamp: env.ledger().timestamp(),
-                    round_id: 0u32,
-                    nonce: 1u64,
-                    network_id: env.ledger().network_id(),
-                    contract_addr: contract_id.clone(),
-                });
+        price: 1_500_0000,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0u32,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
 
     // Pre-#162 UpDown formula: payout_alice = 100 + 100 * 50 / 100 = 150 stroops.
     assert_eq!(
@@ -3322,9 +3338,7 @@ fn test_protocol_fee_updown_indexed_conservation() {
     env.ledger().with_mut(|li| {
         li.sequence_number = 2000; // advance past CONFIG_TIMELOCK_LEDGERS (1440).
     });
-    client.apply_scheduled_changes(
-        &crate::types::ConfigChangeKind::ProtocolFeeBps,
-    );
+    client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
     assert_eq!(client.get_protocol_fee_bps(), Some(200u32));
 
     client.create_round(&1_000_0000, &None);
@@ -3333,29 +3347,36 @@ fn test_protocol_fee_updown_indexed_conservation() {
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
     client.resolve_round(&OraclePayload {
-                    price: 1_500_0000,
-                    timestamp: env.ledger().timestamp(),
-                    round_id: 0u32,
-                    nonce: 2u64,
-                    network_id: env.ledger().network_id(),
-                    contract_addr: contract_id.clone(),
-                });
+        price: 1_500_0000,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0u32,
+        nonce: 2u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
 
     // total_pot = 150; fee = floor(150 * 200 / 10_000) = 3.
     // fee_from_losing = min(3, 50) = 3; fee_from_winning = 0.
     // distributable_winning = 100, distributable_losing = 47.
     // alice payout = 100 + 100 * 47 / 100 = 147.
     let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
-    assert_eq!(payouts, 147_000_0000i128,
-        "winner payout must reflect fee deducted from losing pool");
+    assert_eq!(
+        payouts, 147_000_0000i128,
+        "winner payout must reflect fee deducted from losing pool"
+    );
     let treasury = client.get_protocol_fee_treasury();
-    assert_eq!(treasury, 3_000_0000i128,
-        "treasury must accumulate exactly the bps-computed fee");
+    assert_eq!(
+        treasury, 3_000_0000i128,
+        "treasury must accumulate exactly the bps-computed fee"
+    );
 
     // Conservation invariant.
     let total_pot: i128 = 150_000_0000i128;
-    assert_eq!(payouts + treasury, total_pot,
-        "conservation: payouts + treasury must equal total_pot");
+    assert_eq!(
+        payouts + treasury,
+        total_pot,
+        "conservation: payouts + treasury must equal total_pot"
+    );
 
     // One round -> one fee_collected event.
     assert_eq!(count_protocol_fee_events(&env), 1);
@@ -3385,9 +3406,7 @@ fn test_protocol_fee_updown_legacy_conservation() {
 
     client.schedule_protocol_fee_bps(&Some(500u32)); // 5%
     env.ledger().with_mut(|li| li.sequence_number = 2000);
-    client.apply_scheduled_changes(
-        &crate::types::ConfigChangeKind::ProtocolFeeBps,
-    );
+    client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     let start_price: u128 = 1_000_0000;
     client.create_round(&start_price, &None);
@@ -3395,25 +3414,45 @@ fn test_protocol_fee_updown_legacy_conservation() {
     // Author positions via the legacy bulk map.
     env.as_contract(&contract_id, || {
         let mut positions = Map::<Address, UserPosition>::new(&env);
-        positions.set(alice.clone(), UserPosition { amount: 100_000_0000, side: BetSide::Up });
-        positions.set(bob.clone(), UserPosition { amount: 50_000_0000, side: BetSide::Down });
-        env.storage().persistent().set(&DataKey::UpDownPositions, &positions);
+        positions.set(
+            alice.clone(),
+            UserPosition {
+                amount: 100_000_0000,
+                side: BetSide::Up,
+            },
+        );
+        positions.set(
+            bob.clone(),
+            UserPosition {
+                amount: 50_000_0000,
+                side: BetSide::Down,
+            },
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::UpDownPositions, &positions);
 
-        let mut round: Round = env.storage().persistent().get(&DataKey::ActiveRound).unwrap();
+        let mut round: Round = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ActiveRound)
+            .unwrap();
         round.pool_up = 100_000_0000;
         round.pool_down = 50_000_0000;
-        env.storage().persistent().set(&DataKey::ActiveRound, &round);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
     client.resolve_round(&OraclePayload {
-                    price: 1_500_0000,
-                    timestamp: env.ledger().timestamp(),
-                    round_id: 0u32,
-                    nonce: 3u64,
-                    network_id: env.ledger().network_id(),
-                    contract_addr: contract_id.clone(),
-                });
+        price: 1_500_0000,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0u32,
+        nonce: 3u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
 
     // total_pot = 150; fee = floor(150 * 500 / 10_000) = 7.
     // distributable_winning = 100, distributable_losing = 43.
@@ -3446,9 +3485,7 @@ fn test_protocol_fee_precision_indexed_conservation() {
 
     client.schedule_protocol_fee_bps(&Some(1000u32)); // 10% (cap)
     env.ledger().with_mut(|li| li.sequence_number = 2000);
-    client.apply_scheduled_changes(
-        &crate::types::ConfigChangeKind::ProtocolFeeBps,
-    );
+    client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     client.create_round(&2000, &Some(1));
     client.place_precision_prediction(&alice, &100_000_0000, &2297u128);
@@ -3457,13 +3494,13 @@ fn test_protocol_fee_precision_indexed_conservation() {
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
     client.resolve_round(&OraclePayload {
-                    price: 2298,
-                    timestamp: env.ledger().timestamp(),
-                    round_id: 0u32,
-                    nonce: 4u64,
-                    network_id: env.ledger().network_id(),
-                    contract_addr: contract_id.clone(),
-                });
+        price: 2298,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0u32,
+        nonce: 4u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
 
     // total_pot = 100 + 150 + 50 = 300. fee = 300 * 1000 / 10_000 = 30.
     // winner_count = 1 -> payout_pool = 270 -> alice gets 270.
@@ -3471,8 +3508,11 @@ fn test_protocol_fee_precision_indexed_conservation() {
     assert_eq!(payouts, 270_000_0000i128);
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 30_000_0000i128);
-    assert_eq!(payouts + treasury, 300_000_0000i128,
-        "conservation invariant must hold for Precision indexed path");
+    assert_eq!(
+        payouts + treasury,
+        300_000_0000i128,
+        "conservation invariant must hold for Precision indexed path"
+    );
 }
 
 #[test]
@@ -3495,30 +3535,51 @@ fn test_protocol_fee_precision_legacy_conservation() {
 
     client.schedule_protocol_fee_bps(&Some(100u32)); // 1%
     env.ledger().with_mut(|li| li.sequence_number = 2000);
-    client.apply_scheduled_changes(
-        &crate::types::ConfigChangeKind::ProtocolFeeBps,
-    );
+    client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     let start_price: u128 = 2000;
     client.create_round(&start_price, &Some(1));
 
     env.as_contract(&contract_id, || {
         let mut predictions = Map::<Address, PrecisionPrediction>::new(&env);
-        predictions.set(alice.clone(), PrecisionPrediction { user: alice.clone(), predicted_price: 2297, amount: 100_000_0000 });
-        predictions.set(bob.clone(), PrecisionPrediction { user: bob.clone(), predicted_price: 2500, amount: 150_000_0000 });
-        predictions.set(charlie.clone(), PrecisionPrediction { user: charlie.clone(), predicted_price: 5000, amount: 50_000_0000 });
-        env.storage().persistent().set(&DataKey::PrecisionPositions, &predictions);
+        predictions.set(
+            alice.clone(),
+            PrecisionPrediction {
+                user: alice.clone(),
+                predicted_price: 2297,
+                amount: 100_000_0000,
+            },
+        );
+        predictions.set(
+            bob.clone(),
+            PrecisionPrediction {
+                user: bob.clone(),
+                predicted_price: 2500,
+                amount: 150_000_0000,
+            },
+        );
+        predictions.set(
+            charlie.clone(),
+            PrecisionPrediction {
+                user: charlie.clone(),
+                predicted_price: 5000,
+                amount: 50_000_0000,
+            },
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
     client.resolve_round(&OraclePayload {
-                    price: 2298,
-                    timestamp: env.ledger().timestamp(),
-                    round_id: 0u32,
-                    nonce: 5u64,
-                    network_id: env.ledger().network_id(),
-                    contract_addr: contract_id.clone(),
-                });
+        price: 2298,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0u32,
+        nonce: 5u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
 
     // total_pot = 300; fee = 300 * 100 / 10_000 = 3.
     // payout_pool = 297 -> winner alice gets 297.
@@ -3526,8 +3587,11 @@ fn test_protocol_fee_precision_legacy_conservation() {
     assert_eq!(payouts, 297_000_0000i128);
     let treasury = client.get_protocol_fee_treasury();
     assert_eq!(treasury, 3_000_0000i128);
-    assert_eq!(payouts + treasury, 300_000_0000i128,
-        "conservation invariant must hold for Precision legacy path");
+    assert_eq!(
+        payouts + treasury,
+        300_000_0000i128,
+        "conservation invariant must hold for Precision legacy path"
+    );
 }
 
 #[test]
@@ -3552,9 +3616,7 @@ fn test_protocol_fee_thin_losing_pool_updown() {
 
     client.schedule_protocol_fee_bps(&Some(1000u32)); // 10% (cap)
     env.ledger().with_mut(|li| li.sequence_number = 2000);
-    client.apply_scheduled_changes(
-        &crate::types::ConfigChangeKind::ProtocolFeeBps,
-    );
+    client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     client.create_round(&1_000_0000, &None);
     // winning_pool = 1000, losing_pool = 1.
@@ -3568,24 +3630,31 @@ fn test_protocol_fee_thin_losing_pool_updown() {
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
     client.resolve_round(&OraclePayload {
-                    price: 1_500_0000,
-                    timestamp: env.ledger().timestamp(),
-                    round_id: 0u32,
-                    nonce: 6u64,
-                    network_id: env.ledger().network_id(),
-                    contract_addr: contract_id.clone(),
-                });
+        price: 1_500_0000,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0u32,
+        nonce: 6u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
 
     let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
     // alice gets her principal minus the spillover (= 1000 - 99 = 901)
     // (since distributable_losing = 0, the share numerator is 0; payout = amount).
-    assert_eq!(payouts, 1000_000_0000i128,
-        "loser has 0 distributable_losing so winners only get principal back");
+    assert_eq!(
+        payouts, 1000_000_0000i128,
+        "loser has 0 distributable_losing so winners only get principal back"
+    );
     let treasury = client.get_protocol_fee_treasury();
-    assert_eq!(treasury, 100_000_0000i128,
-        "full fee still collected: 1 (from losing) + 99 (from winning spillover) = 100");
-    assert_eq!(payouts + treasury, 1001_000_0000i128,
-        "conservation invariant holds even when losing_pool is thin");
+    assert_eq!(
+        treasury, 100_000_0000i128,
+        "full fee still collected: 1 (from losing) + 99 (from winning spillover) = 100"
+    );
+    assert_eq!(
+        payouts + treasury,
+        1001_000_0000i128,
+        "conservation invariant holds even when losing_pool is thin"
+    );
 }
 
 #[test]
@@ -3593,7 +3662,9 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
     // Price-unchanged refunds must NOT deduct the fee from treasury even when
     // the fee is enabled. The user's stake is returned 100%; no fee events
     // are emitted on any refund path.
-    struct Case { up: bool, }
+    struct Case {
+        up: bool,
+    }
     let _cases = [Case { up: true }, Case { up: false }];
     let env = Env::default();
     let contract_id = env.register(VirtualTokenContract, ());
@@ -3611,40 +3682,63 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
 
     client.schedule_protocol_fee_bps(&Some(1000u32));
     env.ledger().with_mut(|li| li.sequence_number = 2000);
-    client.apply_scheduled_changes(
-        &crate::types::ConfigChangeKind::ProtocolFeeBps,
-    );
+    client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     let start_price: u128 = 1_500_0000;
     client.create_round(&start_price, &None);
     env.as_contract(&contract_id, || {
         let mut positions = Map::<Address, UserPosition>::new(&env);
-        positions.set(alice.clone(), UserPosition { amount: 100_000_0000, side: BetSide::Up });
-        positions.set(bob.clone(), UserPosition { amount: 50_000_0000, side: BetSide::Down });
-        env.storage().persistent().set(&DataKey::UpDownPositions, &positions);
-        let mut round: Round = env.storage().persistent().get(&DataKey::ActiveRound).unwrap();
+        positions.set(
+            alice.clone(),
+            UserPosition {
+                amount: 100_000_0000,
+                side: BetSide::Up,
+            },
+        );
+        positions.set(
+            bob.clone(),
+            UserPosition {
+                amount: 50_000_0000,
+                side: BetSide::Down,
+            },
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::UpDownPositions, &positions);
+        let mut round: Round = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ActiveRound)
+            .unwrap();
         round.pool_up = 100_000_0000;
         round.pool_down = 50_000_0000;
-        env.storage().persistent().set(&DataKey::ActiveRound, &round);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
     client.resolve_round(&OraclePayload {
-            price: start_price,
-            timestamp: env.ledger().timestamp(),
-            round_id: 0u32,
-            nonce: 7u64,
-            network_id: env.ledger().network_id(),
-            contract_addr: contract_id.clone(),
-        });
+        price: start_price,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0u32,
+        nonce: 7u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
 
     // Refund: no fee event, treasury still 0.
-    assert_eq!(count_protocol_fee_events(&env), 0,
-        "price-unchanged refunds MUST NOT emit a fee event");
+    assert_eq!(
+        count_protocol_fee_events(&env),
+        0,
+        "price-unchanged refunds MUST NOT emit a fee event"
+    );
     assert_eq!(client.get_protocol_fee_treasury(), 0);
     let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
-    assert_eq!(payouts, 150_000_0000i128,
-        "all participants refunded their full stake");
+    assert_eq!(
+        payouts, 150_000_0000i128,
+        "all participants refunded their full stake"
+    );
 }
 
 #[test]
@@ -3668,9 +3762,7 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
 
     client.schedule_protocol_fee_bps(&Some(500u32)); // 5%
     env.ledger().with_mut(|li| li.sequence_number = 2_000);
-    client.apply_scheduled_changes(
-        &crate::types::ConfigChangeKind::ProtocolFeeBps,
-    );
+    client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     let start_price: u128 = 1_500_0000;
     client.create_round(&start_price, &None);
@@ -3678,13 +3770,33 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
     // ONLY down bets -- pool_up=0. Price goes UP -> one-sided refund of all.
     env.as_contract(&contract_id, || {
         let mut positions = Map::<Address, UserPosition>::new(&env);
-        positions.set(alice.clone(), UserPosition { amount: 100_000_0000, side: BetSide::Down });
-        positions.set(bob.clone(), UserPosition { amount: 50_000_0000, side: BetSide::Down });
-        env.storage().persistent().set(&DataKey::UpDownPositions, &positions);
-        let mut round: Round = env.storage().persistent().get(&DataKey::ActiveRound).unwrap();
+        positions.set(
+            alice.clone(),
+            UserPosition {
+                amount: 100_000_0000,
+                side: BetSide::Down,
+            },
+        );
+        positions.set(
+            bob.clone(),
+            UserPosition {
+                amount: 50_000_0000,
+                side: BetSide::Down,
+            },
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::UpDownPositions, &positions);
+        let mut round: Round = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ActiveRound)
+            .unwrap();
         round.pool_up = 0;
         round.pool_down = 150_000_0000;
-        env.storage().persistent().set(&DataKey::ActiveRound, &round);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -3702,8 +3814,11 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
         0,
         "one-sided refund MUST NOT emit a fee event"
     );
-    assert_eq!(client.get_protocol_fee_treasury(), 0,
-        "one-sided refund MUST NOT credit the treasury");
+    assert_eq!(
+        client.get_protocol_fee_treasury(),
+        0,
+        "one-sided refund MUST NOT credit the treasury"
+    );
     let payouts = sum_pending_payouts(&env, &[alice.clone(), bob.clone()]);
     assert_eq!(
         payouts, 150_000_0000i128,
@@ -3732,9 +3847,7 @@ fn test_protocol_fee_withdrawal_to_recipient() {
 
     client.schedule_protocol_fee_bps(&Some(1000u32)); // 10%
     env.ledger().with_mut(|li| li.sequence_number = 2000);
-    client.apply_scheduled_changes(
-        &crate::types::ConfigChangeKind::ProtocolFeeBps,
-    );
+    client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 
     client.create_round(&1_000_0000, &None);
     client.place_bet(&alice, &100_000_0000, &BetSide::Up);
@@ -3742,13 +3855,13 @@ fn test_protocol_fee_withdrawal_to_recipient() {
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
     client.resolve_round(&OraclePayload {
-                    price: 1_500_0000,
-                    timestamp: env.ledger().timestamp(),
-                    round_id: 0u32,
-                    nonce: 8u64,
-                    network_id: env.ledger().network_id(),
-                    contract_addr: contract_id.clone(),
-                });
+        price: 1_500_0000,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0u32,
+        nonce: 8u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+    });
     // total_pot = 150; fee = 15; distributable_losing = 35.
     // payout = 100 + 100 * 35 / 100 = 135.
     assert_eq!(client.get_protocol_fee_treasury(), 15_000_0000i128);
@@ -3764,10 +3877,7 @@ fn test_protocol_fee_withdrawal_to_recipient() {
     assert_eq!(client.get_protocol_fee_treasury(), 5_000_0000i128);
 
     // Attempting to overwithdraw must NOT consume funds.
-    let result = client.try_withdraw_protocol_fee(
-        &treasury_account.clone(),
-        &1_000_000_0000i128,
-    );
+    let result = client.try_withdraw_protocol_fee(&treasury_account.clone(), &1_000_000_0000i128);
     assert!(result.is_err(), "over-withdrawal must be rejected");
     assert_eq!(client.get_protocol_fee_treasury(), 5_000_0000i128);
 }
@@ -3805,7 +3915,10 @@ fn test_protocol_fee_schedule_validation_rejects_zero_and_over_cap() {
 
     // Over cap rejected.
     let r_max = client.try_schedule_protocol_fee_bps(&Some(1_001u32));
-    assert!(r_max.is_err(), "1_001 bps exceeds MAX_PROTOCOL_FEE_BPS=1000");
+    assert!(
+        r_max.is_err(),
+        "1_001 bps exceeds MAX_PROTOCOL_FEE_BPS=1000"
+    );
     run_to_activation(&env);
     client.cancel_config_change(&crate::types::ConfigChangeKind::ProtocolFeeBps);
 

@@ -268,5 +268,3 @@ fn test_chaos_cancel_and_restart_round_no_state_bleed() {
     // Alice's round-1 position is gone; she can place a fresh bet in round 2
     assert_eq!(client.get_user_position(&alice), None);
 }
-
-

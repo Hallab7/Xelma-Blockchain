@@ -6,12 +6,12 @@ use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{BetSide, ConfigChangeKind, ConfigChangePayload, OraclePayload};
 use soroban_sdk::xdr::ToXdr;
-use std::vec::Vec;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
     Address, Bytes, BytesN, Env, IntoVal, Symbol, TryIntoVal, Val,
 };
+use std::vec::Vec;
 
 fn setup() -> (
     Env,
@@ -484,7 +484,9 @@ fn test_action_rejected_resolve_round_oracle_nonce_reused() {
 
     // Restore ActiveRound to test nonce reuse for the same round ID
     env.as_contract(&contract_id, || {
-        env.storage().persistent().set(&crate::types::DataKey::ActiveRound, &round);
+        env.storage()
+            .persistent()
+            .set(&crate::types::DataKey::ActiveRound, &round);
     });
 
     // Second resolve with same nonce should be rejected
@@ -578,14 +580,14 @@ fn test_action_rejected_set_max_precision_participants_invalid() {
     let result = client.try_set_max_precision_participants(&0);
     assert_eq!(
         result,
-        Err(Ok(ContractError::InvalidPrecisionParticipantCap))
+        Err(Ok(ContractError::InvalidPrecisionCap))
     );
 
     assert_last_action_rejected(
         &env,
         admin,
         symbol_short!("max_prec"),
-        ContractError::InvalidPrecisionParticipantCap,
+        ContractError::InvalidPrecisionCap,
     );
 }
 

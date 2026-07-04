@@ -185,5 +185,3 @@ fn test_protocol_health_mint_initial_fails_while_paused() {
     let result = client.try_mint_initial(&user);
     assert!(result.is_err());
 }
-
-

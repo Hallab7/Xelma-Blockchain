@@ -160,5 +160,3 @@ fn test_guard_repeated_rejections_do_not_corrupt_state() {
     assert_eq!(round_after.price_start, original_round.price_start);
     assert_eq!(client.get_last_round_id(), 1);
 }
-
-

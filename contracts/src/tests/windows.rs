@@ -624,5 +624,3 @@ fn test_get_round_phase_default_windows() {
     env.ledger().with_mut(|li| li.sequence_number = 62);
     assert_eq!(client.get_round_phase(), RoundPhase::Resolvable);
 }
-
-

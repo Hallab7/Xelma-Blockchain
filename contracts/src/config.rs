@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: MIT
-use soroban_sdk::{
-    symbol_short, Address, Env, Symbol,
+use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
+use crate::common::{
+    _emit_action_rejected, _emit_config_updated, _extend_persistent_ttl, _set_balance, balance,
+    payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS, DEFAULT_ARCHIVE_RETENTION,
+    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION,
+    MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
+    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PRECISION_PARTICIPANTS_LIMIT,
+    MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS, MIN_ARCHIVE_RETENTION, MIN_CAP_VALUE,
+    MIN_ORACLE_STALE_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{
-    DataKey, ConfigChangeKind, ConfigChangePayload, PendingConfigChange,
-};
-use crate::common::{
-    _extend_persistent_ttl, payout_add, _emit_config_updated,
-    _emit_action_rejected, balance, _set_balance,
-    MIN_CAP_VALUE, MAX_MIN_PARTICIPANTS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
-    MAX_PRECISION_PARTICIPANTS_LIMIT, MAX_BET_WINDOW_LEDGERS, MAX_RUN_WINDOW_LEDGERS,
-    MAX_CLOSE_BUFFER_LEDGERS, MAX_ORACLE_DEVIATION_BPS, MAX_PROTOCOL_FEE_BPS, BPS_DENOMINATOR,
-    DEFAULT_ORACLE_STALE_THRESHOLD, MIN_ORACLE_STALE_THRESHOLD, MAX_ORACLE_STALE_THRESHOLD,
-    CONFIG_TIMELOCK_LEDGERS, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS,
-    DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_ARCHIVE_RETENTION, MIN_ARCHIVE_RETENTION, MAX_ARCHIVE_RETENTION,
-};
-use crate::admin::{_require_supported_schema, _ensure_not_paused, _ensure_normal_mode};
+use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 pub fn set_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
     schedule_windows(env, bet_ledgers, run_ledgers)
@@ -32,10 +28,7 @@ pub fn get_max_stake(env: Env) -> Option<i128> {
     env.storage().persistent().get(&key)
 }
 
-pub fn set_max_user_exposure(
-    env: Env,
-    max_exposure: Option<i128>,
-) -> Result<(), ContractError> {
+pub fn set_max_user_exposure(env: Env, max_exposure: Option<i128>) -> Result<(), ContractError> {
     schedule_max_user_exposure(env, max_exposure)
 }
 
@@ -45,18 +38,11 @@ pub fn get_max_user_exposure(env: Env) -> Option<i128> {
     env.storage().persistent().get(&key)
 }
 
-pub fn set_max_pending_winnings(
-    env: Env,
-    max_pending: Option<i128>,
-) -> Result<(), ContractError> {
+pub fn set_max_pending_winnings(env: Env, max_pending: Option<i128>) -> Result<(), ContractError> {
     schedule_max_pending_winnings(env, max_pending)
 }
 
-pub fn schedule_windows(
-    env: Env,
-    bet_ledgers: u32,
-    run_ledgers: u32,
-) -> Result<(), ContractError> {
+pub fn schedule_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     _validate_windows(bet_ledgers, run_ledgers)?;
     _schedule_config_change(
@@ -190,10 +176,7 @@ pub fn withdraw_protocol_fee(
     Ok(amount)
 }
 
-pub fn get_pending_config_change(
-    env: Env,
-    kind: ConfigChangeKind,
-) -> Option<PendingConfigChange> {
+pub fn get_pending_config_change(env: Env, kind: ConfigChangeKind) -> Option<PendingConfigChange> {
     env.storage()
         .persistent()
         .get(&DataKey::PendingConfigChange(kind))
@@ -379,9 +362,9 @@ pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), Contract
             &env,
             &admin,
             symbol_short!("max_prec"),
-            ContractError::InvalidPrecisionParticipantCap,
+            ContractError::InvalidPrecisionCap,
         );
-        return Err(ContractError::InvalidPrecisionParticipantCap);
+        return Err(ContractError::InvalidPrecisionCap);
     }
 
     let key = DataKey::MaxPrecisionParticipants;
@@ -824,10 +807,7 @@ pub fn _apply_config_payload(
                 env.storage().persistent().remove(&key);
             }
         }
-        (
-            ConfigChangeKind::MaxPendingWinnings,
-            ConfigChangePayload::MaxPendingWinnings(max),
-        ) => {
+        (ConfigChangeKind::MaxPendingWinnings, ConfigChangePayload::MaxPendingWinnings(max)) => {
             _validate_max_stake(*max)?;
             let key = DataKey::MaxPendingWinnings;
             if let Some(v) = max {

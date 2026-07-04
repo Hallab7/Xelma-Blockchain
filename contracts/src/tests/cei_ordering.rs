@@ -108,7 +108,10 @@ fn test_claim_winnings_cei_pending_cleared_after_claim() {
 
     // Idempotency: a second claim returns 0 and does not mutate state.
     let second_claim = client.claim_winnings(&alice);
-    assert_eq!(second_claim, 0, "second claim on empty pending must return 0");
+    assert_eq!(
+        second_claim, 0,
+        "second claim on empty pending must return 0"
+    );
     assert_eq!(
         client.balance(&alice),
         balance_after_claim,
@@ -180,5 +183,3 @@ fn test_cancel_config_change_rejected_after_activation() {
         "cancellation must be rejected once activation ledger is reached"
     );
 }
-
-

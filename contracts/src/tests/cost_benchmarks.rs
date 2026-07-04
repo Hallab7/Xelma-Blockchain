@@ -250,5 +250,3 @@ fn bench_cost_get_precision_predictions_page() {
         "get_precision_predictions_page MEM regression: {mem}"
     );
 }
-
-

@@ -100,7 +100,9 @@ fn test_migrate_v2_to_v3_happy_path() {
     assert_eq!(client.get_schema_version(), 3u32);
 
     let migrated = env.as_contract(&contract_id, || {
-        env.storage().persistent().get::<_, bool>(&DataKey::MigratedToV3)
+        env.storage()
+            .persistent()
+            .get::<_, bool>(&DataKey::MigratedToV3)
     });
     assert_eq!(migrated, Some(true));
 }
