@@ -227,11 +227,7 @@ pub fn cancel_config_change(env: Env, kind: ConfigChangeKind) -> Result<(), Cont
     })?;
 
     let key = DataKey::PendingConfigChange(kind.clone());
-    let pending: PendingConfigChange = match env
-        .storage()
-        .persistent()
-        .get(&key)
-    {
+    let pending: PendingConfigChange = match env.storage().persistent().get(&key) {
         Some(p) => p,
         None => return Ok(()),
     };

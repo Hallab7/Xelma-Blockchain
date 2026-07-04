@@ -3101,8 +3101,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
 
     let total_after_precision = count_outcome_loss_events(&env);
     assert_eq!(
-        total_after_precision,
-        3,
+        total_after_precision, 3,
         "Precision round must emit exactly 3 new loss events for the 3 losers",
     );
 
