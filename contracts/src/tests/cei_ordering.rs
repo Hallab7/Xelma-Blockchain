@@ -41,7 +41,7 @@ fn setup() -> (Env, Address, Address, VirtualTokenContractClient<'static>) {
 /// balance increase, and the function is idempotent after the first claim.
 #[test]
 fn test_claim_winnings_cei_pending_cleared_after_claim() {
-    let (env, admin, oracle, client) = setup();
+    let (env, _admin, _oracle, client) = setup();
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
@@ -127,7 +127,7 @@ fn test_claim_winnings_cei_pending_cleared_after_claim() {
 /// after the event Interaction.
 #[test]
 fn test_cancel_config_change_cei_key_removed_before_event() {
-    let (env, _admin, _oracle, client) = setup();
+    let (_env, _admin, _oracle, client) = setup();
 
     // Schedule a windows change (creates PendingConfigChange(Windows)).
     client.schedule_windows(&10, &20);

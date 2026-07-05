@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema, _set_mode};
+use crate::admin::{_ensure_not_paused, _require_supported_schema};
 use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
-    payout_add, payout_mul, sort_addresses, BPS_DENOMINATOR, DEFAULT_ARCHIVE_RETENTION,
+    payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
 };
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
@@ -193,9 +193,8 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         .ok_or(ContractError::OracleNotSet)?;
 
     oracle.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &oracle, symbol_short!("resolve"), e);
-        e
     })?;
 
     let round: Round = env

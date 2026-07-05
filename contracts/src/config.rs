@@ -12,7 +12,7 @@ use crate::common::{
 };
 use crate::errors::ContractError;
 use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env};
 
 pub fn set_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
     schedule_windows(env, bet_ledgers, run_ledgers)
@@ -146,9 +146,8 @@ pub fn withdraw_protocol_fee(
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("withdraw"), e);
-        e
     })?;
 
     if amount <= 0 {
@@ -221,9 +220,8 @@ pub fn cancel_config_change(env: Env, kind: ConfigChangeKind) -> Result<(), Cont
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("cncl_cfg"), e);
-        e
     })?;
 
     let key = DataKey::PendingConfigChange(kind.clone());
@@ -269,9 +267,8 @@ pub fn set_close_buffer_ledgers(env: Env, buffer_ledgers: u32) -> Result<(), Con
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("closebuf"), e);
-        e
     })?;
 
     _validate_close_buffer_ledgers(buffer_ledgers)?;
@@ -311,9 +308,8 @@ pub fn set_min_participants(env: Env, min: Option<u32>) -> Result<(), ContractEr
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("min_par"), e);
-        e
     })?;
 
     let key = DataKey::MinParticipants;
@@ -355,9 +351,8 @@ pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), Contract
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("max_prec"), e);
-        e
     })?;
 
     if max == 0 || max > MAX_PRECISION_PARTICIPANTS_LIMIT {
@@ -403,9 +398,8 @@ pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("mint_lim"), e);
-        e
     })?;
 
     let old_limit: u32 = env
@@ -440,12 +434,11 @@ pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> 
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("set_arch"), e);
-        e
     })?;
 
-    if limit < MIN_ARCHIVE_RETENTION || limit > MAX_ARCHIVE_RETENTION {
+    if !(MIN_ARCHIVE_RETENTION..=MAX_ARCHIVE_RETENTION).contains(&limit) {
         _emit_action_rejected(
             &env,
             &admin,
@@ -720,9 +713,8 @@ pub fn _schedule_config_change(
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(env).map_err(|e| {
+    _ensure_not_paused(env).inspect_err(|&e| {
         _emit_action_rejected(env, &admin, symbol_short!("sched"), e);
-        e
     })?;
 
     let key = DataKey::PendingConfigChange(kind.clone());
@@ -854,7 +846,7 @@ pub fn _apply_config_payload(
             #[allow(deprecated)]
             env.events().publish(
                 (symbol_short!("protocol"), symbol_short!("fee_bps")),
-                (bps.clone(),),
+                (*bps,),
             );
         }
         _ => return Err(ContractError::InvalidMode),

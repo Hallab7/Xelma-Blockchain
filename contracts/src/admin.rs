@@ -63,9 +63,8 @@ pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
         .get(&admin_key)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("migrate"), e);
-        e
     })?;
 
     if env.storage().persistent().has(&DataKey::ActiveRound) {
@@ -113,9 +112,8 @@ pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
         .get(&admin_key)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("migrate"), e);
-        e
     })?;
 
     if env.storage().persistent().has(&DataKey::ActiveRound) {
@@ -268,9 +266,8 @@ pub fn arm_oracle_deviation_override(env: Env) -> Result<(), ContractError> {
         .get(&admin_key)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("arm_ovr"), e);
-        e
     })?;
 
     let override_key = DataKey::OracleDeviationOverrideArmed;

@@ -4,7 +4,7 @@
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{
-    BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, OraclePayload, PrecisionPrediction,
+    BetSide, DataKey, OraclePayload, PrecisionPrediction,
     Round, RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
 };
 use soroban_sdk::{
@@ -107,7 +107,7 @@ fn test_resolve_round_price_unchanged() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -215,7 +215,7 @@ fn test_resolve_round_price_went_up() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -315,7 +315,7 @@ fn test_resolve_round_price_went_down() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -418,7 +418,7 @@ fn test_resolve_round_without_active_round() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -505,7 +505,7 @@ fn test_resolve_precision_closest_guess_wins() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -604,7 +604,7 @@ fn test_resolve_precision_tie_splits_pot() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -686,7 +686,7 @@ fn test_resolve_precision_exact_match() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -723,7 +723,7 @@ fn test_resolve_precision_no_predictions() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -803,7 +803,7 @@ fn test_resolve_precision_three_way_tie() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -867,7 +867,7 @@ fn test_resolve_precision_single_prediction() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -935,7 +935,7 @@ fn test_resolve_precision_large_differences() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1016,7 +1016,7 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1133,7 +1133,7 @@ fn test_precision_remainder_5way_tie() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1216,7 +1216,7 @@ fn test_precision_no_remainder() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1261,7 +1261,7 @@ fn test_round_resolved_event_emitted() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1315,7 +1315,7 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1377,7 +1377,7 @@ fn test_unchanged_price_resolution_emits_refund_outcomes() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1442,7 +1442,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1533,7 +1533,7 @@ fn test_claim_winnings_event_emitted() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1666,7 +1666,7 @@ fn test_precision_payout_deterministic_same_inputs() {
             round_id: client
                 .get_active_round()
                 .map(|r| r.start_ledger)
-                .unwrap_or(0) as u32,
+                .unwrap_or(0),
             nonce: 1u64,
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
@@ -1751,7 +1751,7 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1808,7 +1808,7 @@ fn test_min_participants_blocks_settlement_updown() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1853,7 +1853,7 @@ fn test_min_participants_allows_settlement_at_threshold() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1893,7 +1893,7 @@ fn test_min_participants_fallback_refunds_precision_mode() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -1932,7 +1932,7 @@ fn test_min_participants_fallback_event_emitted() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2009,7 +2009,7 @@ fn test_no_min_participants_threshold_resolves_normally() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2088,7 +2088,7 @@ fn test_precision_payout_conservation_large_tie_set() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2170,7 +2170,7 @@ fn test_precision_commit_reveal_resolution_payout_with_unrevealed_participants()
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2259,7 +2259,7 @@ fn test_precision_remainder_goes_to_lexicographically_lowest_winner() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2574,7 +2574,7 @@ fn test_outcome_loss_event_updown_indexed_path() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2678,7 +2678,7 @@ fn test_outcome_loss_event_updown_legacy_path() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2744,7 +2744,7 @@ fn test_outcome_loss_event_precision_indexed_path() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2847,7 +2847,7 @@ fn test_outcome_loss_event_precision_legacy_path() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2943,7 +2943,7 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2984,7 +2984,7 @@ fn test_outcome_loss_event_not_emitted_on_min_participants_fallback() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3063,7 +3063,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3092,7 +3092,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 2u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3420,7 +3420,7 @@ fn sum_pending_payouts(
                 .expect("overflow summing pending payouts");
         }
     });
-    total.into()
+    total
 }
 
 #[test]
@@ -3455,7 +3455,7 @@ fn test_protocol_fee_disabled_default_is_no_behaviour_change() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3511,7 +3511,7 @@ fn test_protocol_fee_updown_indexed_conservation() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 2u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3615,7 +3615,7 @@ fn test_protocol_fee_updown_legacy_conservation() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 3u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3667,7 +3667,7 @@ fn test_protocol_fee_precision_indexed_conservation() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 4u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3754,7 +3754,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 5u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3819,7 +3819,7 @@ fn test_protocol_fee_thin_losing_pool_updown() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 6u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3916,7 +3916,7 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 7u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -3974,7 +3974,7 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 9u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -4032,7 +4032,7 @@ fn test_protocol_fee_withdrawal_to_recipient() {
         round_id: client
             .get_active_round()
             .map(|r| r.start_ledger)
-            .unwrap_or(0) as u32,
+            .unwrap_or(0),
         nonce: 8u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),

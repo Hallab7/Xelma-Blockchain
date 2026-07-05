@@ -9,9 +9,8 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
-    Address, Bytes, BytesN, Env, IntoVal, Symbol, TryIntoVal, Val,
+    Address, Bytes, BytesN, Env, Symbol, TryIntoVal,
 };
-use std::vec::Vec;
 
 fn setup() -> (
     Env,
@@ -443,7 +442,7 @@ fn test_action_rejected_cancel_round_no_active() {
 fn test_action_rejected_oracle_heartbeat_invalid_status() {
     let (env, _, _, _, client) = setup();
     // Use env.as_contract to read oracle for our own check
-    let oracle: Address = env.as_contract(&env.register(VirtualTokenContract, ()), || {
+    let _oracle: Address = env.as_contract(&env.register(VirtualTokenContract, ()), || {
         // We need the actual oracle address — extract from the setup helper
         // which stores it at DataKey::Oracle
         Address::generate(&env)

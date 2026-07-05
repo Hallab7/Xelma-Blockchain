@@ -10,7 +10,7 @@ use crate::types::{
     BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round, RoundMode, UserPosition,
 };
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Vec};
 
 /// Creates a new prediction round (admin only)
 pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
@@ -43,13 +43,11 @@ pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<()
         .ok_or(ContractError::AdminNotSet)?;
 
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("create"), e);
-        e
     })?;
-    assert_no_active_round(&env).map_err(|e| {
+    assert_no_active_round(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("create"), e);
-        e
     })?;
 
     // Get configured windows (with defaults)
@@ -176,9 +174,7 @@ pub fn place_bet(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round
-        .bet_end_ledger
-        .checked_sub(close_buffer_ledgers)
-        .unwrap_or(0);
+        .bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
@@ -310,9 +306,7 @@ pub fn place_precision_prediction(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round
-        .bet_end_ledger
-        .checked_sub(close_buffer_ledgers)
-        .unwrap_or(0);
+        .bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
@@ -431,9 +425,7 @@ pub fn commit_prediction(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round
-        .bet_end_ledger
-        .checked_sub(close_buffer_ledgers)
-        .unwrap_or(0);
+        .bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }

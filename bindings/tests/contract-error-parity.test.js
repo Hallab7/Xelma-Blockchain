@@ -2,7 +2,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import assert from "assert";
+import { describe, it, expect } from "vitest";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,8 +23,7 @@ for (const line of errorsCode.split("\n")) {
 
 const tsMapMatch = bindingsCode.match(/export\s+const\s+ContractError\s*=\s*\{([\s\S]*)\}/);
 if (!tsMapMatch) {
-  console.error("Could not find ContractError map in bindings/src/index.ts");
-  process.exit(1);
+  throw new Error("Could not find ContractError map in bindings/src/index.ts");
 }
 
 const tsCodes = new Map();
@@ -36,36 +35,45 @@ while ((entry = tsEntryRegex.exec(tsMapMatch[1])) !== null) {
 
 const rustCodes = new Map(rustVariants.map(v => [v.code, v.name]));
 
-const missingInTS = [];
-const extraInTS = [];
-const nameMismatches = [];
+describe("Contract Error Parity", () => {
+  it("has no missing error codes in TS", () => {
+    const missingInTS = [];
+    for (const [code, name] of rustCodes) {
+      const tsName = tsCodes.get(code);
+      if (!tsName) {
+        missingInTS.push(`${code}: ${name}`);
+      }
+    }
+    expect(missingInTS).toEqual([]);
+  });
 
-for (const [code, name] of rustCodes) {
-  const tsName = tsCodes.get(code);
-  if (!tsName) {
-    missingInTS.push(`${code}: ${name}`);
-  } else if (tsName !== name) {
-    nameMismatches.push(`Code ${code}: Rust name is "${name}", TS name is "${tsName}"`);
-  }
-}
+  it("has no extra error codes in TS", () => {
+    const extraInTS = [];
+    for (const [code, name] of tsCodes) {
+      if (!rustCodes.has(code)) {
+        extraInTS.push(`${code}: ${name}`);
+      }
+    }
+    expect(extraInTS).toEqual([]);
+  });
 
-for (const [code, name] of tsCodes) {
-  if (!rustCodes.has(code)) {
-    extraInTS.push(`${code}: ${name}`);
-  }
-}
+  it("has no error name mismatches", () => {
+    const nameMismatches = [];
+    for (const [code, name] of rustCodes) {
+      const tsName = tsCodes.get(code);
+      if (tsName && tsName !== name) {
+        nameMismatches.push(`Code ${code}: Rust name is "${name}", TS name is "${tsName}"`);
+      }
+    }
+    expect(nameMismatches).toEqual([]);
+  });
 
-assert.strictEqual(missingInTS.length, 0, `Missing error codes in TS: ${missingInTS.join(", ")}`);
-assert.strictEqual(extraInTS.length, 0, `Extra error codes in TS (not in Rust): ${extraInTS.join(", ")}`);
-assert.strictEqual(nameMismatches.length, 0, `Error name mismatches: ${nameMismatches.join("; ")}`);
+  it("contains decodeContractError helper", () => {
+    expect(bindingsCode.includes("export function decodeContractError")).toBe(true);
+  });
 
-assert(
-  bindingsCode.includes("export function decodeContractError"),
-  "decodeContractError helper is missing from bindings"
-);
-assert(
-  bindingsCode.includes("export function formatContractError"),
-  "formatContractError helper is missing from bindings"
-);
+  it("contains formatContractError helper", () => {
+    expect(bindingsCode.includes("export function formatContractError")).toBe(true);
+  });
+});
 
-console.log(`✅ Error code parity check passed: ${rustCodes.size} variants mapped correctly.`);
