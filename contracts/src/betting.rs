@@ -173,8 +173,7 @@ pub fn place_bet(
         .persistent()
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
-    let close_ledger = round
-        .bet_end_ledger.saturating_sub(close_buffer_ledgers);
+    let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
@@ -305,8 +304,7 @@ pub fn place_precision_prediction(
         .persistent()
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
-    let close_ledger = round
-        .bet_end_ledger.saturating_sub(close_buffer_ledgers);
+    let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
@@ -424,8 +422,7 @@ pub fn commit_prediction(
         .persistent()
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
-    let close_ledger = round
-        .bet_end_ledger.saturating_sub(close_buffer_ledgers);
+    let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
