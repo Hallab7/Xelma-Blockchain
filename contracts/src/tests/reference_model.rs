@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+#![allow(dead_code)]
+#![allow(unused)]
+#![allow(clippy::mutable_key_type)]
 //! Simplified reference model for contract state used in invariant testing.
 
 extern crate std;

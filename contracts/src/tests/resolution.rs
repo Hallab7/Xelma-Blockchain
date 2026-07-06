@@ -3854,10 +3854,6 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
     // Price-unchanged refunds must NOT deduct the fee from treasury even when
     // the fee is enabled. The user's stake is returned 100%; no fee events
     // are emitted on any refund path.
-    struct Case {
-        up: bool,
-    }
-    let _cases = [Case { up: true }, Case { up: false }];
     let env = Env::default();
     let contract_id = env.register(VirtualTokenContract, ());
     let client = VirtualTokenContractClient::new(&env, &contract_id);
