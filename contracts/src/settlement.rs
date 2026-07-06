@@ -1204,6 +1204,7 @@ pub fn _archive_round(
         .set(&DataKey::RecentArchivedRoundIds, &recent);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn _persist_user_outcome(
     env: &Env,
     round_id: u64,

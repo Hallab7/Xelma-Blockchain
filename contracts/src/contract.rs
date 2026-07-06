@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! Core contract implementation for the XLM Price Prediction Market.
 
+#![allow(dead_code)]
+
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Map, Symbol, Vec};
 
 use crate::errors::ContractError;
@@ -133,25 +135,7 @@ impl VirtualTokenContract {
 
     /// Sets the runtime mode of the contract (admin only)
     pub fn set_runtime_mode(env: Env, mode: u32) -> Result<(), ContractError> {
-        Self::_require_supported_schema(&env)?;
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(ContractError::AdminNotSet)?;
-
-        admin.require_auth();
-
-        let new_mode = match mode {
-            0 => RuntimeMode::Normal,
-            1 => RuntimeMode::ClaimsOnly,
-            2 => RuntimeMode::FullyPaused,
-            _ => return Err(ContractError::InvalidMode),
-        };
-
-        Self::_set_mode(&env, new_mode)?;
-
-        Ok(())
+        admin::set_runtime_mode(env, mode)
     }
 
     pub fn get_admin(env: Env) -> Option<Address> {

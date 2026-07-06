@@ -18,6 +18,7 @@ use soroban_sdk::{
 };
 
 /// Must match `CONFIG_TIMELOCK_LEDGERS` in contract.rs.
+#[allow(dead_code)]
 const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
 
 // ─── Helper ──────────────────────────────────────────────────────────────────

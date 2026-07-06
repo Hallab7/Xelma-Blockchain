@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! Tests for round resolution and winnings distribution.
 
+#![allow(clippy::inconsistent_digit_grouping)]
+
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{
