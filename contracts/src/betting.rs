@@ -1,32 +1,25 @@
 // SPDX-License-Identifier: MIT
-use soroban_sdk::{
-    symbol_short, Address, Env, Symbol, Vec, Bytes, BytesN,
+use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
+use crate::common::{
+    _emit_action_rejected, _extend_persistent_ttl, _set_balance, assert_no_active_round, balance,
+    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_START_PRICE,
 };
-use soroban_sdk::xdr::ToXdr;
+use crate::config::get_max_precision_participants;
 use crate::errors::ContractError;
 use crate::types::{
-    DataKey, Round, RoundMode, BetSide, UserPosition, PrecisionPrediction, PrecisionCommitment,
+    BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round, RoundMode, UserPosition,
 };
-use crate::common::{
-    _extend_persistent_ttl, assert_no_active_round, balance, _set_balance,
-    MIN_START_PRICE, MAX_START_PRICE, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS,
-    _emit_action_rejected,
-};
-use crate::admin::{_require_supported_schema, _ensure_not_paused, _ensure_normal_mode};
-use crate::config::get_max_precision_participants;
+use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Vec};
 
 /// Creates a new prediction round (admin only)
-pub fn create_round(
-    env: Env,
-    start_price: u128,
-    mode: Option<u32>,
-) -> Result<(), ContractError> {
+pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     if start_price < MIN_START_PRICE {
-        return Err(ContractError::StartPriceTooLow);
+        return Err(ContractError::InvalidStartPrice);
     }
     if start_price > MAX_START_PRICE {
-        return Err(ContractError::StartPriceTooHigh);
+        return Err(ContractError::InvalidStartPrice);
     }
 
     // Default to Up/Down mode (0) if not specified
@@ -50,13 +43,11 @@ pub fn create_round(
         .ok_or(ContractError::AdminNotSet)?;
 
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("create"), e);
-        e
     })?;
-    assert_no_active_round(&env).map_err(|e| {
+    assert_no_active_round(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("create"), e);
-        e
     })?;
 
     // Get configured windows (with defaults)
@@ -182,10 +173,7 @@ pub fn place_bet(
         .persistent()
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
-    let close_ledger = round
-        .bet_end_ledger
-        .checked_sub(close_buffer_ledgers)
-        .unwrap_or(0);
+    let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
@@ -284,7 +272,7 @@ pub fn place_precision_prediction(
     }
 
     if predicted_price > 99_999_999 {
-        return Err(ContractError::InvalidPriceScale);
+        return Err(ContractError::InvalidPrice);
     }
 
     // Single read of the active round
@@ -316,10 +304,7 @@ pub fn place_precision_prediction(
         .persistent()
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
-    let close_ledger = round
-        .bet_end_ledger
-        .checked_sub(close_buffer_ledgers)
-        .unwrap_or(0);
+    let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }
@@ -338,7 +323,7 @@ pub fn place_precision_prediction(
         .unwrap_or(Vec::new(&env));
     let max_precision_participants = get_max_precision_participants(env.clone());
     if participants.len() >= max_precision_participants {
-        return Err(ContractError::PrecisionParticipantCapExceeded);
+        return Err(ContractError::PrecisionCapExceeded);
     }
 
     let user_balance = balance(env.clone(), user.clone());
@@ -437,10 +422,7 @@ pub fn commit_prediction(
         .persistent()
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
-    let close_ledger = round
-        .bet_end_ledger
-        .checked_sub(close_buffer_ledgers)
-        .unwrap_or(0);
+    let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
         return Err(ContractError::RoundEnded);
     }

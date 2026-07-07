@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: MIT
-use soroban_sdk::{
-    Address, Env, Vec, Map,
+use crate::common::{
+    _derive_round_phase, _extend_persistent_ttl, sort_addresses, BPS_DENOMINATOR,
+    DEFAULT_ARCHIVE_RETENTION, MAX_PAGE_SIZE,
 };
 use crate::errors::ContractError;
 use crate::types::{
-    DataKey, Round, RoundPoolStats, RoundPhase, RoundMode, BetSide, UserPosition,
-    PrecisionPrediction, PrecisionCommitment, ArchivedRoundSummary, UserRoundOutcome,
-    UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round,
+    RoundMode, RoundPhase, RoundPoolStats, UserPosition, UserRoundOutcome, UserStats,
 };
-use crate::common::{
-    _extend_persistent_ttl, _derive_round_phase, sort_addresses,
-    DEFAULT_ARCHIVE_RETENTION, BPS_DENOMINATOR, MAX_PAGE_SIZE,
-};
+use soroban_sdk::{Address, Env, Map, Vec};
 
 pub fn get_active_round(env: Env) -> Option<Round> {
     env.storage().persistent().get(&DataKey::ActiveRound)

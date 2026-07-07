@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: MIT
-use soroban_sdk::{
-    symbol_short, Address, Env, Symbol, Vec, Map,
+use crate::admin::{_ensure_not_paused, _require_supported_schema};
+use crate::common::{
+    _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
+    payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
 };
+use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
-    DataKey, Round, RoundMode, BetSide, UserPosition, PrecisionPrediction, PrecisionCommitment,
-    RoundArchiveStatus, UserOutcomeType, UserRoundOutcome, ArchivedRoundSummary, OraclePayload, UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, OraclePayload, PrecisionCommitment,
+    PrecisionPrediction, Round, RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
+    UserRoundOutcome, UserStats,
 };
-use crate::common::{
-    _extend_persistent_ttl, payout_add, payout_mul, _accumulate_pending, _emit_action_rejected,
-    balance, _set_balance, sort_addresses,
-    DEFAULT_ARCHIVE_RETENTION, BPS_DENOMINATOR,
-};
-use crate::admin::{_require_supported_schema, _ensure_not_paused, _ensure_normal_mode, _set_mode};
-use crate::config::{_apply_protocol_fee_updown, _apply_protocol_fee_precision};
+use soroban_sdk::{symbol_short, Address, Env, Map, Symbol, Vec};
 
 /// Cancels the active round and deterministically refunds all participant stakes.
 pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
@@ -53,9 +51,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
             for i in 0..participants.len() {
                 if let Some(user) = participants.get(i) {
                     let pos_key = DataKey::Position(round_id, user.clone());
-                    if let Some(pos) =
-                        env.storage().persistent().get::<_, UserPosition>(&pos_key)
-                    {
+                    if let Some(pos) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
                         _accumulate_pending(&env, user.clone(), pos.amount)?;
                         let prediction_side = match pos.side {
                             BetSide::Up => 0,
@@ -197,9 +193,8 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         .ok_or(ContractError::OracleNotSet)?;
 
     oracle.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &oracle, symbol_short!("resolve"), e);
-        e
     })?;
 
     let round: Round = env
@@ -234,9 +229,9 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
             &env,
             &oracle,
             symbol_short!("resolve"),
-            ContractError::OracleContractMismatch,
+            ContractError::OracleNetworkMismatch,
         );
-        return Err(ContractError::OracleContractMismatch);
+        return Err(ContractError::OracleNetworkMismatch);
     }
 
     // Verify data freshness (max 300 seconds / 5 minutes old)
@@ -507,8 +502,11 @@ pub fn _resolve_updown_mode(
     let price_went_down = final_price < round.price_start;
     let price_unchanged = final_price == round.price_start;
 
-    let is_one_sided = (price_went_up && round.pool_down == 0 && round.pool_up > 0)
-        || (price_went_down && round.pool_up == 0 && round.pool_down > 0);
+    // One-sided: exactly one pool is empty (XOR).  Regardless of which way
+    // price moved, if the winning-side pool is 0 there are no winners to pay,
+    // and if the losing-side pool is 0 there is nothing to distribute — in
+    // both cases every participant gets a full refund.
+    let is_one_sided = (round.pool_up == 0) != (round.pool_down == 0);
 
     if !participants.is_empty() {
         if price_unchanged || is_one_sided {
@@ -609,17 +607,19 @@ pub fn _record_winnings_legacy(
         return Ok(());
     }
 
-    let (winning_pool, losing_pool, _fee_amount) =
+    let original_winning_pool = winning_pool;
+    let (dist_winning, dist_losing, _fee_amount) =
         _apply_protocol_fee_updown(env, round_id, winning_pool, losing_pool)?;
+    // Proportional share of ALL distributable funds (handles fee spillover from winning pool).
+    let total_distributable = payout_add(dist_winning, dist_losing)?;
 
     let keys: Vec<Address> = positions.keys();
     for i in 0..keys.len() {
         if let Some(user) = keys.get(i) {
             if let Some(position) = positions.get(user.clone()) {
                 if position.side == winning_side {
-                    let share_numerator = payout_mul(position.amount, losing_pool)?;
-                    let share = share_numerator / winning_pool;
-                    let payout = payout_add(position.amount, share)?;
+                    let payout =
+                        payout_mul(position.amount, total_distributable)? / original_winning_pool;
 
                     _accumulate_pending(env, user.clone(), payout)?;
                     _update_stats_win(env, user.clone())?;
@@ -779,8 +779,7 @@ pub fn _resolve_precision_mode(
     }
 
     if !winners.is_empty() && total_pot > 0 {
-        let (payout_pool, _fee_amount) =
-            _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        let (payout_pool, _fee_amount) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
         let winner_count = winners.len() as i128;
         let payout_per_winner = payout_pool / winner_count;
         let remainder = payout_pool % winner_count;
@@ -897,8 +896,7 @@ pub fn _resolve_precision_legacy(
     }
 
     if !winners.is_empty() && total_pot > 0 {
-        let (payout_pool, _fee_amount) =
-            _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        let (payout_pool, _fee_amount) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
         let winner_count = winners.len() as i128;
         let payout_per_winner = payout_pool / winner_count;
         let remainder = payout_pool % winner_count;
@@ -1008,17 +1006,19 @@ pub fn _record_winnings_indexed(
         return Ok(());
     }
 
-    let (winning_pool, losing_pool, _fee_amount) =
+    let original_winning_pool = winning_pool;
+    let (dist_winning, dist_losing, _fee_amount) =
         _apply_protocol_fee_updown(env, round_id, winning_pool, losing_pool)?;
+    // Proportional share of ALL distributable funds (handles fee spillover from winning pool).
+    let total_distributable = payout_add(dist_winning, dist_losing)?;
 
     for i in 0..participants.len() {
         if let Some(user) = participants.get(i) {
             let pos_key = DataKey::Position(round_id, user.clone());
             if let Some(position) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
                 if position.side == winning_side {
-                    let share_numerator = payout_mul(position.amount, losing_pool)?;
-                    let share = share_numerator / winning_pool;
-                    let payout = payout_add(position.amount, share)?;
+                    let payout =
+                        payout_mul(position.amount, total_distributable)? / original_winning_pool;
 
                     _accumulate_pending(env, user.clone(), payout)?;
                     _update_stats_win(env, user.clone())?;
@@ -1124,8 +1124,7 @@ pub fn _archive_round(
                 for i in 0..participants.len() {
                     if let Some(user) = participants.get(i) {
                         let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-                        let commit_key =
-                            DataKey::PrecisionCommitment(round.round_id, user.clone());
+                        let commit_key = DataKey::PrecisionCommitment(round.round_id, user.clone());
 
                         let pred_opt = env
                             .storage()
@@ -1205,6 +1204,7 @@ pub fn _archive_round(
         .set(&DataKey::RecentArchivedRoundIds, &recent);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn _persist_user_outcome(
     env: &Env,
     round_id: u64,
@@ -1227,10 +1227,22 @@ pub fn _persist_user_outcome(
         predicted_price,
         stake,
         payout,
-        outcome,
+        outcome: outcome.clone(),
     };
     env.storage().persistent().set(&key, &record);
     _extend_persistent_ttl(env, &key);
+
+    let outcome_type_u32 = match outcome {
+        UserOutcomeType::Win => 1u32,
+        UserOutcomeType::Loss => 0u32,
+        UserOutcomeType::Refund => 2u32,
+        UserOutcomeType::Cancel => 3u32,
+    };
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("payout"), symbol_short!("outcome")),
+        (round_id, round_mode, user.clone(), payout, outcome_type_u32),
+    );
 }
 
 pub fn _refund_under_threshold(
@@ -1248,9 +1260,7 @@ pub fn _refund_under_threshold(
             for i in 0..participants.len() {
                 if let Some(user) = participants.get(i) {
                     let pos_key = DataKey::Position(round_id, user.clone());
-                    if let Some(pos) =
-                        env.storage().persistent().get::<_, UserPosition>(&pos_key)
-                    {
+                    if let Some(pos) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
                         _accumulate_pending(env, user.clone(), pos.amount)?;
                         let prediction_side = match pos.side {
                             BetSide::Up => 0,

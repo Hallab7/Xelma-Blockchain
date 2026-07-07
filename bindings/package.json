@@ -18,7 +18,7 @@
     "build": "./node_modules/.bin/tsc",
     "lint": "./node_modules/.bin/tsc --noEmit",
     "test:parity": "node src/parity.js",
-    "test:errors": "node tests/contract-error-parity.test.js",
+    "test:errors": "vitest run tests/contract-error-parity.test.js",
     "test:wasm": "vitest run tests/wasm-parity.test.js",
     "test:vitest": "vitest run",
     "test:integration": "vitest run tests/integration.test.ts",

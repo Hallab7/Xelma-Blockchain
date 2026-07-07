@@ -116,5 +116,3 @@ fn test_oracle_and_heartbeat_ttl_extended() {
     });
     assert!(oracle_ttl >= 518_400);
 }
-
-

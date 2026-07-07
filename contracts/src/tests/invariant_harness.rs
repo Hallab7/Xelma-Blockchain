@@ -1,6 +1,7 @@
-extern crate std;
 // SPDX-License-Identifier: MIT
 //! Differential invariant test harness using a reference model.
+
+extern crate std;
 
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;

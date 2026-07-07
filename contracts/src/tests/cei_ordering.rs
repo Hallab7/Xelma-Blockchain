@@ -18,6 +18,7 @@ use soroban_sdk::{
 };
 
 /// Must match `CONFIG_TIMELOCK_LEDGERS` in contract.rs.
+#[allow(dead_code)]
 const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ fn setup() -> (Env, Address, Address, VirtualTokenContractClient<'static>) {
 /// balance increase, and the function is idempotent after the first claim.
 #[test]
 fn test_claim_winnings_cei_pending_cleared_after_claim() {
-    let (env, admin, oracle, client) = setup();
+    let (env, _admin, _oracle, client) = setup();
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
@@ -108,7 +109,10 @@ fn test_claim_winnings_cei_pending_cleared_after_claim() {
 
     // Idempotency: a second claim returns 0 and does not mutate state.
     let second_claim = client.claim_winnings(&alice);
-    assert_eq!(second_claim, 0, "second claim on empty pending must return 0");
+    assert_eq!(
+        second_claim, 0,
+        "second claim on empty pending must return 0"
+    );
     assert_eq!(
         client.balance(&alice),
         balance_after_claim,
@@ -124,7 +128,7 @@ fn test_claim_winnings_cei_pending_cleared_after_claim() {
 /// after the event Interaction.
 #[test]
 fn test_cancel_config_change_cei_key_removed_before_event() {
-    let (env, _admin, _oracle, client) = setup();
+    let (_env, _admin, _oracle, client) = setup();
 
     // Schedule a windows change (creates PendingConfigChange(Windows)).
     client.schedule_windows(&10, &20);
@@ -180,5 +184,3 @@ fn test_cancel_config_change_rejected_after_activation() {
         "cancellation must be rejected once activation ledger is reached"
     );
 }
-
-

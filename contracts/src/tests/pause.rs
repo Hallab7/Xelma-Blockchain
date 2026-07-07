@@ -124,7 +124,7 @@ fn test_protocol_health_paused() {
 #[test]
 fn test_protocol_health_not_paused_healthy() {
     let env = Env::default();
-    let (client, contract_id, _admin, oracle) = setup_contract(&env);
+    let (client, _contract_id, _admin, _oracle) = setup_contract(&env);
     let user = Address::generate(&env);
 
     // With oracle heartbeat active + no active round → NO_ACTIVE_ROUND
@@ -185,5 +185,3 @@ fn test_protocol_health_mint_initial_fails_while_paused() {
     let result = client.try_mint_initial(&user);
     assert!(result.is_err());
 }
-
-

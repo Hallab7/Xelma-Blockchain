@@ -386,5 +386,3 @@ fn test_get_max_pending_winnings_returns_configured_value() {
     apply_max_pending_winnings(&env, &client, None);
     assert_eq!(client.get_max_pending_winnings(), None);
 }
-
-

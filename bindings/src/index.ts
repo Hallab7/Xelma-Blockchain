@@ -103,6 +103,73 @@ export enum RuntimeMode {
   FullyPaused = 2,
 }
 
+export enum ProtocolStatus {
+  Active = 0,
+  Paused = 1,
+  ClaimsOnly = 2,
+}
+
+export enum RoundStatus {
+  Unknown = 0,
+  Betting = 1,
+  Running = 2,
+  AwaitingResolve = 3,
+  Resolved = 4,
+  Cancelled = 5,
+  FallbackRefund = 6,
+}
+
+export enum UserOutcomeType {
+  Win = 0,
+  Loss = 1,
+  Refund = 2,
+  Cancel = 3,
+}
+
+export interface UserRoundOutcome {
+  user: string;
+  round_mode: u32;
+  prediction_side: u32;
+  predicted_price: u128;
+  stake: i128;
+  payout: i128;
+  outcome: UserOutcomeType;
+}
+
+export interface OracleRotationProposal {
+  new_oracle: string;
+  proposed_at: u64;
+  expires_at: u64;
+}
+
+export interface ProtocolHealthStatus {
+  paused: boolean;
+  oracle_live: boolean;
+  oracle_status: u32;
+  has_active_round: boolean;
+  active_round_phase: u32;
+  schema_version: u32;
+  ledger_sequence: u32;
+  ledger_timestamp: u64;
+  status_code: u32;
+}
+
+export interface RoundPoolStats {
+  round_id: u64;
+  mode: RoundMode;
+  total_up_stake: i128;
+  total_down_stake: i128;
+  up_participant_count: u32;
+  down_participant_count: u32;
+  up_stake_ratio_bps: u32;
+  down_stake_ratio_bps: u32;
+  precision_total_stake: i128;
+  precision_participant_count: u32;
+  precision_prediction_count: u32;
+  precision_commitment_count: u32;
+  precision_revealed_count: u32;
+}
+
 
 export interface UserPosition {
   amount: i128;
@@ -149,6 +216,12 @@ export enum ConfigChangeKind {
   MaxPendingWinnings = 3,
   OracleStaleThreshold = 4,
   OracleMaxDeviationBps = 5,
+  ProtocolFeeBps = 6,
+  MinParticipants = 7,
+  MaxPrecisionParticipants = 8,
+  MintLimit = 9,
+  ArchiveRetention = 10,
+  CloseBufferLedgers = 11,
 }
 
 /**
@@ -163,7 +236,19 @@ export enum RoundArchiveStatus {
 /**
  * Payload for a scheduled critical config change.
  */
-export type ConfigChangePayload = {tag: "Windows", values: readonly [u32, u32]} | {tag: "MaxStake", values: readonly [Option<i128>]} | {tag: "MaxUserRoundExposure", values: readonly [Option<i128>]} | {tag: "MaxPendingWinnings", values: readonly [Option<i128>]} | {tag: "OracleStaleThreshold", values: readonly [u64]} | {tag: "OracleMaxDeviationBps", values: readonly [Option<u32>]};
+export type ConfigChangePayload =
+  | {tag: "Windows", values: readonly [u32, u32]}
+  | {tag: "MaxStake", values: readonly [Option<i128>]}
+  | {tag: "MaxUserRoundExposure", values: readonly [Option<i128>]}
+  | {tag: "MaxPendingWinnings", values: readonly [Option<i128>]}
+  | {tag: "OracleStaleThreshold", values: readonly [u64]}
+  | {tag: "OracleMaxDeviationBps", values: readonly [Option<u32>]}
+  | {tag: "ProtocolFeeBps", values: readonly [Option<u32>]}
+  | {tag: "MinParticipants", values: readonly [Option<u32>]}
+  | {tag: "MaxPrecisionParticipants", values: readonly [u32]}
+  | {tag: "MintLimit", values: readonly [u32]}
+  | {tag: "ArchiveRetention", values: readonly [u32]}
+  | {tag: "CloseBufferLedgers", values: readonly [u32]};
 
 
 /**
@@ -238,14 +323,6 @@ export const ContractError = {
    */
   3: {message:"OracleNotSet"},
   /**
-   * Only admin can perform this action
-   */
-  4: {message:"UnauthorizedAdmin"},
-  /**
-   * Only oracle can perform this action
-   */
-  5: {message:"UnauthorizedOracle"},
-  /**
    * Bet amount must be greater than zero
    */
   6: {message:"InvalidBetAmount"},
@@ -290,10 +367,6 @@ export const ContractError = {
    */
   16: {message:"RoundNotEnded"},
   /**
-   * Invalid price scale (must represent 4 decimal places)
-   */
-  17: {message:"InvalidPriceScale"},
-  /**
    * Oracle data is too old (STALE)
    */
   18: {message:"StaleOracleData"},
@@ -305,10 +378,6 @@ export const ContractError = {
    * An active round already exists and cannot be overwritten
    */
   20: {message:"RoundAlreadyActive"},
-  /**
-   * Admin and Oracle addresses cannot be identical
-   */
-  21: {message:"AdminIsOracle"},
   /**
    * Contract is paused for emergency recovery
    */
@@ -326,10 +395,6 @@ export const ContractError = {
    */
   25: {message:"PayoutOverflow"},
   /**
-   * Round has been cancelled and cannot be resolved
-   */
-  26: {message:"RoundCancelled"},
-  /**
    * Round cannot be cancelled (no active round or already resolved)
    */
   27: {message:"RoundNotCancellable"},
@@ -346,45 +411,25 @@ export const ContractError = {
    */
   30: {message:"PendingWinningsCapExceeded"},
   /**
-   * Start price is below the minimum allowed value
+   * Start price is outside the allowed range
    */
-  31: {message:"StartPriceTooLow"},
-  /**
-   * Start price exceeds the maximum allowed value
-   */
-  32: {message:"StartPriceTooHigh"},
+  31: {message:"InvalidStartPrice"},
   /**
    * Oracle payload nonce was already consumed for this round (replay)
    */
   33: {message:"OracleNonceReused"},
   /**
-   * Round has fewer participants than the configured minimum for competitive settlement
-   */
-  34: {message:"InsufficientParticipants"},
-  /**
    * Minimum participants value is out of valid range (must be 1–10000)
    */
   35: {message:"InvalidMinParticipants"},
   /**
-   * Oracle heartbeat status is out of range (must be 0, 1, or 2)
-   */
-  36: {message:"InvalidOracleStatus"},
-  /**
-   * Oracle stale threshold is out of valid range (must be 60–86400 seconds)
-   */
-  37: {message:"InvalidStaleThreshold"},
-  /**
    * Precision participant cap is out of range (must be 1–10000)
    */
-  38: {message:"InvalidPrecisionParticipantCap"},
+  38: {message:"InvalidPrecisionCap"},
   /**
    * Precision round has reached the configured participant cap
    */
-  39: {message:"PrecisionParticipantCapExceeded"},
-  /**
-   * Oracle max deviation bps is invalid (must be > 0)
-   */
-  40: {message:"InvalidOracleDeviationBps"},
+  39: {message:"PrecisionCapExceeded"},
   /**
    * Oracle final price deviates beyond configured threshold
    */
@@ -393,10 +438,6 @@ export const ContractError = {
    * Stored schema version is unknown or unsupported by this contract build
    */
   42: {message:"UnsupportedSchemaVersion"},
-  /**
-   * Migration path is invalid for the stored schema version
-   */
-  43: {message:"InvalidMigrationPath"},
   /**
    * Migration cannot run while a round is active
    */
@@ -422,17 +463,21 @@ export const ContractError = {
    */
   49: {message:"OracleNetworkMismatch"},
   /**
-   * Oracle payload contract_addr does not match the current contract
-   */
-  50: {message:"OracleContractMismatch"},
-  /**
    * Protocol fee bps is outside the allowed range (must be in 1..=MAX_PROTOCOL_FEE_BPS)
    */
   51: {message:"InvalidProtocolFeeBps"},
   /**
-   * Treasury withdrawal would underflow the accumulated treasury balance
+   * Rate limit for minting in the current ledger has been exceeded
    */
-  52: {message:"FeeTreasuryUnderflow"}
+  53: {message:"MintLimitExceeded"},
+  /**
+   * No pending oracle rotation proposal to accept or cancel
+   */
+  54: {message:"NoPendingRotation"},
+  /**
+   * Invalid archive retention limit
+   */
+  62: {message:"InvalidArchiveRetention"}
 }
 
 /**
@@ -949,6 +994,32 @@ export interface Client {
    */
   schedule_oracle_stale_threshold: ({seconds}: {seconds: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
+  migrate_schema_v2_to_v3: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  set_oracle_min_confidence_bps: ({min_bps}: {min_bps: Option<u32>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  set_oracle_strict_mode: ({enabled}: {enabled: boolean}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_oracle_min_confidence_bps: (options?: MethodOptions) => Promise<AssembledTransaction<Option<u32>>>
+  get_oracle_strict_mode: (options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
+  get_protocol_health: (options?: MethodOptions) => Promise<AssembledTransaction<ProtocolHealthStatus>>
+  get_protocol_status: (options?: MethodOptions) => Promise<AssembledTransaction<ProtocolStatus>>
+  get_round_status: ({round_id}: {round_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<RoundStatus>>
+  propose_oracle_rotation: ({new_oracle, expires_in_seconds}: {new_oracle: string, expires_in_seconds: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  accept_oracle_rotation: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  cancel_oracle_rotation: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_oracle_rotation_proposal: (options?: MethodOptions) => Promise<AssembledTransaction<Option<OracleRotationProposal>>>
+  schedule_protocol_fee_bps: ({bps}: {bps: Option<u32>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  set_protocol_fee_bps: ({bps}: {bps: Option<u32>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_protocol_fee_bps: (options?: MethodOptions) => Promise<AssembledTransaction<Option<u32>>>
+  get_protocol_fee_treasury: (options?: MethodOptions) => Promise<AssembledTransaction<i128>>
+  withdraw_protocol_fee: ({recipient, amount}: {recipient: string, amount: i128}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
+  set_mint_limit: ({limit}: {limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_mint_limit: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  set_archive_retention: ({limit}: {limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_archive_retention: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  set_close_buffer_ledgers: ({buffer_ledgers}: {buffer_ledgers: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_close_buffer_ledgers: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  get_round_pool_stats: (options?: MethodOptions) => Promise<AssembledTransaction<Option<RoundPoolStats>>>
+  get_user_archived_participation: ({user, round_id}: {user: string, round_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Option<UserRoundOutcome>>>
+
 }
 export class Client extends ContractClient {
   static async deploy<T = Client>(
@@ -1112,6 +1183,31 @@ export class Client extends ContractClient {
         get_max_precision_participants: this.txFromJSON<u32>,
         get_precision_predictions_page: this.txFromJSON<Array<PrecisionPrediction>>,
         set_max_precision_participants: this.txFromJSON<Result<void>>,
-        schedule_oracle_stale_threshold: this.txFromJSON<Result<void>>
+        schedule_oracle_stale_threshold: this.txFromJSON<Result<void>>,
+        migrate_schema_v2_to_v3: this.txFromJSON<Result<void>>,
+        set_oracle_min_confidence_bps: this.txFromJSON<Result<void>>,
+        set_oracle_strict_mode: this.txFromJSON<Result<void>>,
+        get_oracle_min_confidence_bps: this.txFromJSON<Option<u32>>,
+        get_oracle_strict_mode: this.txFromJSON<boolean>,
+        get_protocol_health: this.txFromJSON<ProtocolHealthStatus>,
+        get_protocol_status: this.txFromJSON<ProtocolStatus>,
+        get_round_status: this.txFromJSON<RoundStatus>,
+        propose_oracle_rotation: this.txFromJSON<Result<void>>,
+        accept_oracle_rotation: this.txFromJSON<Result<void>>,
+        cancel_oracle_rotation: this.txFromJSON<Result<void>>,
+        get_oracle_rotation_proposal: this.txFromJSON<Option<OracleRotationProposal>>,
+        schedule_protocol_fee_bps: this.txFromJSON<Result<void>>,
+        set_protocol_fee_bps: this.txFromJSON<Result<void>>,
+        get_protocol_fee_bps: this.txFromJSON<Option<u32>>,
+        get_protocol_fee_treasury: this.txFromJSON<i128>,
+        withdraw_protocol_fee: this.txFromJSON<Result<i128>>,
+        set_mint_limit: this.txFromJSON<Result<void>>,
+        get_mint_limit: this.txFromJSON<u32>,
+        set_archive_retention: this.txFromJSON<Result<void>>,
+        get_archive_retention: this.txFromJSON<u32>,
+        set_close_buffer_ledgers: this.txFromJSON<Result<void>>,
+        get_close_buffer_ledgers: this.txFromJSON<u32>,
+        get_round_pool_stats: this.txFromJSON<Option<RoundPoolStats>>,
+        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>
   }
 }

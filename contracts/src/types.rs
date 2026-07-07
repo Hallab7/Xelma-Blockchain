@@ -134,6 +134,10 @@ pub enum DataKey {
     MintLimitConfig,
     /// Pending two-step oracle rotation proposal with expiry.
     OracleRotationProposal,
+    /// Configurable archive retention limit: maximum number of ArchivedRound entries
+    /// retained on-chain before the oldest are pruned (FIFO). If unset, the protocol
+    /// default is used.
+    ArchiveRetention,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
@@ -474,4 +478,30 @@ pub enum RoundStatus {
     Cancelled = 5,
     /// Settlement triggered but insufficient participants; all stakes refunded.
     FallbackRefund = 6,
+}
+
+/// Terminal outcome persisted per user per archived round.
+///
+/// Allows `get_user_archived_participation` to answer profile/history
+/// queries without replaying the full event stream.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum UserOutcomeType {
+    Win = 0,
+    Loss = 1,
+    Refund = 2,
+    Cancel = 3,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UserRoundOutcome {
+    pub user: Address,
+    pub round_mode: u32,
+    pub prediction_side: u32,
+    pub predicted_price: u128,
+    pub stake: i128,
+    pub payout: i128,
+    pub outcome: UserOutcomeType,
 }

@@ -66,16 +66,10 @@ pub enum ContractError {
     OracleNonceReused = 33,
     /// Minimum participants value is out of valid range (must be 1–10000)
     InvalidMinParticipants = 35,
-    /// Oracle heartbeat status is out of range (must be 0, 1, or 2)
-    InvalidOracleStatus = 36,
-    /// Oracle stale threshold is out of valid range (must be 60–86400 seconds)
-    InvalidStaleThreshold = 37,
     /// Precision participant cap is out of range (must be 1–10000)
-    InvalidPrecisionParticipantCap = 38,
+    InvalidPrecisionCap = 38,
     /// Precision round has reached the configured participant cap
-    PrecisionParticipantCapExceeded = 39,
-    /// Oracle max deviation bps is invalid (must be > 0)
-    InvalidOracleDeviationBps = 40,
+    PrecisionCapExceeded = 39,
     /// Oracle final price deviates beyond configured threshold
     OracleDeviationExceeded = 41,
     /// Stored schema version is unknown or unsupported by this contract build
@@ -93,8 +87,6 @@ pub enum ContractError {
     HashMismatch = 48,
     /// Oracle payload network_id does not match the runtime network
     OracleNetworkMismatch = 49,
-    /// Oracle payload contract_addr does not match the current contract
-    OracleContractMismatch = 50,
     /// Protocol fee bps is outside the allowed range (must be in `1..=MAX_PROTOCOL_FEE_BPS`)
     InvalidProtocolFeeBps = 51,
 
@@ -102,6 +94,6 @@ pub enum ContractError {
     MintLimitExceeded = 53,
     /// No pending oracle rotation proposal to accept or cancel
     NoPendingRotation = 54,
-    /// Pending oracle rotation proposal has expired; submit a fresh proposal
-    RotationExpired = 55,
+    /// Invalid archive retention limit
+    InvalidArchiveRetention = 62,
 }

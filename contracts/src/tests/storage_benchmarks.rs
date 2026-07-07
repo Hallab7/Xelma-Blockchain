@@ -337,5 +337,3 @@ fn bench_precision_mode_indexed_keys() {
     assert_eq!(client.get_pending_winnings(&alice), 0);
     assert_eq!(client.get_pending_winnings(&carol), 0);
 }
-
-

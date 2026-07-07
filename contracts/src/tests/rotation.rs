@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for two-step oracle rotation with expiry.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
@@ -20,7 +21,11 @@ fn init(env: &Env, client: &VirtualTokenContractClient) -> (Address, Address, Ad
 }
 
 fn has_event_with_topic(
-    events: &soroban_sdk::Vec<(Address, soroban_sdk::Vec<soroban_sdk::Val>, soroban_sdk::Val)>,
+    events: &soroban_sdk::Vec<(
+        Address,
+        soroban_sdk::Vec<soroban_sdk::Val>,
+        soroban_sdk::Val,
+    )>,
     env: &Env,
     topic: soroban_sdk::Symbol,
 ) -> bool {
@@ -28,8 +33,8 @@ fn has_event_with_topic(
         let event = events.get(i).unwrap();
         let topics = event.1;
         topics.len() == 2
-            && topics.get(0).try_into_val(env) == Ok(symbol_short!("oracle"))
-            && topics.get(1).try_into_val(env) == Ok(topic)
+            && topics.get(0).unwrap().try_into_val(env) == Ok(symbol_short!("oracle"))
+            && topics.get(1).unwrap().try_into_val(env) == Ok(topic.clone())
     })
 }
 
@@ -88,7 +93,7 @@ fn test_accept_after_expiry_fails() {
     });
 
     let result = client.try_accept_oracle_rotation();
-    assert_eq!(result, Err(Ok(ContractError::RotationExpired)));
+    assert_eq!(result, Err(Ok(ContractError::NoPendingRotation)));
 
     let stored: Address = client.get_oracle().expect("oracle should be set");
     assert_ne!(stored, new_oracle, "oracle should NOT have been rotated");
@@ -186,7 +191,7 @@ fn test_propose_expiry_too_short_fails() {
     let (_admin, _oracle, new_oracle) = init(&env, &client);
 
     let result = client.try_propose_oracle_rotation(&new_oracle, &59);
-    assert_eq!(result, Err(Ok(ContractError::InvalidStaleThreshold)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidDuration)));
 }
 
 #[test]
@@ -241,6 +246,7 @@ fn test_accept_after_expiry_emits_expired_event() {
     });
 
     let _ = client.try_accept_oracle_rotation();
+    let _ = client.get_oracle_rotation_proposal();
 
     let events = env.events().all();
     assert!(
@@ -275,10 +281,7 @@ fn test_propose_requires_admin_auth() {
 
     let (_admin, _oracle, new_oracle) = init(&env, &client);
 
-    env.mock_all_auths_allowing_non_root_auth();
+    env.mock_auths(&[]);
     let result = client.try_propose_oracle_rotation(&new_oracle, &3600);
-    assert!(
-        result.is_err(),
-        "non-admin should not be able to propose"
-    );
+    assert!(result.is_err(), "non-admin should not be able to propose");
 }

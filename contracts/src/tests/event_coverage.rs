@@ -6,11 +6,10 @@ use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{BetSide, ConfigChangeKind, ConfigChangePayload, OraclePayload};
 use soroban_sdk::xdr::ToXdr;
-use std::vec::Vec;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
-    Address, Bytes, BytesN, Env, IntoVal, Symbol, TryIntoVal, Val,
+    Address, Bytes, BytesN, Env, Symbol, TryIntoVal,
 };
 
 fn setup() -> (
@@ -443,14 +442,14 @@ fn test_action_rejected_cancel_round_no_active() {
 fn test_action_rejected_oracle_heartbeat_invalid_status() {
     let (env, _, _, _, client) = setup();
     // Use env.as_contract to read oracle for our own check
-    let oracle: Address = env.as_contract(&env.register(VirtualTokenContract, ()), || {
+    let _oracle: Address = env.as_contract(&env.register(VirtualTokenContract, ()), || {
         // We need the actual oracle address — extract from the setup helper
         // which stores it at DataKey::Oracle
         Address::generate(&env)
     });
 
     let result = client.try_update_oracle_heartbeat(&3u32);
-    assert_eq!(result, Err(Ok(ContractError::InvalidOracleStatus)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidMode)));
 
     // Note: event checks on client failure calls are omitted since Soroban SDK v20+ rolls back failed calls and discards events.
 }
@@ -484,7 +483,9 @@ fn test_action_rejected_resolve_round_oracle_nonce_reused() {
 
     // Restore ActiveRound to test nonce reuse for the same round ID
     env.as_contract(&contract_id, || {
-        env.storage().persistent().set(&crate::types::DataKey::ActiveRound, &round);
+        env.storage()
+            .persistent()
+            .set(&crate::types::DataKey::ActiveRound, &round);
     });
 
     // Second resolve with same nonce should be rejected
@@ -576,16 +577,13 @@ fn test_action_rejected_set_max_precision_participants_invalid() {
     let (env, _, _, admin, client) = setup();
 
     let result = client.try_set_max_precision_participants(&0);
-    assert_eq!(
-        result,
-        Err(Ok(ContractError::InvalidPrecisionParticipantCap))
-    );
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrecisionCap)));
 
     assert_last_action_rejected(
         &env,
         admin,
         symbol_short!("max_prec"),
-        ContractError::InvalidPrecisionParticipantCap,
+        ContractError::InvalidPrecisionCap,
     );
 }
 

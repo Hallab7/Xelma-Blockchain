@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: MIT
-use soroban_sdk::{
-    symbol_short, Address, Env, Symbol,
+use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
+use crate::common::{
+    _emit_action_rejected, _emit_config_updated, _extend_persistent_ttl, _set_balance, balance,
+    payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS, DEFAULT_ARCHIVE_RETENTION,
+    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION,
+    MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
+    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PRECISION_PARTICIPANTS_LIMIT,
+    MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS, MIN_ARCHIVE_RETENTION, MIN_CAP_VALUE,
+    MIN_ORACLE_STALE_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{
-    DataKey, ConfigChangeKind, ConfigChangePayload, PendingConfigChange,
-};
-use crate::common::{
-    _extend_persistent_ttl, payout_add, _emit_config_updated,
-    _emit_action_rejected, balance, _set_balance,
-    MIN_CAP_VALUE, MAX_MIN_PARTICIPANTS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
-    MAX_PRECISION_PARTICIPANTS_LIMIT, MAX_BET_WINDOW_LEDGERS, MAX_RUN_WINDOW_LEDGERS,
-    MAX_CLOSE_BUFFER_LEDGERS, MAX_ORACLE_DEVIATION_BPS, MAX_PROTOCOL_FEE_BPS, BPS_DENOMINATOR,
-    DEFAULT_ORACLE_STALE_THRESHOLD, MIN_ORACLE_STALE_THRESHOLD, MAX_ORACLE_STALE_THRESHOLD,
-    CONFIG_TIMELOCK_LEDGERS, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS,
-    DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_ARCHIVE_RETENTION, MIN_ARCHIVE_RETENTION, MAX_ARCHIVE_RETENTION,
-};
-use crate::admin::{_require_supported_schema, _ensure_not_paused, _ensure_normal_mode};
+use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange};
+use soroban_sdk::{symbol_short, Address, Env};
 
 pub fn set_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
     schedule_windows(env, bet_ledgers, run_ledgers)
@@ -32,10 +28,7 @@ pub fn get_max_stake(env: Env) -> Option<i128> {
     env.storage().persistent().get(&key)
 }
 
-pub fn set_max_user_exposure(
-    env: Env,
-    max_exposure: Option<i128>,
-) -> Result<(), ContractError> {
+pub fn set_max_user_exposure(env: Env, max_exposure: Option<i128>) -> Result<(), ContractError> {
     schedule_max_user_exposure(env, max_exposure)
 }
 
@@ -45,18 +38,11 @@ pub fn get_max_user_exposure(env: Env) -> Option<i128> {
     env.storage().persistent().get(&key)
 }
 
-pub fn set_max_pending_winnings(
-    env: Env,
-    max_pending: Option<i128>,
-) -> Result<(), ContractError> {
+pub fn set_max_pending_winnings(env: Env, max_pending: Option<i128>) -> Result<(), ContractError> {
     schedule_max_pending_winnings(env, max_pending)
 }
 
-pub fn schedule_windows(
-    env: Env,
-    bet_ledgers: u32,
-    run_ledgers: u32,
-) -> Result<(), ContractError> {
+pub fn schedule_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     _validate_windows(bet_ledgers, run_ledgers)?;
     _schedule_config_change(
@@ -160,9 +146,8 @@ pub fn withdraw_protocol_fee(
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("withdraw"), e);
-        e
     })?;
 
     if amount <= 0 {
@@ -171,9 +156,12 @@ pub fn withdraw_protocol_fee(
 
     let treasury_key = DataKey::ProtocolFeeTreasury;
     let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
+    if amount > current {
+        return Err(ContractError::InsufficientBalance);
+    }
     let new_treasury = current
         .checked_sub(amount)
-        .ok_or(ContractError::FeeTreasuryUnderflow)?;
+        .ok_or(ContractError::InsufficientBalance)?;
     env.storage().persistent().set(&treasury_key, &new_treasury);
     _extend_persistent_ttl(&env, &treasury_key);
 
@@ -190,10 +178,7 @@ pub fn withdraw_protocol_fee(
     Ok(amount)
 }
 
-pub fn get_pending_config_change(
-    env: Env,
-    kind: ConfigChangeKind,
-) -> Option<PendingConfigChange> {
+pub fn get_pending_config_change(env: Env, kind: ConfigChangeKind) -> Option<PendingConfigChange> {
     env.storage()
         .persistent()
         .get(&DataKey::PendingConfigChange(kind))
@@ -235,9 +220,8 @@ pub fn cancel_config_change(env: Env, kind: ConfigChangeKind) -> Result<(), Cont
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("cncl_cfg"), e);
-        e
     })?;
 
     let key = DataKey::PendingConfigChange(kind.clone());
@@ -283,9 +267,8 @@ pub fn set_close_buffer_ledgers(env: Env, buffer_ledgers: u32) -> Result<(), Con
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("closebuf"), e);
-        e
     })?;
 
     _validate_close_buffer_ledgers(buffer_ledgers)?;
@@ -325,9 +308,8 @@ pub fn set_min_participants(env: Env, min: Option<u32>) -> Result<(), ContractEr
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("min_par"), e);
-        e
     })?;
 
     let key = DataKey::MinParticipants;
@@ -369,9 +351,8 @@ pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), Contract
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("max_prec"), e);
-        e
     })?;
 
     if max == 0 || max > MAX_PRECISION_PARTICIPANTS_LIMIT {
@@ -379,9 +360,9 @@ pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), Contract
             &env,
             &admin,
             symbol_short!("max_prec"),
-            ContractError::InvalidPrecisionParticipantCap,
+            ContractError::InvalidPrecisionCap,
         );
-        return Err(ContractError::InvalidPrecisionParticipantCap);
+        return Err(ContractError::InvalidPrecisionCap);
     }
 
     let key = DataKey::MaxPrecisionParticipants;
@@ -417,9 +398,8 @@ pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("mint_lim"), e);
-        e
     })?;
 
     let old_limit: u32 = env
@@ -454,12 +434,11 @@ pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> 
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).map_err(|e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("set_arch"), e);
-        e
     })?;
 
-    if limit < MIN_ARCHIVE_RETENTION || limit > MAX_ARCHIVE_RETENTION {
+    if !(MIN_ARCHIVE_RETENTION..=MAX_ARCHIVE_RETENTION).contains(&limit) {
         _emit_action_rejected(
             &env,
             &admin,
@@ -535,7 +514,7 @@ pub fn _validate_max_stake(max_amount: Option<i128>) -> Result<(), ContractError
 
 pub fn _validate_oracle_stale_threshold(seconds: u64) -> Result<(), ContractError> {
     if !(MIN_ORACLE_STALE_THRESHOLD..=MAX_ORACLE_STALE_THRESHOLD).contains(&seconds) {
-        return Err(ContractError::InvalidStaleThreshold);
+        return Err(ContractError::InvalidDuration);
     }
     Ok(())
 }
@@ -543,7 +522,7 @@ pub fn _validate_oracle_stale_threshold(seconds: u64) -> Result<(), ContractErro
 pub fn _validate_oracle_max_deviation_bps(bps: Option<u32>) -> Result<(), ContractError> {
     if let Some(v) = bps {
         if v == 0 || v > MAX_ORACLE_DEVIATION_BPS {
-            return Err(ContractError::InvalidOracleDeviationBps);
+            return Err(ContractError::WindowOutOfRange);
         }
     }
     Ok(())
@@ -734,9 +713,8 @@ pub fn _schedule_config_change(
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(env).map_err(|e| {
+    _ensure_not_paused(env).inspect_err(|&e| {
         _emit_action_rejected(env, &admin, symbol_short!("sched"), e);
-        e
     })?;
 
     let key = DataKey::PendingConfigChange(kind.clone());
@@ -824,10 +802,7 @@ pub fn _apply_config_payload(
                 env.storage().persistent().remove(&key);
             }
         }
-        (
-            ConfigChangeKind::MaxPendingWinnings,
-            ConfigChangePayload::MaxPendingWinnings(max),
-        ) => {
+        (ConfigChangeKind::MaxPendingWinnings, ConfigChangePayload::MaxPendingWinnings(max)) => {
             _validate_max_stake(*max)?;
             let key = DataKey::MaxPendingWinnings;
             if let Some(v) = max {
@@ -871,7 +846,7 @@ pub fn _apply_config_payload(
             #[allow(deprecated)]
             env.events().publish(
                 (symbol_short!("protocol"), symbol_short!("fee_bps")),
-                (bps.clone(),),
+                (*bps,),
             );
         }
         _ => return Err(ContractError::InvalidMode),

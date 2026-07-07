@@ -839,18 +839,14 @@ fn test_cross_round_mode_alternation() {
 
     // Verify Up/Down position keys cleared after resolve
     env.as_contract(&contract_id, || {
-        assert!(
-            !env.storage().persistent().has(&DataKey::Position(
-                round1.round_id,
-                alice.clone()
-            ))
-        );
-        assert!(
-            !env.storage().persistent().has(&DataKey::Position(
-                round1.round_id,
-                bob.clone()
-            ))
-        );
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::Position(round1.round_id, alice.clone())));
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::Position(round1.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 1
@@ -874,12 +870,10 @@ fn test_cross_round_mode_alternation() {
 
     // No Up/Down position keys should exist for round 2
     env.as_contract(&contract_id, || {
-        assert!(
-            !env.storage().persistent().has(&DataKey::Position(
-                round2.round_id,
-                alice.clone()
-            ))
-        );
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::Position(round2.round_id, alice.clone())));
     });
 
     // Resolve at 2298 — Alice closest (diff 1) wins entire pot
@@ -900,18 +894,14 @@ fn test_cross_round_mode_alternation() {
 
     // Verify Precision position keys cleared after resolve
     env.as_contract(&contract_id, || {
-        assert!(
-            !env.storage().persistent().has(&DataKey::PrecisionPosition(
-                round2.round_id,
-                alice.clone()
-            ))
-        );
-        assert!(
-            !env.storage().persistent().has(&DataKey::PrecisionPosition(
-                round2.round_id,
-                bob.clone()
-            ))
-        );
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::PrecisionPosition(round2.round_id, alice.clone())));
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::PrecisionPosition(round2.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 2
@@ -934,12 +924,10 @@ fn test_cross_round_mode_alternation() {
 
     // No stale Precision keys from round 2 should remain
     env.as_contract(&contract_id, || {
-        assert!(
-            !env.storage().persistent().has(&DataKey::PrecisionPosition(
-                round2.round_id,
-                bob.clone()
-            ))
-        );
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::PrecisionPosition(round2.round_id, bob.clone())));
     });
 
     // Resolve — DOWN wins (price 2.5 < 3.0)
@@ -960,18 +948,14 @@ fn test_cross_round_mode_alternation() {
 
     // Verify Up/Down position keys cleared for round 3
     env.as_contract(&contract_id, || {
-        assert!(
-            !env.storage().persistent().has(&DataKey::Position(
-                round3.round_id,
-                alice.clone()
-            ))
-        );
-        assert!(
-            !env.storage().persistent().has(&DataKey::Position(
-                round3.round_id,
-                bob.clone()
-            ))
-        );
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::Position(round3.round_id, alice.clone())));
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::Position(round3.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 3
@@ -990,5 +974,3 @@ fn test_cross_round_mode_alternation() {
     // Bob:   1000 - 50(R1) + 0 - 150(R2) + 0 - 100(R3) + 0 = 700
     assert_eq!(client.balance(&bob), 700_0000000);
 }
-
-
