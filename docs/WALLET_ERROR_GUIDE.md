@@ -53,6 +53,8 @@ This guide maps each smart‑contract error defined in `contracts/src/errors.rs`
 | `0x2e` | 46 | HashMismatch | Revealed prediction hash does not match committed hash | "Hash mismatch."
 | `0x2f` | 47 | PrecisionParticipantCapExceeded | Precision round has reached the configured participant cap | "Precision participant cap exceeded."
 | `0x30` | 48 | InvalidPrecisionParticipantCap | Precision participant cap is out of range (must be 1–10000) | "Invalid precision participant cap."
+| `0x3f` | 63 | InvalidCommitment | Commitment hash is malformed (e.g. all-zero placeholder) | "Invalid commitment hash."
+| `0x40` | 64 | InvalidSalt | Reveal salt fails minimum entropy rules | "Invalid reveal salt."
 
 ## Integration Walkthroughs
 ### 1. Handling errors in a Freighter wallet

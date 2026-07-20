@@ -143,8 +143,12 @@ metadata field is meaningful:
 
 Emitted for every participant who placed a bet/prediction and was on the
 losing side of a competitive settlement. **Not** emitted for refund paths
-(price-unchanged, one-sided pool, min-participants fallback, or admin
-cancellation) — those cases use their respective refund events instead.
+(price-unchanged, one-sided pool, min-participants fallback, admin
+cancellation, or Precision rounds where **nobody revealed** and all
+commitments are refunded) — those cases use their respective refund
+outcomes instead. When ≥1 Precision prediction is revealed, unrevealed
+commitments forfeit to the pot and **do** emit this loss event
+(`predicted_price = 0`).
 
 | Position | Field            | Type      | Description                                                              |
 |----------|------------------|-----------|--------------------------------------------------------------------------|

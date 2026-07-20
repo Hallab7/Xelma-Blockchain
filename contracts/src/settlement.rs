@@ -778,7 +778,38 @@ pub fn _resolve_precision_mode(
         }
     }
 
-    if !winners.is_empty() && total_pot > 0 {
+    // Unrevealed-commit settlement policy (deterministic):
+    // - If ≥1 prediction was revealed (or placed directly): unrevealed
+    //   commitments forfeit to the pot and are treated as losers.
+    // - If nobody revealed: refund every participant stake (including
+    //   unrevealed commitments) so liquidity cannot be locked forever and
+    //   pot conservation holds with Σ refunds == total_pot.
+    if winners.is_empty() {
+        if total_pot > 0 {
+            for i in 0..participants.len() {
+                if let Some(user) = participants.get(i) {
+                    let stake = participant_amounts.get(i).unwrap_or(0);
+                    if stake > 0 {
+                        _accumulate_pending(env, user.clone(), stake)?;
+                        _persist_user_outcome(
+                            env,
+                            round_id,
+                            1,
+                            &user,
+                            2,
+                            0,
+                            stake,
+                            stake,
+                            UserOutcomeType::Refund,
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    if total_pot > 0 {
         let (payout_pool, _fee_amount) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
         let winner_count = winners.len() as i128;
         let payout_per_winner = payout_pool / winner_count;
@@ -1285,12 +1316,26 @@ pub fn _refund_under_threshold(
             for i in 0..participants.len() {
                 if let Some(user) = participants.get(i) {
                     let pred_key = DataKey::PrecisionPosition(round_id, user.clone());
+                    let commit_key = DataKey::PrecisionCommitment(round_id, user.clone());
+                    let mut refund_amount = 0i128;
                     if let Some(pred) = env
                         .storage()
                         .persistent()
                         .get::<_, PrecisionPrediction>(&pred_key)
                     {
-                        _accumulate_pending(env, user.clone(), pred.amount)?;
+                        refund_amount = pred.amount;
+                    } else if let Some(commit) = env
+                        .storage()
+                        .persistent()
+                        .get::<_, PrecisionCommitment>(&commit_key)
+                    {
+                        // Unrevealed commitments must be refunded on the
+                        // insufficient-participants fallback path (same
+                        // conservation rule as cancel_round).
+                        refund_amount = commit.amount;
+                    }
+                    if refund_amount > 0 {
+                        _accumulate_pending(env, user.clone(), refund_amount)?;
                         _persist_user_outcome(
                             env,
                             round_id,
@@ -1298,8 +1343,8 @@ pub fn _refund_under_threshold(
                             &user,
                             2,
                             0,
-                            pred.amount,
-                            pred.amount,
+                            refund_amount,
+                            refund_amount,
                             UserOutcomeType::Refund,
                         );
                     }
@@ -1314,7 +1359,10 @@ pub fn _refund_under_threshold(
                 .remove(&DataKey::Position(round_id, user.clone()));
             env.storage()
                 .persistent()
-                .remove(&DataKey::PrecisionPosition(round_id, user));
+                .remove(&DataKey::PrecisionPosition(round_id, user.clone()));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::PrecisionCommitment(round_id, user));
         }
     }
     env.storage()

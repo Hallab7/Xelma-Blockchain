@@ -74,6 +74,20 @@ The oracle calls `resolve_round` after `end_ledger` is reached. On success:
 - Participant positions (`UpDownPositions`, `PrecisionPositions`) are removed.
 - Pending winnings for winners are written to `PendingWinnings(address)`.
 
+### Precision commit-reveal windows
+
+| Phase | Ledger range | Allowed actions |
+|---|---|---|
+| Betting | `ledger < bet_end_ledger` | `commit_prediction`, `place_precision_prediction` |
+| Reveal | `bet_end_ledger ≤ ledger < end_ledger` | `reveal_prediction` only |
+| Resolve | `ledger ≥ end_ledger` | `resolve_round` |
+
+**Unrevealed commitments:** If at least one prediction is revealed, any
+still-unrevealed commitment **forfeits to the pot**. If nobody reveals,
+every committed stake is **refunded** to pending winnings so funds cannot
+remain locked. Admin cancel and insufficient-participant fallback also refund
+unrevealed commitments.
+
 ## Claiming Winnings
 
 Users call `claim_winnings` any time after a round resolves. The pending amount

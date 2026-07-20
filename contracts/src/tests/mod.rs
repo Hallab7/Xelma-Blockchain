@@ -5,7 +5,7 @@
 mod betting;
 mod cei_ordering;
 mod chaos_recovery;
-// mod commit_reveal_e2e; // upstream bug
+mod commit_reveal_e2e;
 mod config_helpers;
 // mod config_timelock; // upstream bug
 mod cost_benchmarks;

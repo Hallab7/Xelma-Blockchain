@@ -477,7 +477,15 @@ export const ContractError = {
   /**
    * Invalid archive retention limit
    */
-  62: {message:"InvalidArchiveRetention"}
+  62: {message:"InvalidArchiveRetention"},
+  /**
+   * Commitment hash is malformed (e.g. the all-zero placeholder)
+   */
+  63: {message:"InvalidCommitment"},
+  /**
+   * Reveal salt fails minimum entropy rules (all-zero or constant-byte)
+   */
+  64: {message:"InvalidSalt"}
 }
 
 /**
