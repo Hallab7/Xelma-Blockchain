@@ -786,13 +786,12 @@ fn test_event_coverage_round_summary() {
             let (_contract, topics, _data) = e;
             topics.len() == 2
                 && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-                && topics.get(1).unwrap().try_into_val(&env)
-                    == Ok(soroban_sdk::Symbol::new(&env, "summary"))
+                && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
         })
         .expect("Up/Down summary event should exist");
 
     let (_contract, _topics, data) = summary_event;
-    // Payload: (round_id: u64, mode: u32, price_start: u128, price_final: u128, participant_count: u32, total_pot: i128, status: u32)
+    // Payload: (round_id: u64, mode: u32, price_start: u128, price_final: u128, participant_count: u32, total_pot: i128, fee_amount: i128, status: u32)
     assert_eq!(
         data.try_into_val(&env),
         Ok((
@@ -802,6 +801,7 @@ fn test_event_coverage_round_summary() {
             1_2000000u128,
             2u32,
             300_0000000i128,
+            0i128,
             0u32
         )) // status 0 = Resolved
     );
@@ -839,12 +839,14 @@ fn test_event_coverage_round_summary() {
             let (_contract, topics, data) = e;
             if topics.len() == 2
                 && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-                && topics.get(1).unwrap().try_into_val(&env)
-                    == Ok(soroban_sdk::Symbol::new(&env, "summary"))
+                && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
             {
-                let parsed_opt: Result<(u64, u32, u128, u128, u32, i128, u32), _> =
-                    data.try_into_val(&env);
-                if let Ok((r_id, _, _, _, _, _, _)) = parsed_opt {
+                #[allow(clippy::type_complexity)]
+                let parsed_opt: Result<
+                    (u64, u32, u128, u128, u32, i128, i128, u32),
+                    _,
+                > = data.try_into_val(&env);
+                if let Ok((r_id, _, _, _, _, _, _, _)) = parsed_opt {
                     return r_id == round_id;
                 }
             }
@@ -862,6 +864,7 @@ fn test_event_coverage_round_summary() {
             2150u128,
             2u32,
             400_0000000i128,
+            0i128,
             0u32
         )) // status 0 = Resolved
     );
@@ -881,12 +884,14 @@ fn test_event_coverage_round_summary() {
             let (_contract, topics, data) = e;
             if topics.len() == 2
                 && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-                && topics.get(1).unwrap().try_into_val(&env)
-                    == Ok(soroban_sdk::Symbol::new(&env, "summary"))
+                && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
             {
-                let parsed_opt: Result<(u64, u32, u128, u128, u32, i128, u32), _> =
-                    data.try_into_val(&env);
-                if let Ok((r_id, _, _, _, _, _, _)) = parsed_opt {
+                #[allow(clippy::type_complexity)]
+                let parsed_opt: Result<
+                    (u64, u32, u128, u128, u32, i128, i128, u32),
+                    _,
+                > = data.try_into_val(&env);
+                if let Ok((r_id, _, _, _, _, _, _, _)) = parsed_opt {
                     return r_id == cancel_round_id;
                 }
             }
@@ -904,6 +909,7 @@ fn test_event_coverage_round_summary() {
             0u128,
             1u32,
             50_0000000i128,
+            0i128,
             1u32
         )) // status 1 = Cancelled
     );

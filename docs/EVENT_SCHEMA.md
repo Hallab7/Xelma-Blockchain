@@ -195,7 +195,8 @@ Emitted when a round is resolved, cancelled, or refunded. Contains compact settl
 | 3        | `price_final`       | `u128` | Settlement price (or `0` for administrative cancellation) (4 dec.)    |
 | 4        | `participant_count` | `u32`  | Total unique user participants in the round                           |
 | 5        | `total_pot`         | `i128` | Total accumulated round pot (in stroops)                              |
-| 6        | `status`            | `u32`  | Round status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund   |
+| 6        | `fee_amount`        | `i128` | Total protocol fees collected from the round pot (in stroops)         |
+| 7        | `status`            | `u32`  | Round status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund   |
 
 ---
 
