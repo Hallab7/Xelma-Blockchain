@@ -3,7 +3,7 @@ extern crate std;
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::types::{BetSide, RoundMode, UserOutcomeType};
-use soroban_sdk::testutils::{Address as _, Ledger};
+use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
 
 #[test]
@@ -34,10 +34,10 @@ fn test_simulate_updown() {
     assert_eq!(sim_up.mode, RoundMode::UpDown);
     assert_eq!(sim_up.pool_up, 500);
     assert_eq!(sim_up.pool_down, 300);
-    
+
     // There are two outcomes
     assert_eq!(sim_up.outcomes.len(), 2);
-    
+
     // p1 wins, gets 500 (stake) + 300 (loser's) - fees if applicable (assuming 0% here as default)
     // wait, fee is 0 by default.
     let mut p1_outcome = sim_up.outcomes.get(0).unwrap();
@@ -47,10 +47,10 @@ fn test_simulate_updown() {
         p1_outcome = p2_outcome;
         p2_outcome = temp;
     }
-    
+
     assert_eq!(p1_outcome.outcome, UserOutcomeType::Win);
     assert_eq!(p1_outcome.payout, 800);
-    
+
     assert_eq!(p2_outcome.outcome, UserOutcomeType::Loss);
     assert_eq!(p2_outcome.payout, 0);
 
