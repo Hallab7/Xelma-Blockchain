@@ -466,22 +466,16 @@ pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, 
                 if price_went_up {
                     winning_side = BetSide::Up;
                     winning_pool = round.pool_up;
-                    let (dw, dl, fee) = calculate_protocol_fee_updown(
-                        bps,
-                        round.pool_up,
-                        round.pool_down,
-                    )?;
+                    let (dw, dl, fee) =
+                        calculate_protocol_fee_updown(bps, round.pool_up, round.pool_down)?;
                     dist_winning = dw;
                     dist_losing = dl;
                     total_fee = fee;
                 } else if price_went_down {
                     winning_side = BetSide::Down;
                     winning_pool = round.pool_down;
-                    let (dw, dl, fee) = calculate_protocol_fee_updown(
-                        bps,
-                        round.pool_down,
-                        round.pool_up,
-                    )?;
+                    let (dw, dl, fee) =
+                        calculate_protocol_fee_updown(bps, round.pool_down, round.pool_up)?;
                     dist_winning = dw;
                     dist_losing = dl;
                     total_fee = fee;
@@ -492,10 +486,11 @@ pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, 
 
             for i in 0..participants.len() {
                 if let Some(user) = participants.get(i) {
-                    if let Some(pos) = env.storage().persistent().get::<_, UserPosition>(&DataKey::Position(
-                        round.round_id,
-                        user.clone(),
-                    )) {
+                    if let Some(pos) = env
+                        .storage()
+                        .persistent()
+                        .get::<_, UserPosition>(&DataKey::Position(round.round_id, user.clone()))
+                    {
                         let prediction_side = match pos.side {
                             BetSide::Up => 0,
                             BetSide::Down => 1,
@@ -509,7 +504,8 @@ pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, 
                             outcome_type = UserOutcomeType::Refund;
                         } else {
                             if pos.side == winning_side {
-                                payout = payout_mul(pos.amount, total_distributable)? / winning_pool;
+                                payout =
+                                    payout_mul(pos.amount, total_distributable)? / winning_pool;
                                 outcome_type = UserOutcomeType::Win;
                             } else {
                                 payout = 0;
@@ -540,14 +536,12 @@ pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, 
 
             for i in 0..participants.len() {
                 if let Some(user) = participants.get(i) {
-                    let pred_opt = env.storage().persistent().get::<_, PrecisionPrediction>(&DataKey::PrecisionPosition(
-                        round.round_id,
-                        user.clone(),
-                    ));
-                    let commit_opt = env.storage().persistent().get::<_, PrecisionCommitment>(&DataKey::PrecisionCommitment(
-                        round.round_id,
-                        user.clone(),
-                    ));
+                    let pred_opt = env.storage().persistent().get::<_, PrecisionPrediction>(
+                        &DataKey::PrecisionPosition(round.round_id, user.clone()),
+                    );
+                    let commit_opt = env.storage().persistent().get::<_, PrecisionCommitment>(
+                        &DataKey::PrecisionCommitment(round.round_id, user.clone()),
+                    );
 
                     let mut amt = 0;
                     if let Some(ref p) = pred_opt {

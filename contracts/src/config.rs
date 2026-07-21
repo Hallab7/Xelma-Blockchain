@@ -611,7 +611,8 @@ pub fn _apply_protocol_fee_updown(
     losing_pool: i128,
 ) -> Result<(i128, i128, i128), ContractError> {
     let bps = _read_protocol_fee_bps(env);
-    let (dist_winning, dist_losing, fee_amount) = calculate_protocol_fee_updown(bps, winning_pool, losing_pool)?;
+    let (dist_winning, dist_losing, fee_amount) =
+        calculate_protocol_fee_updown(bps, winning_pool, losing_pool)?;
     if fee_amount > 0 {
         _collect_protocol_fee(env, round_id, fee_amount, bps)?;
     }

@@ -26,7 +26,7 @@ mod rotation;
 // mod reference_model; // upstream bug: uses std HashMap in no_std context
 // mod resolution; // upstream bug: duplicate type imports
 mod security;
+mod simulate_tests;
 mod storage_benchmarks;
 mod ttl_tests;
 mod windows;
-mod simulate_tests;
