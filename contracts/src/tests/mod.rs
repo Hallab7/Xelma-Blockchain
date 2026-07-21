@@ -29,3 +29,4 @@ mod security;
 mod storage_benchmarks;
 mod ttl_tests;
 mod windows;
+mod simulate_tests;
