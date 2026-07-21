@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Type definitions for the XLM Price Prediction Market.
 
-use soroban_sdk::{contracttype, Address, BytesN};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 /// Round mode for prediction type
 #[contracttype]
@@ -504,4 +504,16 @@ pub struct UserRoundOutcome {
     pub stake: i128,
     pub payout: i128,
     pub outcome: UserOutcomeType,
+}
+
+/// Simulated payout result for a specific hypothetical final price.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimulationResult {
+    pub mode: RoundMode,
+    pub pool_up: i128,
+    pub pool_down: i128,
+    pub precision_total_stake: i128,
+    pub fee_amount: i128,
+    pub outcomes: Vec<UserRoundOutcome>,
 }
