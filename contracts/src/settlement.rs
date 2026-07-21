@@ -11,7 +11,7 @@ use crate::types::{
     PrecisionPrediction, Round, RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
     UserRoundOutcome, UserStats,
 };
-use soroban_sdk::{symbol_short, Address, Env, Map, Symbol, Vec};
+use soroban_sdk::{symbol_short, Address, Env, Map, Vec};
 
 /// Cancels the active round and deterministically refunds all participant stakes.
 pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
@@ -123,6 +123,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
         RoundArchiveStatus::Cancelled,
         0,
         participant_count,
+        0,
     );
 
     env.storage()
@@ -405,6 +406,7 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
                 RoundArchiveStatus::FallbackRefund,
                 payload.price,
                 count,
+                0,
             );
             _refund_under_threshold(&env, &round, &threshold_participants)?;
             #[allow(deprecated)]
@@ -416,9 +418,9 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         }
     }
 
-    match round.mode {
+    let fee_amount = match round.mode {
         RoundMode::UpDown => {
-            let one_sided = _resolve_updown_mode(&env, &round, payload.price)?;
+            let (one_sided, fee) = _resolve_updown_mode(&env, &round, payload.price)?;
             if one_sided {
                 #[allow(deprecated)]
                 env.events().publish(
@@ -426,11 +428,10 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
                     (round_id, round.pool_up, round.pool_down),
                 );
             }
+            fee
         }
-        RoundMode::Precision => {
-            _resolve_precision_mode(&env, round_id, payload.price)?;
-        }
-    }
+        RoundMode::Precision => _resolve_precision_mode(&env, round_id, payload.price)?,
+    };
 
     let participants: Vec<Address> = env
         .storage()
@@ -445,6 +446,7 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         RoundArchiveStatus::Resolved,
         payload.price,
         participant_count,
+        fee_amount,
     );
 
     for i in 0..participants.len() {
@@ -490,7 +492,7 @@ pub fn _resolve_updown_mode(
     env: &Env,
     round: &Round,
     final_price: u128,
-) -> Result<bool, ContractError> {
+) -> Result<(bool, i128), ContractError> {
     let participants: Vec<Address> = env
         .storage()
         .persistent()
@@ -508,11 +510,13 @@ pub fn _resolve_updown_mode(
     // both cases every participant gets a full refund.
     let is_one_sided = (round.pool_up == 0) != (round.pool_down == 0);
 
+    let mut fee_amount = 0;
+
     if !participants.is_empty() {
         if price_unchanged || is_one_sided {
             _record_refunds_indexed(env, round.round_id, 0, &participants)?;
         } else if price_went_up {
-            _record_winnings_indexed(
+            fee_amount = _record_winnings_indexed(
                 env,
                 round.round_id,
                 &participants,
@@ -521,7 +525,7 @@ pub fn _resolve_updown_mode(
                 round.pool_down,
             )?;
         } else if price_went_down {
-            _record_winnings_indexed(
+            fee_amount = _record_winnings_indexed(
                 env,
                 round.round_id,
                 &participants,
@@ -540,7 +544,7 @@ pub fn _resolve_updown_mode(
             if price_unchanged {
                 _record_refunds_legacy(env, round.round_id, &positions)?;
             } else if price_went_up {
-                _record_winnings_legacy(
+                fee_amount = _record_winnings_legacy(
                     env,
                     round.round_id,
                     &positions,
@@ -549,7 +553,7 @@ pub fn _resolve_updown_mode(
                     round.pool_down,
                 )?;
             } else if price_went_down {
-                _record_winnings_legacy(
+                fee_amount = _record_winnings_legacy(
                     env,
                     round.round_id,
                     &positions,
@@ -561,7 +565,7 @@ pub fn _resolve_updown_mode(
         }
     }
 
-    Ok(is_one_sided)
+    Ok((is_one_sided, fee_amount))
 }
 
 pub fn _record_refunds_legacy(
@@ -602,13 +606,13 @@ pub fn _record_winnings_legacy(
     winning_side: BetSide,
     winning_pool: i128,
     losing_pool: i128,
-) -> Result<(), ContractError> {
+) -> Result<i128, ContractError> {
     if winning_pool == 0 {
-        return Ok(());
+        return Ok(0);
     }
 
     let original_winning_pool = winning_pool;
-    let (dist_winning, dist_losing, _fee_amount) =
+    let (dist_winning, dist_losing, fee_amount) =
         _apply_protocol_fee_updown(env, round_id, winning_pool, losing_pool)?;
     // Proportional share of ALL distributable funds (handles fee spillover from winning pool).
     let total_distributable = payout_add(dist_winning, dist_losing)?;
@@ -674,14 +678,14 @@ pub fn _record_winnings_legacy(
         }
     }
 
-    Ok(())
+    Ok(fee_amount)
 }
 
 pub fn _resolve_precision_mode(
     env: &Env,
     round_id: u64,
     final_price: u128,
-) -> Result<(), ContractError> {
+) -> Result<i128, ContractError> {
     let mut participants: Vec<Address> = env
         .storage()
         .persistent()
@@ -696,7 +700,7 @@ pub fn _resolve_precision_mode(
             .get(&DataKey::PrecisionPositions)
             .unwrap_or(Map::new(env));
         if legacy.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
         return _resolve_precision_legacy(env, round_id, &legacy, final_price);
     }
@@ -778,8 +782,10 @@ pub fn _resolve_precision_mode(
         }
     }
 
+    let mut fee_amount = 0;
     if !winners.is_empty() && total_pot > 0 {
-        let (payout_pool, _fee_amount) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        let (payout_pool, fee) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        fee_amount = fee;
         let winner_count = winners.len() as i128;
         let payout_per_winner = payout_pool / winner_count;
         let remainder = payout_pool % winner_count;
@@ -841,7 +847,7 @@ pub fn _resolve_precision_mode(
         }
     }
 
-    Ok(())
+    Ok(fee_amount)
 }
 
 pub fn _resolve_precision_legacy(
@@ -849,10 +855,10 @@ pub fn _resolve_precision_legacy(
     round_id: u64,
     predictions_map: &Map<Address, PrecisionPrediction>,
     final_price: u128,
-) -> Result<(), ContractError> {
+) -> Result<i128, ContractError> {
     let predictions = predictions_map.values();
     if predictions.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     let mut min_diff: Option<u128> = None;
@@ -895,8 +901,10 @@ pub fn _resolve_precision_legacy(
         }
     }
 
+    let mut fee_amount = 0;
     if !winners.is_empty() && total_pot > 0 {
-        let (payout_pool, _fee_amount) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        let (payout_pool, fee) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        fee_amount = fee;
         let winner_count = winners.len() as i128;
         let payout_per_winner = payout_pool / winner_count;
         let remainder = payout_pool % winner_count;
@@ -959,7 +967,7 @@ pub fn _resolve_precision_legacy(
         }
     }
 
-    Ok(())
+    Ok(fee_amount)
 }
 
 pub fn _record_refunds_indexed(
@@ -1001,13 +1009,13 @@ pub fn _record_winnings_indexed(
     winning_side: BetSide,
     winning_pool: i128,
     losing_pool: i128,
-) -> Result<(), ContractError> {
+) -> Result<i128, ContractError> {
     if winning_pool == 0 {
-        return Ok(());
+        return Ok(0);
     }
 
     let original_winning_pool = winning_pool;
-    let (dist_winning, dist_losing, _fee_amount) =
+    let (dist_winning, dist_losing, fee_amount) =
         _apply_protocol_fee_updown(env, round_id, winning_pool, losing_pool)?;
     // Proportional share of ALL distributable funds (handles fee spillover from winning pool).
     let total_distributable = payout_add(dist_winning, dist_losing)?;
@@ -1073,7 +1081,7 @@ pub fn _record_winnings_indexed(
         }
     }
 
-    Ok(())
+    Ok(fee_amount)
 }
 
 pub fn _archive_round(
@@ -1082,6 +1090,7 @@ pub fn _archive_round(
     status: RoundArchiveStatus,
     final_price: u128,
     participant_count: u32,
+    fee_amount: i128,
 ) {
     let status_val = status.clone() as u32;
     let summary = ArchivedRoundSummary {
@@ -1152,7 +1161,7 @@ pub fn _archive_round(
 
     #[allow(deprecated)]
     env.events().publish(
-        (symbol_short!("round"), Symbol::new(env, "summary")),
+        (symbol_short!("round"), symbol_short!("summary")),
         (
             round.round_id,
             round.mode.clone() as u32,
@@ -1160,6 +1169,7 @@ pub fn _archive_round(
             final_price,
             participant_count,
             total_pot,
+            fee_amount,
             status_val,
         ),
     );

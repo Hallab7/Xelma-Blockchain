@@ -280,14 +280,12 @@ pub fn assert_refund_fee_conservation(
 ) {
     let treasury_delta = treasury_after - treasury_before;
     assert_eq!(
-        treasury_delta,
-        0,
+        treasury_delta, 0,
         "[seed={seed_label}] Fee must not be charged on refund/cancel: \
          treasury moved by {treasury_delta}"
     );
     assert_eq!(
-        sum_refunds,
-        total_pot,
+        sum_refunds, total_pot,
         "[seed={seed_label}] Refund conservation violated: \
          refunds={sum_refunds} pot={total_pot}"
     );
