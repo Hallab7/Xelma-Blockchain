@@ -233,7 +233,7 @@ Xelma-Blockchain/
 │   └── README.md              # Bindings usage guide
 │
 ├── target/                    # Build artifacts
-│   └── wasm32-unknown-unknown/
+│   └── wasm32v1-none/
 │       └── release/
 │           └── xelma_contract.wasm  # Compiled contract
 │
@@ -265,7 +265,7 @@ cd Xelma-Blockchain
 
 ```bash
 cd contracts
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 ```
 
 ### 3. Run Tests
@@ -280,7 +280,7 @@ cargo test --workspace --locked
 ```bash
 cd ../../
 stellar contract bindings typescript \
-  --wasm target/wasm32-unknown-unknown/release/xelma_contract.wasm \
+  --wasm target/wasm32v1-none/release/xelma_contract.wasm \
   --output-dir ./bindings \
   --overwrite
 
@@ -764,7 +764,7 @@ This repository contains both source files and generated artifacts. Understandin
 **1. Build the Smart Contract:**
 ```bash
 cd contracts
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 ```
 
 **2. Regenerate TypeScript Bindings:**
@@ -772,7 +772,7 @@ After building the contract, generate the bindings from the WASM file:
 ```bash
 cd ../
 stellar contract bindings typescript \
-  --wasm target/wasm32-unknown-unknown/release/xelma_contract.wasm \
+  --wasm target/wasm32v1-none/release/xelma_contract.wasm \
   --output-dir ./bindings/src \
   --overwrite
 ```
@@ -804,11 +804,11 @@ cargo test
 2. **If you modified the contract**, regenerate bindings:
    ```bash
    # Build contract
-   cargo build --target wasm32-unknown-unknown --release --package xelma-contract
+   stellar contract build --package xelma-contract
    
    # Regenerate bindings
    stellar contract bindings typescript \
-     --wasm target/wasm32-unknown-unknown/release/xelma_contract.wasm \
+     --wasm target/wasm32v1-none/release/xelma_contract.wasm \
      --output-dir ./bindings/src \
      --overwrite
    
