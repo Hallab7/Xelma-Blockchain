@@ -172,6 +172,37 @@ CI enforces:
 reported in CI for visibility but is not the hard gate (attribution lands in
 the modules above).
 
+## E2E Smoke Test (local Soroban RPC)
+
+Unit tests under `contracts/src/tests/` run entirely in-process via
+`soroban_sdk::testutils` and never touch a real RPC, transaction signing, or
+wasm-validation path. `scripts/e2e_smoke.sh` closes that gap: it deploys the
+actual compiled WASM to a real local Soroban network and drives one full
+round through `initialize -> mint_initial -> create_round -> place_bet ->
+resolve_round -> claim_winnings`, asserting balances and on-chain events.
+This is also what CI's `e2e-smoke` job runs against the WASM built in the
+same run.
+
+**Prerequisites:** [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli)
+(>=22, with `stellar container` support), Docker (running), `jq`.
+
+```bash
+# Build the contract, then run the smoke test against it
+stellar contract build --package xelma-contract
+./scripts/e2e_smoke.sh
+```
+
+The script manages its own local network container (start on entry, stop on
+exit) and prints recent container logs automatically on failure. Useful
+environment variables:
+
+- `WASM_PATH` — path to the WASM to deploy (default:
+  `target/wasm32v1-none/release/xelma_contract.wasm`; built automatically if
+  missing).
+- `SKIP_NETWORK_START=1` — reuse an already-running `local` network container
+  instead of starting/stopping one (handy when iterating).
+- `KEEP_NETWORK=1` — leave the container running after the script exits.
+
 ## Canonical Contract Crate
 
 The contract crate name is `xelma-contract`. Do not reintroduce legacy crate naming in build scripts, docs, or CI commands.
