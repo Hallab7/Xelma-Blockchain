@@ -29,7 +29,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -97,5 +97,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: deployed-wasm
-          path: target/wasm32-unknown-unknown/release/xelma_contract.wasm
+          path: target/wasm32v1-none/release/xelma_contract.wasm
           retention-days: 7
