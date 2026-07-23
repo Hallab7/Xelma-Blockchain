@@ -96,4 +96,8 @@ pub enum ContractError {
     NoPendingRotation = 54,
     /// Invalid archive retention limit
     InvalidArchiveRetention = 62,
+    /// Commitment hash is malformed (e.g. the all-zero placeholder)
+    InvalidCommitment = 63,
+    /// Reveal salt fails minimum entropy rules (all-zero or constant-byte)
+    InvalidSalt = 64,
 }

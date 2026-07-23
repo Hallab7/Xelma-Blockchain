@@ -381,8 +381,10 @@ jobs:
           # the overall workspace coverage check (at 80%) to ensure actual implementation files are covered.
           CONTRACT_THRESHOLD=0
 
-          echo "contract.rs line coverage: ${CONTRACT_COVERAGE}% (threshold: ${CONTRACT_THRESHOLD}%)"
-          echo "CONTRACT_COVERAGE=${CONTRACT_COVERAGE}" >> $GITHUB_ENV
+          # Report facade coverage for visibility (not a hard gate).
+          CONTRACT_COVERAGE=$(extract_file_coverage "contracts/src/contract.rs")
+          echo "contract.rs line coverage (informational): ${CONTRACT_COVERAGE}%"
+          echo "CONTRACT_COVERAGE=${CONTRACT_COVERAGE}" >> "$GITHUB_ENV"
 
           if [ "$CONTRACT_COVERAGE_INT" -lt "$CONTRACT_THRESHOLD" ]; then
             echo "FAIL: contract.rs coverage ${CONTRACT_COVERAGE}% is below threshold ${CONTRACT_THRESHOLD}%"
@@ -395,10 +397,14 @@ jobs:
           OVERALL_THRESHOLD=80
 
           echo "Overall workspace line coverage: ${OVERALL_COVERAGE}% (threshold: ${OVERALL_THRESHOLD}%)"
-          echo "OVERALL_COVERAGE=${OVERALL_COVERAGE}" >> $GITHUB_ENV
+          echo "OVERALL_COVERAGE=${OVERALL_COVERAGE}" >> "$GITHUB_ENV"
 
           if [ "$OVERALL_COVERAGE_INT" -lt "$OVERALL_THRESHOLD" ]; then
             echo "FAIL: Overall coverage ${OVERALL_COVERAGE}% is below threshold ${OVERALL_THRESHOLD}%"
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
             exit 1
           fi
 

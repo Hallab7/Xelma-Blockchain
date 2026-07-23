@@ -222,7 +222,13 @@ fn test_event_coverage_commit_and_reveal() {
     client.create_round(&1_0000000, &Some(1)); // Precision mode
 
     let price = 500u128;
-    let salt = BytesN::from_array(&env, &[1; 32]);
+    let mut salt_bytes = [0u8; 32];
+    for (i, b) in salt_bytes.iter_mut().enumerate() {
+        *b = (i as u8).wrapping_add(1);
+    }
+    salt_bytes[0] = 0x81;
+    salt_bytes[31] = 0x5B;
+    let salt = BytesN::from_array(&env, &salt_bytes);
     let mut preimage = Bytes::new(&env);
     preimage.append(&price.to_xdr(&env));
     preimage.append(&salt.clone().to_xdr(&env));

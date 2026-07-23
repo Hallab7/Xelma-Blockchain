@@ -139,7 +139,10 @@ Conservations across event streams:
 * For each `fee_collected` event: Σ of `("claim","winnings")` for the
   same round's winners + `fee_amount` == `round.pool_up + round.pool_down`
   (UpDown) or `Σ prediction.amount` (Precision mode, including
-  unrevealed-commitment stakes).
+  unrevealed-commitment stakes that forfeited to the pot).
+* When a Precision round resolves with **zero reveals**, stakes are refunded
+  instead of fee-split: `Σ refund amounts == Σ commitment amounts` and no
+  `fee_collected` event is emitted for that path.
 * Treasury balance monotonically increases across `fee_collected`
   events and monotonically decreases across `fee_withdrawn` events.
 

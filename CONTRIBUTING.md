@@ -162,8 +162,15 @@ cargo llvm-cov --all-features --workspace --html --output-dir coverage-report --
 # Open coverage-report/html/index.html in a browser
 ```
 
-CI enforces a 90% line-coverage threshold on `contracts/src/contract.rs` and
-80% overall workspace coverage.
+CI enforces:
+
+- 90% line coverage on critical implementation modules
+  (`contracts/src/betting.rs`, `contracts/src/settlement.rs`)
+- 80% overall workspace line coverage
+
+`contracts/src/contract.rs` is largely a thin facade; its line coverage is
+reported in CI for visibility but is not the hard gate (attribution lands in
+the modules above).
 
 ## E2E Smoke Test (local Soroban RPC)
 

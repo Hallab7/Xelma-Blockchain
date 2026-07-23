@@ -12,6 +12,44 @@ use crate::types::{
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Vec};
 
+/// Commitment preimage format (Precision commit-reveal):
+///
+/// ```text
+/// commitment = sha256( predicted_price.to_xdr() || salt.to_xdr() )
+/// ```
+///
+/// - `predicted_price` is a `u128` (4-decimal price scale).
+/// - `salt` is a 32-byte value with minimum on-chain entropy (see
+///   [`salt_has_minimum_entropy`]); wallets MUST still sample it from a CSPRNG.
+/// - The commitment hash stored at commit time MUST be exactly 32 bytes and
+///   MUST NOT be the all-zero placeholder (`InvalidCommitment`).
+///
+/// Unrevealed commitments are settled by the precision resolver: forfeited to
+/// the pot when at least one prediction is revealed, or refunded when nobody
+/// reveals (see `_resolve_precision_mode`).
+fn is_zero_bytes32(env: &Env, value: &BytesN<32>) -> bool {
+    *value == BytesN::from_array(env, &[0u8; 32])
+}
+
+/// Rejects clearly weak salts: all-zero or every byte identical.
+/// Stronger entropy (CSPRNG) is a client responsibility; this only blocks
+/// trivial placeholders that invite grinding / griefing.
+fn salt_has_minimum_entropy(salt: &BytesN<32>) -> bool {
+    let bytes = salt.to_array();
+    let first = bytes[0];
+    let mut saw_nonzero = false;
+    let mut saw_different = false;
+    for b in bytes.iter() {
+        if *b != 0 {
+            saw_nonzero = true;
+        }
+        if *b != first {
+            saw_different = true;
+        }
+    }
+    saw_nonzero && saw_different
+}
+
 /// Creates a new prediction round (admin only)
 pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
@@ -378,6 +416,12 @@ pub fn commit_prediction(
     user.require_auth();
     _ensure_normal_mode(&env)?;
 
+    // Reject clearly invalid commitment placeholders early (before balance
+    // reads / deductions) so griefing commits cannot lock liquidity.
+    if is_zero_bytes32(&env, &hash) {
+        return Err(ContractError::InvalidCommitment);
+    }
+
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
     }
@@ -483,6 +527,12 @@ pub fn reveal_prediction(
     user.require_auth();
     _ensure_normal_mode(&env)?;
 
+    // Enforce salt entropy before any storage reads so malformed reveals fail
+    // fast with an explicit error (not HashMismatch after a wasted lookup).
+    if !salt_has_minimum_entropy(&salt) {
+        return Err(ContractError::InvalidSalt);
+    }
+
     // Single read of the active round
     let round: Round = env
         .storage()
@@ -513,7 +563,7 @@ pub fn reveal_prediction(
         return Err(ContractError::AlreadyRevealed);
     }
 
-    // Verify hash
+    // Verify hash: sha256(predicted_price.to_xdr() || salt.to_xdr())
     let mut preimage = Bytes::new(&env);
     preimage.append(&predicted_price.to_xdr(&env));
     preimage.append(&salt.to_xdr(&env));

@@ -9,12 +9,26 @@ use crate::types::{
     BetSide, DataKey, OraclePayload, PrecisionPrediction, Round, RoundArchiveStatus, RoundMode,
     UserOutcomeType, UserPosition,
 };
+use soroban_sdk::BytesN;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
     Address, Env, Map, TryIntoVal, Vec,
 };
 use std::string::{String, ToString};
+
+/// Salt satisfying on-chain minimum entropy (non-zero, non-constant).
+fn test_salt(env: &Env, seed: u8) -> BytesN<32> {
+    let mut bytes = [0u8; 32];
+    let mut i = 0;
+    while i < 32 {
+        bytes[i] = seed.wrapping_add(i as u8).wrapping_mul(17).wrapping_add(3);
+        i += 1;
+    }
+    bytes[0] = seed | 0x80;
+    bytes[31] = seed ^ 0x5A;
+    BytesN::from_array(env, &bytes)
+}
 
 fn payout_outcome_events(env: &Env) -> std::vec::Vec<(u64, u32, Address, i128, u32)> {
     env.events()
@@ -2134,7 +2148,7 @@ fn test_precision_commit_reveal_resolution_payout_with_unrevealed_participants()
 
     // Alice commits and reveals guess of 2000
     let price_alice = 2000u128;
-    let salt_alice = BytesN::from_array(&env, &[1; 32]);
+    let salt_alice = test_salt(&env, 1);
     let mut preimage_alice = Bytes::new(&env);
     preimage_alice.append(&price_alice.to_xdr(&env));
     preimage_alice.append(&salt_alice.clone().to_xdr(&env));
@@ -2144,7 +2158,7 @@ fn test_precision_commit_reveal_resolution_payout_with_unrevealed_participants()
 
     // Bob commits but does NOT reveal
     let price_bob = 2200u128;
-    let salt_bob = BytesN::from_array(&env, &[2; 32]);
+    let salt_bob = test_salt(&env, 2);
     let mut preimage_bob = Bytes::new(&env);
     preimage_bob.append(&price_bob.to_xdr(&env));
     preimage_bob.append(&salt_bob.clone().to_xdr(&env));
@@ -2225,7 +2239,7 @@ fn test_precision_remainder_goes_to_lexicographically_lowest_winner() {
 
     // Both commit the same guess (2000)
     let price = 2000u128;
-    let salt_a = BytesN::from_array(&env, &[1; 32]);
+    let salt_a = test_salt(&env, 1);
     let mut preimage_a = Bytes::new(&env);
     preimage_a.append(&price.to_xdr(&env));
     preimage_a.append(&salt_a.clone().to_xdr(&env));
@@ -2233,7 +2247,7 @@ fn test_precision_remainder_goes_to_lexicographically_lowest_winner() {
     let committed_hash_a: BytesN<32> = hash_a.into();
     client.commit_prediction(&lowest_user, &committed_hash_a, &bet_lowest);
 
-    let salt_b = BytesN::from_array(&env, &[2; 32]);
+    let salt_b = test_salt(&env, 2);
     let mut preimage_b = Bytes::new(&env);
     preimage_b.append(&price.to_xdr(&env));
     preimage_b.append(&salt_b.clone().to_xdr(&env));
@@ -2727,7 +2741,7 @@ fn test_outcome_loss_event_precision_indexed_path() {
 
     // Build Charlie's commitment hash locally and submit it via the contract API.
     let price_c = 2200u128;
-    let salt_c = soroban_sdk::BytesN::from_array(&env, &[3; 32]);
+    let salt_c = test_salt(&env, 3);
     let mut preimage_c = soroban_sdk::Bytes::new(&env);
     use soroban_sdk::xdr::ToXdr;
     preimage_c.append(&price_c.to_xdr(&env));

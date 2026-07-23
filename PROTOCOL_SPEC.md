@@ -20,6 +20,38 @@ The contract supports two round modes:
 | Up/Down | `0` | Correct side receives stake plus a proportional share of the losing pool. Unchanged price refunds all participants. |
 | Precision | `1` | Closest price prediction wins the pot. Ties split the pot evenly; deterministic remainder goes to the first winner in resolution order. |
 
+### Precision commit-reveal (user-visible rules)
+
+Precision rounds accept either a direct `place_precision_prediction` or a
+commit-reveal flow (`commit_prediction` → `reveal_prediction`).
+
+**Commitment format.** The on-chain commitment is a 32-byte SHA-256 digest:
+
+```text
+commitment = sha256( predicted_price.to_xdr() || salt.to_xdr() )
+```
+
+- The all-zero hash is rejected at commit time (`InvalidCommitment`).
+- Clients MUST sample `salt` as 32 cryptographically random bytes.
+- The contract additionally rejects clearly weak salts at reveal time:
+  all-zero or constant-byte salts fail with `InvalidSalt`.
+
+**Reveal window.** Reveals are accepted only while
+`bet_end_ledger ≤ ledger < end_ledger`.
+
+**Unrevealed commitments at settlement (deterministic):**
+
+| Situation | Policy |
+|---|---|
+| ≥1 prediction revealed (or placed directly) | Unrevealed commitments **forfeit to the pot** and count as losers (anti-griefing). |
+| Nobody revealed | All committed stakes are **refunded** to pending winnings (conservation; no locked liquidity). |
+| Admin `cancel_round` / insufficient-participants fallback | All stakes including unrevealed commitments are **refunded**. |
+
+Pot conservation (I8) still holds: with mixed reveals,
+`Σ winner payouts + protocol fee == total pot` (including forfeited
+unrevealed stakes); with all-unrevealed refunds,
+`Σ refunds == total pot`.
+
 All token amounts are stored as `i128` stroops where `1 vXLM = 10_000_000`.
 Prices are stored as `u128` values scaled to 4 decimal places.
 
