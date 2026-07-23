@@ -574,13 +574,11 @@ pub fn _collect_protocol_fee(
     Ok(())
 }
 
-pub fn _apply_protocol_fee_updown(
-    env: &Env,
-    round_id: u64,
+pub fn calculate_protocol_fee_updown(
+    bps: Option<u32>,
     winning_pool: i128,
     losing_pool: i128,
 ) -> Result<(i128, i128, i128), ContractError> {
-    let bps = _read_protocol_fee_bps(env);
     if bps.is_none() {
         return Ok((winning_pool, losing_pool, 0));
     }
@@ -603,16 +601,28 @@ pub fn _apply_protocol_fee_updown(
     let dist_losing = losing_pool
         .checked_sub(fee_from_losing)
         .ok_or(ContractError::Overflow)?;
-    _collect_protocol_fee(env, round_id, fee_amount, Some(bps_value))?;
     Ok((dist_winning, dist_losing, fee_amount))
 }
 
-pub fn _apply_protocol_fee_precision(
+pub fn _apply_protocol_fee_updown(
     env: &Env,
     round_id: u64,
+    winning_pool: i128,
+    losing_pool: i128,
+) -> Result<(i128, i128, i128), ContractError> {
+    let bps = _read_protocol_fee_bps(env);
+    let (dist_winning, dist_losing, fee_amount) =
+        calculate_protocol_fee_updown(bps, winning_pool, losing_pool)?;
+    if fee_amount > 0 {
+        _collect_protocol_fee(env, round_id, fee_amount, bps)?;
+    }
+    Ok((dist_winning, dist_losing, fee_amount))
+}
+
+pub fn calculate_protocol_fee_precision(
+    bps: Option<u32>,
     total_pot: i128,
 ) -> Result<(i128, i128), ContractError> {
-    let bps = _read_protocol_fee_bps(env);
     if bps.is_none() || total_pot <= 0 {
         return Ok((total_pot, 0));
     }
@@ -624,8 +634,18 @@ pub fn _apply_protocol_fee_precision(
     let distributable = total_pot
         .checked_sub(fee_amount)
         .ok_or(ContractError::Overflow)?;
+    Ok((distributable, fee_amount))
+}
+
+pub fn _apply_protocol_fee_precision(
+    env: &Env,
+    round_id: u64,
+    total_pot: i128,
+) -> Result<(i128, i128), ContractError> {
+    let bps = _read_protocol_fee_bps(env);
+    let (distributable, fee_amount) = calculate_protocol_fee_precision(bps, total_pot)?;
     if fee_amount > 0 {
-        _collect_protocol_fee(env, round_id, fee_amount, Some(bps_value))?;
+        _collect_protocol_fee(env, round_id, fee_amount, bps)?;
     }
     Ok((distributable, fee_amount))
 }

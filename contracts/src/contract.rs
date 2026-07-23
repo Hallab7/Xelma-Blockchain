@@ -10,8 +10,8 @@ use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     OracleHeartbeatRecord, OraclePayload, OracleRotationProposal, PendingConfigChange,
     PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus,
-    RoundPhase, RoundPoolStats, RoundStatus, RuntimeMode, UserPosition, UserRoundOutcome,
-    UserStats,
+    RoundPhase, RoundPoolStats, RoundStatus, RuntimeMode, SimulationResult, UserPosition,
+    UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -758,6 +758,12 @@ impl VirtualTokenContract {
     /// Returns user's vXLM balance
     pub fn balance(env: Env, user: Address) -> i128 {
         common::balance(env, user)
+    }
+
+    /// Estimates payouts for the active round given a hypothetical final price.
+    /// Does not mutate storage. Returns SimulationResult.
+    pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, ContractError> {
+        queries::simulate_payout(env, final_price)
     }
 }
 

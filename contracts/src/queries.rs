@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: MIT
 use crate::common::{
-    _derive_round_phase, _extend_persistent_ttl, sort_addresses, BPS_DENOMINATOR,
-    DEFAULT_ARCHIVE_RETENTION, MAX_PAGE_SIZE,
+    _derive_round_phase, _extend_persistent_ttl, payout_add, payout_mul, sort_addresses,
+    BPS_DENOMINATOR, DEFAULT_ARCHIVE_RETENTION, MAX_PAGE_SIZE,
+};
+use crate::config::{
+    _read_protocol_fee_bps, calculate_protocol_fee_precision, calculate_protocol_fee_updown,
 };
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round,
-    RoundMode, RoundPhase, RoundPoolStats, UserPosition, UserRoundOutcome, UserStats,
+    RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UserOutcomeType, UserPosition,
+    UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -423,4 +427,242 @@ pub fn get_updown_positions_page(
     }
 
     result
+}
+
+/// Estimates payouts for the active round given a hypothetical final price, without mutating storage.
+pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, ContractError> {
+    let round = env
+        .storage()
+        .persistent()
+        .get::<_, Round>(&DataKey::ActiveRound)
+        .ok_or(ContractError::NoActiveRound)?;
+
+    let participants: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::RoundParticipants(round.round_id))
+        .unwrap_or(Vec::new(&env));
+    let participants = sort_addresses(participants);
+
+    let mut outcomes: Vec<UserRoundOutcome> = Vec::new(&env);
+    let mut total_fee: i128 = 0;
+    let mut precision_total_stake: i128 = 0;
+
+    let bps = _read_protocol_fee_bps(&env);
+
+    match round.mode {
+        RoundMode::UpDown => {
+            let price_went_up = final_price > round.price_start;
+            let price_went_down = final_price < round.price_start;
+            let price_unchanged = final_price == round.price_start;
+            let is_one_sided = (round.pool_up == 0) != (round.pool_down == 0);
+
+            let mut dist_winning: i128 = 0;
+            let mut dist_losing: i128 = 0;
+            let mut winning_side = BetSide::Up;
+            let mut winning_pool: i128 = 0;
+
+            if !price_unchanged && !is_one_sided {
+                if price_went_up {
+                    winning_side = BetSide::Up;
+                    winning_pool = round.pool_up;
+                    let (dw, dl, fee) =
+                        calculate_protocol_fee_updown(bps, round.pool_up, round.pool_down)?;
+                    dist_winning = dw;
+                    dist_losing = dl;
+                    total_fee = fee;
+                } else if price_went_down {
+                    winning_side = BetSide::Down;
+                    winning_pool = round.pool_down;
+                    let (dw, dl, fee) =
+                        calculate_protocol_fee_updown(bps, round.pool_down, round.pool_up)?;
+                    dist_winning = dw;
+                    dist_losing = dl;
+                    total_fee = fee;
+                }
+            }
+
+            let total_distributable = payout_add(dist_winning, dist_losing)?;
+
+            for i in 0..participants.len() {
+                if let Some(user) = participants.get(i) {
+                    if let Some(pos) = env
+                        .storage()
+                        .persistent()
+                        .get::<_, UserPosition>(&DataKey::Position(round.round_id, user.clone()))
+                    {
+                        let prediction_side = match pos.side {
+                            BetSide::Up => 0,
+                            BetSide::Down => 1,
+                        };
+
+                        let payout: i128;
+                        let outcome_type: UserOutcomeType;
+
+                        if price_unchanged || is_one_sided {
+                            payout = pos.amount;
+                            outcome_type = UserOutcomeType::Refund;
+                        } else {
+                            if pos.side == winning_side {
+                                payout =
+                                    payout_mul(pos.amount, total_distributable)? / winning_pool;
+                                outcome_type = UserOutcomeType::Win;
+                            } else {
+                                payout = 0;
+                                outcome_type = UserOutcomeType::Loss;
+                            }
+                        }
+
+                        outcomes.push_back(UserRoundOutcome {
+                            user,
+                            round_mode: 0,
+                            prediction_side,
+                            predicted_price: 0,
+                            stake: pos.amount,
+                            payout,
+                            outcome: outcome_type,
+                        });
+                    }
+                }
+            }
+        }
+        RoundMode::Precision => {
+            let mut min_diff: Option<u128> = None;
+            let mut winners: Vec<PrecisionPrediction> = Vec::new(&env);
+            let mut total_pot: i128 = 0;
+            let mut is_winner_mask: Vec<bool> = Vec::new(&env);
+            let mut preds: Vec<PrecisionPrediction> = Vec::new(&env);
+            let mut user_amounts: Vec<i128> = Vec::new(&env);
+
+            for i in 0..participants.len() {
+                if let Some(user) = participants.get(i) {
+                    let pred_opt = env.storage().persistent().get::<_, PrecisionPrediction>(
+                        &DataKey::PrecisionPosition(round.round_id, user.clone()),
+                    );
+                    let commit_opt = env.storage().persistent().get::<_, PrecisionCommitment>(
+                        &DataKey::PrecisionCommitment(round.round_id, user.clone()),
+                    );
+
+                    let mut amt = 0;
+                    if let Some(ref p) = pred_opt {
+                        amt = p.amount;
+                        preds.push_back(p.clone());
+                    } else if let Some(ref c) = commit_opt {
+                        amt = c.amount;
+                        preds.push_back(PrecisionPrediction {
+                            user: user.clone(),
+                            predicted_price: 0,
+                            amount: amt,
+                        });
+                    } else {
+                        preds.push_back(PrecisionPrediction {
+                            user: user.clone(),
+                            predicted_price: 0,
+                            amount: 0,
+                        });
+                    }
+                    total_pot = total_pot.checked_add(amt).ok_or(ContractError::Overflow)?;
+                    user_amounts.push_back(amt);
+                    is_winner_mask.push_back(false);
+
+                    if let Some(pred) = pred_opt {
+                        let diff = if pred.predicted_price >= final_price {
+                            pred.predicted_price.checked_sub(final_price).unwrap()
+                        } else {
+                            final_price.checked_sub(pred.predicted_price).unwrap()
+                        };
+
+                        match min_diff {
+                            None => {
+                                min_diff = Some(diff);
+                                winners.push_back(pred.clone());
+                                is_winner_mask.set(i, true);
+                            }
+                            Some(current_min) => {
+                                if diff < current_min {
+                                    min_diff = Some(diff);
+                                    winners = Vec::new(&env);
+                                    winners.push_back(pred.clone());
+                                    for j in 0..i {
+                                        is_winner_mask.set(j, false);
+                                    }
+                                    is_winner_mask.set(i, true);
+                                } else if diff == current_min {
+                                    winners.push_back(pred.clone());
+                                    is_winner_mask.set(i, true);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            precision_total_stake = total_pot;
+            let mut payout_pool: i128 = 0;
+            if !winners.is_empty() && total_pot > 0 {
+                let (dist, fee) = calculate_protocol_fee_precision(bps, total_pot)?;
+                total_fee = fee;
+                payout_pool = dist;
+            }
+
+            let winner_count = winners.len() as i128;
+            let payout_per_winner = if winner_count > 0 {
+                payout_pool / winner_count
+            } else {
+                0
+            };
+            let remainder = if winner_count > 0 {
+                payout_pool % winner_count
+            } else {
+                0
+            };
+
+            let mut winner_idx = 0;
+            for i in 0..participants.len() {
+                if let Some(user) = participants.get(i) {
+                    let mut payout = 0;
+                    let mut outcome_type = UserOutcomeType::Loss;
+                    let is_winner = is_winner_mask.get(i).unwrap_or(false);
+                    let amt = user_amounts.get(i).unwrap_or(0);
+                    let pred_price = if i < preds.len() {
+                        preds.get(i).unwrap().predicted_price
+                    } else {
+                        0
+                    };
+
+                    if winners.is_empty() {
+                        payout = amt; // refund
+                        outcome_type = UserOutcomeType::Refund;
+                    } else if is_winner {
+                        payout = if winner_idx == 0 {
+                            payout_per_winner.checked_add(remainder).unwrap()
+                        } else {
+                            payout_per_winner
+                        };
+                        outcome_type = UserOutcomeType::Win;
+                        winner_idx += 1;
+                    }
+
+                    outcomes.push_back(UserRoundOutcome {
+                        user,
+                        round_mode: 1,
+                        prediction_side: 2, // arbitrary
+                        predicted_price: pred_price,
+                        stake: amt,
+                        payout,
+                        outcome: outcome_type,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(SimulationResult {
+        mode: round.mode,
+        pool_up: round.pool_up,
+        pool_down: round.pool_down,
+        precision_total_stake,
+        fee_amount: total_fee,
+        outcomes,
+    })
 }
