@@ -130,7 +130,7 @@ Unlike traditional prediction markets, Xelma is:
 - **Canonical crate**: `xelma-contract` (used by CI, build, and artifact paths)
 
 ### Key Features:
-- ✅ Custom error handling (20 error types)
+- ✅ Custom error handling (50 error types)
 - ✅ Emergency pause/recovery controls for incident response
 - ✅ Overflow protection (checked arithmetic)
 - ✅ Role-based access control (Admin, Oracle, User)
@@ -212,7 +212,10 @@ Xelma-Blockchain/
 │   │       ├── property_invariants.rs
 │   │       ├── resolution.rs
 │   │       ├── security.rs
+│   │       ├── storage_benchmarks.rs
+│   │       ├── ttl_tests.rs
 │   │       └── windows.rs
+│   │       └── ... (20+ test files total — see docs/CONTRIBUTOR_MAP.md)
 │   ├── Cargo.toml            # Rust dependencies
 │   └── test_snapshots/       # Test execution records
 │
@@ -229,7 +232,10 @@ Xelma-Blockchain/
 │           └── xelma_contract.wasm  # Compiled contract
 │
 ├── docs/
-│   └── EVENT_SCHEMA.md        # Canonical on-chain event schema for indexers
+│   ├── CONTRIBUTOR_MAP.md     # Module → test → task map for contributors
+│   ├── CONTRIBUTOR_TASK_MATRIX.md # PR evidence requirements by task type
+│   ├── EVENT_SCHEMA.md        # Canonical on-chain event schema for indexers
+│   └── storage_lifecycle.md   # TTL/rent policy reference
 ├── SECURITY_REVIEW.md         # Comprehensive security audit
 ├── Cargo.toml                 # Workspace configuration
 └── README.md                  # This file
@@ -313,7 +319,7 @@ console.log(`Wins: ${stats.total_wins}, Streak: ${stats.current_streak}`);
 We take security seriously. The contract has undergone comprehensive hardening:
 
 ### Security Features:
-- ✅ **20 Custom Error Types** - Clear, debuggable error codes
+- ✅ **50 Custom Error Types** - Clear, debuggable error codes
 - ✅ **Checked Arithmetic** - All math operations use `checked_*` to prevent overflow
 - ✅ **Role-Based Access** - Admin creates rounds, Oracle resolves, Users bet
 - ✅ **Input Validation** - All parameters validated (amount > 0, round active, etc.)
@@ -616,6 +622,7 @@ async function watchForNewRounds(contractId: string) {
 
 We welcome contributions from the community! Start with the maintainer workflow docs:
 
+- **[CONTRIBUTOR_MAP.md](./docs/CONTRIBUTOR_MAP.md)** — Module → test → task map (start here!)
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [GOVERNANCE.md](./GOVERNANCE.md)
 - [SUPPORT.md](./SUPPORT.md)
@@ -724,9 +731,13 @@ Check issues labeled [`good-first-issue`](https://github.com/TevaLabs/Xelma-Bloc
 
 ## 📚 Documentation
 
+- **[Contributor Map](./docs/CONTRIBUTOR_MAP.md)** — Module → test → task map (new contributors start here!)
+- **[Contributor Task Matrix](./docs/CONTRIBUTOR_TASK_MATRIX.md)** — PR evidence requirements for every task type
 - **[Smart Contract](./contracts/src/)** - Modular Rust code (contract, types, errors)
 - **[Protocol Spec](./PROTOCOL_SPEC.md)** - Formal invariants, threat model, and test traceability
 - **[Security Review](./SECURITY_REVIEW.md)** - Security analysis and best practices
+- **[Event Schema](./docs/EVENT_SCHEMA.md)** — Canonical on-chain event schema for indexers
+- **[Storage Lifecycle](./docs/storage_lifecycle.md)** — TTL/rent policy for persistent keys
 - **[Bindings Guide](./bindings/README.md)** - TypeScript integration guide
 - **[Test Suite](./contracts/src/tests/)** - Comprehensive test examples
 
