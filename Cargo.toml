@@ -6,6 +6,8 @@ members = [
 
 [workspace.dependencies]
 soroban-sdk = "23.0.1"
+proptest = "1.0"
+rand = "0.8"
 
 [profile.release]
 opt-level = "z"
@@ -20,6 +22,3 @@ lto = true
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
-[dev-dependencies]
-proptest = "1.0"
-rand = "0.8"
