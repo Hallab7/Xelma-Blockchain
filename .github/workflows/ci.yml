@@ -298,12 +298,10 @@ jobs:
     needs: contract-build
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Stellar CLI
-        uses: stellar/stellar-cli@v1
-        with:
-          version: "26.0.0"
+        uses: actions/checkout@v4          - name: Install Stellar CLI
+        run: |
+          cargo install --locked stellar-cli
+          stellar --version
 
       - name: Download WASM artifact
         uses: actions/download-artifact@v4
@@ -382,7 +380,6 @@ jobs:
           CONTRACT_THRESHOLD=0
 
           # Report facade coverage for visibility (not a hard gate).
-          CONTRACT_COVERAGE=$(extract_file_coverage "contracts/src/contract.rs")
           echo "contract.rs line coverage (informational): ${CONTRACT_COVERAGE}%"
           echo "CONTRACT_COVERAGE=${CONTRACT_COVERAGE}" >> "$GITHUB_ENV"
 
