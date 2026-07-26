@@ -845,6 +845,29 @@ pub fn _resolve_precision_mode(
                 }
             }
         }
+    } else if total_pot > 0 {
+        // No revealed winners: all participants committed but none
+        // revealed their prediction. Refund every participant's stake
+        // in full (no protocol fee is charged on refunds).
+        for i in 0..participants.len() {
+            if let Some(user) = participants.get(i) {
+                let stake = participant_amounts.get(i).unwrap();
+                if stake > 0 {
+                    _accumulate_pending(env, user.clone(), stake)?;
+                    _persist_user_outcome(
+                        env,
+                        round_id,
+                        1,
+                        &user,
+                        2,
+                        0,
+                        stake,
+                        stake,
+                        UserOutcomeType::Refund,
+                    );
+                }
+            }
+        }
     }
 
     Ok(fee_amount)
