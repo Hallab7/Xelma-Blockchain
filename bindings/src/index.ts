@@ -296,10 +296,18 @@ export interface PrecisionPredictionsPage {
 }
 
 /**
+ * Single entry in a cursor-based Up/Down positions page.
+ */
+export interface UpdownPositionEntry {
+  user: string;
+  position: UserPosition;
+}
+
+/**
  * Cursor-based page of Up/Down positions.
  */
 export interface UpdownPositionsPage {
-  items: Array<readonly [string, UserPosition]>;
+  items: Array<UpdownPositionEntry>;
   next_cursor: Option<string>;
 }
 

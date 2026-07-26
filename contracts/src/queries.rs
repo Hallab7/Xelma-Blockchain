@@ -10,8 +10,8 @@ use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKey, LeaderboardEntry, LeaderboardPage,
     PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage, Round,
-    RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UpdownPositionsPage,
-    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UpdownPositionEntry,
+    UpdownPositionsPage, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -831,14 +831,17 @@ pub fn get_updown_positions_cursor(
 
     let end = start.saturating_add(limit).min(total);
 
-    let mut items: Vec<(Address, UserPosition)> = Vec::new(&env);
+    let mut items: Vec<UpdownPositionEntry> = Vec::new(&env);
     let mut last_addr: Option<Address> = None;
     for i in start..end {
         if let Some(user) = participants.get(i) {
             let pos_key = DataKey::Position(round.round_id, user.clone());
             if let Some(pos) = env.storage().persistent().get(&pos_key) {
                 last_addr = Some(user.clone());
-                items.push_back((user, pos));
+                items.push_back(UpdownPositionEntry {
+                    user,
+                    position: pos,
+                });
             }
         }
     }

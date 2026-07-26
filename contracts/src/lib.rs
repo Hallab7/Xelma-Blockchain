@@ -34,6 +34,6 @@ pub use types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     LeaderboardEntry, LeaderboardPage, OracleRotationProposal, PendingConfigChange,
     PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage,
-    ProtocolHealthStatus, Round, RoundArchiveStatus, UpdownPositionsPage,
-    UserPosition, UserStats,
+    ProtocolHealthStatus, Round, RoundArchiveStatus, UpdownPositionEntry,
+    UpdownPositionsPage, UserPosition, UserStats,
 };
