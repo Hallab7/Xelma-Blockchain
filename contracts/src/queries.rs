@@ -9,9 +9,10 @@ use crate::config::{
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKey, LeaderboardEntry, LeaderboardPage,
-    PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage, Round,
-    RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UpdownPositionEntry,
-    UpdownPositionsPage, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage,
+    ProtocolHealthStatus, Round, RoundMode, RoundPhase, RoundPoolStats,
+    SimulationResult, UpdownPositionEntry, UpdownPositionsPage, UserOutcomeType,
+    UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -691,10 +692,7 @@ fn _find_cursor_position(sorted: &Vec<Address>, cursor: &Option<Address>) -> u32
 
 /// Finds the index of the first entry in a sorted leaderboard Vec whose user
 /// address is strictly greater than `cursor`. Returns 0 when `cursor` is `None`.
-fn _find_cursor_in_leaderboard(
-    sorted: &Vec<LeaderboardEntry>,
-    cursor: &Option<Address>,
-) -> u32 {
+fn _find_cursor_in_leaderboard(sorted: &Vec<LeaderboardEntry>, cursor: &Option<Address>) -> u32 {
     let cursor_addr = match cursor {
         Some(a) => a,
         None => return 0,
@@ -916,11 +914,7 @@ fn _collect_leaderboard_entries(env: &Env) -> Vec<LeaderboardEntry> {
 ///
 /// The result is a snapshot built from on-chain `UserStats` collected from
 /// active and recent round participants.
-pub fn get_leaderboard_by_wins(
-    env: Env,
-    cursor: Option<Address>,
-    limit: u32,
-) -> LeaderboardPage {
+pub fn get_leaderboard_by_wins(env: Env, cursor: Option<Address>, limit: u32) -> LeaderboardPage {
     let limit = limit.min(MAX_PAGE_SIZE);
     if limit == 0 {
         return LeaderboardPage {
@@ -932,7 +926,7 @@ pub fn get_leaderboard_by_wins(
     let entries = _collect_leaderboard_entries(&env);
 
     // Sort: wins descending, then address ascending (tiebreaker).
-    let mut sorted = Vec::new(&env);
+    let mut sorted: Vec<LeaderboardEntry> = Vec::new(&env);
     for i in 0..entries.len() {
         if let Some(e) = entries.get(i) {
             let mut inserted = false;
@@ -994,7 +988,7 @@ pub fn get_leaderboard_by_streak(env: Env, cursor: Option<Address>, limit: u32) 
     let entries = _collect_leaderboard_entries(&env);
 
     // Sort: best_streak descending, then address ascending (tiebreaker).
-    let mut sorted = Vec::new(&env);
+    let mut sorted: Vec<LeaderboardEntry> = Vec::new(&env);
     for i in 0..entries.len() {
         if let Some(e) = entries.get(i) {
             let mut inserted = false;
