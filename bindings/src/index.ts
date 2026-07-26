@@ -1306,6 +1306,10 @@ export class Client extends ContractClient {
         set_close_buffer_ledgers: this.txFromJSON<Result<void>>,
         get_close_buffer_ledgers: this.txFromJSON<u32>,
         get_round_pool_stats: this.txFromJSON<Option<RoundPoolStats>>,
-        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>
+        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>,
+        get_precision_predictions_cursor: this.txFromJSON<PrecisionPredictionsPage>,
+        get_updown_positions_cursor: this.txFromJSON<UpdownPositionsPage>,
+        get_leaderboard_by_wins: this.txFromJSON<LeaderboardPage>,
+        get_leaderboard_by_streak: this.txFromJSON<LeaderboardPage>,
   }
 }

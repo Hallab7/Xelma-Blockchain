@@ -33,7 +33,6 @@ pub use errors::ContractError;
 pub use types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     LeaderboardEntry, LeaderboardPage, OracleRotationProposal, PendingConfigChange,
-    PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage,
-    ProtocolHealthStatus, Round, RoundArchiveStatus, UpdownPositionEntry,
-    UpdownPositionsPage, UserPosition, UserStats,
+    PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage, ProtocolHealthStatus,
+    Round, RoundArchiveStatus, UpdownPositionEntry, UpdownPositionsPage, UserPosition, UserStats,
 };
