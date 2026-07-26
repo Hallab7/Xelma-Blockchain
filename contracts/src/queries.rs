@@ -9,10 +9,10 @@ use crate::config::{
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKey, LeaderboardEntry, LeaderboardPage,
-    PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage,
-    ProtocolHealthStatus, Round, RoundMode, RoundPhase, RoundPoolStats,
-    SimulationResult, UpdownPositionEntry, UpdownPositionsPage, UserOutcomeType,
-    UserPosition, UserRoundOutcome, UserStats,
+    PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage, Round,
+    RoundMode, RoundPhase, RoundPoolStats, SimulationResult,
+    UpdownPositionEntry, UpdownPositionsPage, UserOutcomeType, UserPosition,
+    UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
