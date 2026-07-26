@@ -298,7 +298,9 @@ jobs:
     needs: contract-build
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4          - name: Install Stellar CLI
+        uses: actions/checkout@v4
+
+      - name: Install Stellar CLI
         run: |
           curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
