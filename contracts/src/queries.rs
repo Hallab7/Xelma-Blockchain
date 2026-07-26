@@ -681,7 +681,7 @@ fn _find_cursor_position(sorted: &Vec<Address>, cursor: &Option<Address>) -> u32
 
     for i in 0..sorted.len() {
         if let Some(addr) = sorted.get(i) {
-            if addr > cursor_addr {
+            if &addr > cursor_addr {
                 return i;
             }
         }
@@ -880,7 +880,7 @@ fn _collect_leaderboard_entries(env: &Env) -> Vec<LeaderboardEntry> {
                 let mut found = false;
                 for j in 0..seen.len() {
                     if let Some(s) = seen.get(j) {
-                        if s == &user {
+                        if s == user {
                             found = true;
                             break;
                         }
@@ -936,15 +936,18 @@ pub fn get_leaderboard_by_wins(
     for i in 0..entries.len() {
         if let Some(e) = entries.get(i) {
             let mut inserted = false;
-            for j in 0..sorted.len() {
-                let cur = sorted.get_unchecked(j);
-                if e.stats.total_wins > cur.stats.total_wins
-                    || (e.stats.total_wins == cur.stats.total_wins && e.user < cur.user)
-                {
-                    sorted.insert(j, e.clone());
-                    inserted = true;
-                    break;
+            let mut j: u32 = 0;
+            while j < sorted.len() {
+                if let Some(cur) = sorted.get(j) {
+                    if e.stats.total_wins > cur.stats.total_wins
+                        || (e.stats.total_wins == cur.stats.total_wins && e.user < cur.user)
+                    {
+                        sorted.insert(j, e.clone());
+                        inserted = true;
+                        break;
+                    }
                 }
+                j += 1;
             }
             if !inserted {
                 sorted.push_back(e);
@@ -979,11 +982,7 @@ pub fn get_leaderboard_by_wins(
 
 /// Returns a cursor-based page of the global leaderboard ordered by best streak
 /// descending, with address ascending as tiebreaker.
-pub fn get_leaderboard_by_streak(
-    env: Env,
-    cursor: Option<Address>,
-    limit: u32,
-) -> LeaderboardPage {
+pub fn get_leaderboard_by_streak(env: Env, cursor: Option<Address>, limit: u32) -> LeaderboardPage {
     let limit = limit.min(MAX_PAGE_SIZE);
     if limit == 0 {
         return LeaderboardPage {
@@ -999,15 +998,18 @@ pub fn get_leaderboard_by_streak(
     for i in 0..entries.len() {
         if let Some(e) = entries.get(i) {
             let mut inserted = false;
-            for j in 0..sorted.len() {
-                let cur = sorted.get_unchecked(j);
-                if e.stats.best_streak > cur.stats.best_streak
-                    || (e.stats.best_streak == cur.stats.best_streak && e.user < cur.user)
-                {
-                    sorted.insert(j, e.clone());
-                    inserted = true;
-                    break;
+            let mut j: u32 = 0;
+            while j < sorted.len() {
+                if let Some(cur) = sorted.get(j) {
+                    if e.stats.best_streak > cur.stats.best_streak
+                        || (e.stats.best_streak == cur.stats.best_streak && e.user < cur.user)
+                    {
+                        sorted.insert(j, e.clone());
+                        inserted = true;
+                        break;
+                    }
                 }
+                j += 1;
             }
             if !inserted {
                 sorted.push_back(e);
