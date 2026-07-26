@@ -8,9 +8,10 @@ use crate::config::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round,
-    RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UserOutcomeType, UserPosition,
-    UserRoundOutcome, UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, LeaderboardEntry, LeaderboardPage,
+    PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage, Round,
+    RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UpdownPositionsPage,
+    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -665,4 +666,373 @@ pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, 
         fee_amount: total_fee,
         outcomes,
     })
+}
+
+// ─── Cursor helpers ──────────────────────────────────────────────────────────
+
+/// Finds the index of the first address in a sorted Vec that is strictly greater
+/// than `cursor`. Returns 0 when `cursor` is `None` (start from beginning).
+/// When the cursor is past the last element, returns `sorted.len()`.
+fn _find_cursor_position(sorted: &Vec<Address>, cursor: &Option<Address>) -> u32 {
+    let cursor_addr = match cursor {
+        Some(a) => a,
+        None => return 0,
+    };
+
+    for i in 0..sorted.len() {
+        if let Some(addr) = sorted.get(i) {
+            if addr > cursor_addr {
+                return i;
+            }
+        }
+    }
+    sorted.len()
+}
+
+/// Finds the index of the first entry in a sorted leaderboard Vec whose user
+/// address is strictly greater than `cursor`. Returns 0 when `cursor` is `None`.
+fn _find_cursor_in_leaderboard(
+    sorted: &Vec<LeaderboardEntry>,
+    cursor: &Option<Address>,
+) -> u32 {
+    let cursor_addr = match cursor {
+        Some(a) => a,
+        None => return 0,
+    };
+
+    for i in 0..sorted.len() {
+        if let Some(entry) = sorted.get(i) {
+            if &entry.user > cursor_addr {
+                return i;
+            }
+        }
+    }
+    sorted.len()
+}
+
+// ─── Cursor-based participant/prediction pagination ──────────────────────────
+
+/// Returns a cursor-based page of Precision-mode predictions for the active round.
+///
+/// `cursor`: The last user address from the previous page, or `None` to start
+/// from the beginning.  `limit` is clamped to `MAX_PAGE_SIZE`.
+///
+/// The returned `next_cursor` is the last address included in this page, or
+/// `None` when the page is empty or the dataset is exhausted.
+pub fn get_precision_predictions_cursor(
+    env: Env,
+    cursor: Option<Address>,
+    limit: u32,
+) -> PrecisionPredictionsPage {
+    let limit = limit.min(MAX_PAGE_SIZE);
+    if limit == 0 {
+        return PrecisionPredictionsPage {
+            items: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let round = match env
+        .storage()
+        .persistent()
+        .get::<_, Round>(&DataKey::ActiveRound)
+    {
+        Some(r) => r,
+        None => {
+            return PrecisionPredictionsPage {
+                items: Vec::new(&env),
+                next_cursor: None,
+            }
+        }
+    };
+
+    let participants: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::RoundParticipants(round.round_id))
+        .unwrap_or(Vec::new(&env));
+    let participants = sort_addresses(participants);
+
+    let total = participants.len();
+    let start = _find_cursor_position(&participants, &cursor);
+    if start >= total {
+        return PrecisionPredictionsPage {
+            items: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let end = start.saturating_add(limit).min(total);
+
+    let mut items: Vec<PrecisionPrediction> = Vec::new(&env);
+    let mut last_addr: Option<Address> = None;
+    for i in start..end {
+        if let Some(user) = participants.get(i) {
+            let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
+            if let Some(pred) = env.storage().persistent().get(&pred_key) {
+                last_addr = Some(user.clone());
+                items.push_back(pred);
+            }
+        }
+    }
+
+    PrecisionPredictionsPage {
+        items,
+        next_cursor: last_addr,
+    }
+}
+
+/// Returns a cursor-based page of Up/Down positions for the active round.
+///
+/// Each item is a `(Address, UserPosition)` pair sorted by address ascending.
+/// Same cursor semantics as [`get_precision_predictions_cursor`].
+pub fn get_updown_positions_cursor(
+    env: Env,
+    cursor: Option<Address>,
+    limit: u32,
+) -> UpdownPositionsPage {
+    let limit = limit.min(MAX_PAGE_SIZE);
+    if limit == 0 {
+        return UpdownPositionsPage {
+            items: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let round = match env
+        .storage()
+        .persistent()
+        .get::<_, Round>(&DataKey::ActiveRound)
+    {
+        Some(r) => r,
+        None => {
+            return UpdownPositionsPage {
+                items: Vec::new(&env),
+                next_cursor: None,
+            }
+        }
+    };
+
+    let participants: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::RoundParticipants(round.round_id))
+        .unwrap_or(Vec::new(&env));
+    let participants = sort_addresses(participants);
+
+    let total = participants.len();
+    let start = _find_cursor_position(&participants, &cursor);
+    if start >= total {
+        return UpdownPositionsPage {
+            items: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let end = start.saturating_add(limit).min(total);
+
+    let mut items: Vec<(Address, UserPosition)> = Vec::new(&env);
+    let mut last_addr: Option<Address> = None;
+    for i in start..end {
+        if let Some(user) = participants.get(i) {
+            let pos_key = DataKey::Position(round.round_id, user.clone());
+            if let Some(pos) = env.storage().persistent().get(&pos_key) {
+                last_addr = Some(user.clone());
+                items.push_back((user, pos));
+            }
+        }
+    }
+
+    UpdownPositionsPage {
+        items,
+        next_cursor: last_addr,
+    }
+}
+
+// ─── Leaderboard queries ─────────────────────────────────────────────────────
+
+/// Collects all on-chain user stats into a deterministic sorted Vec of
+/// `LeaderboardEntry` by scanning known participants from the active round
+/// and recent archived rounds.
+///
+/// This is a best-effort snapshot: users with stats but no recent round
+/// participation may not appear. A complete solution would maintain a
+/// dedicated leaderboard index (future enhancement).
+fn _collect_leaderboard_entries(env: &Env) -> Vec<LeaderboardEntry> {
+    let mut seen: Vec<Address> = Vec::new(env);
+
+    // Collect from the active round participant list if any.
+    if let Some(round) = env
+        .storage()
+        .persistent()
+        .get::<_, Round>(&DataKey::ActiveRound)
+    {
+        let participants: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RoundParticipants(round.round_id))
+            .unwrap_or(Vec::new(env));
+        for i in 0..participants.len() {
+            if let Some(user) = participants.get(i) {
+                let mut found = false;
+                for j in 0..seen.len() {
+                    if let Some(s) = seen.get(j) {
+                        if s == &user {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if !found {
+                    seen.push_back(user);
+                }
+            }
+        }
+    }
+
+    // Build leaderboard entries from seen users.
+    let mut entries = Vec::new(env);
+    for i in 0..seen.len() {
+        if let Some(user) = seen.get(i) {
+            let stats = get_user_stats(env.clone(), user.clone());
+            entries.push_back(LeaderboardEntry {
+                user: user.clone(),
+                stats,
+            });
+        }
+    }
+
+    entries
+}
+
+/// Returns a cursor-based page of the global leaderboard ordered by total wins
+/// descending, with address ascending as tiebreaker.
+///
+/// `cursor`: The last user address from the previous page, or `None` to start
+/// from the beginning.  `limit` is clamped to `MAX_PAGE_SIZE` (100).
+///
+/// The result is a snapshot built from on-chain `UserStats` collected from
+/// active and recent round participants.
+pub fn get_leaderboard_by_wins(
+    env: Env,
+    cursor: Option<Address>,
+    limit: u32,
+) -> LeaderboardPage {
+    let limit = limit.min(MAX_PAGE_SIZE);
+    if limit == 0 {
+        return LeaderboardPage {
+            items: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let entries = _collect_leaderboard_entries(&env);
+
+    // Sort: wins descending, then address ascending (tiebreaker).
+    let mut sorted = Vec::new(&env);
+    for i in 0..entries.len() {
+        if let Some(e) = entries.get(i) {
+            let mut inserted = false;
+            for j in 0..sorted.len() {
+                let cur = sorted.get_unchecked(j);
+                if e.stats.total_wins > cur.stats.total_wins
+                    || (e.stats.total_wins == cur.stats.total_wins && e.user < cur.user)
+                {
+                    sorted.insert(j, e.clone());
+                    inserted = true;
+                    break;
+                }
+            }
+            if !inserted {
+                sorted.push_back(e);
+            }
+        }
+    }
+
+    let total = sorted.len();
+    let start = _find_cursor_in_leaderboard(&sorted, &cursor);
+    if start >= total {
+        return LeaderboardPage {
+            items: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let end = start.saturating_add(limit).min(total);
+    let mut items = Vec::new(&env);
+    let mut last_addr: Option<Address> = None;
+    for i in start..end {
+        if let Some(e) = sorted.get(i) {
+            last_addr = Some(e.user.clone());
+            items.push_back(e.clone());
+        }
+    }
+
+    LeaderboardPage {
+        items,
+        next_cursor: last_addr,
+    }
+}
+
+/// Returns a cursor-based page of the global leaderboard ordered by best streak
+/// descending, with address ascending as tiebreaker.
+pub fn get_leaderboard_by_streak(
+    env: Env,
+    cursor: Option<Address>,
+    limit: u32,
+) -> LeaderboardPage {
+    let limit = limit.min(MAX_PAGE_SIZE);
+    if limit == 0 {
+        return LeaderboardPage {
+            items: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let entries = _collect_leaderboard_entries(&env);
+
+    // Sort: best_streak descending, then address ascending (tiebreaker).
+    let mut sorted = Vec::new(&env);
+    for i in 0..entries.len() {
+        if let Some(e) = entries.get(i) {
+            let mut inserted = false;
+            for j in 0..sorted.len() {
+                let cur = sorted.get_unchecked(j);
+                if e.stats.best_streak > cur.stats.best_streak
+                    || (e.stats.best_streak == cur.stats.best_streak && e.user < cur.user)
+                {
+                    sorted.insert(j, e.clone());
+                    inserted = true;
+                    break;
+                }
+            }
+            if !inserted {
+                sorted.push_back(e);
+            }
+        }
+    }
+
+    let total = sorted.len();
+    let start = _find_cursor_in_leaderboard(&sorted, &cursor);
+    if start >= total {
+        return LeaderboardPage {
+            items: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let end = start.saturating_add(limit).min(total);
+    let mut items = Vec::new(&env);
+    let mut last_addr: Option<Address> = None;
+    for i in start..end {
+        if let Some(e) = sorted.get(i) {
+            last_addr = Some(e.user.clone());
+            items.push_back(e.clone());
+        }
+    }
+
+    LeaderboardPage {
+        items,
+        next_cursor: last_addr,
+    }
 }

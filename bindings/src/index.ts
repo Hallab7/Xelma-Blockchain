@@ -286,6 +286,39 @@ export interface PrecisionPrediction {
   user: string;
 }
 
+/**
+ * Cursor-based page of precision predictions.
+ * Pass next_cursor as the cursor argument to the next call to fetch the subsequent page.
+ */
+export interface PrecisionPredictionsPage {
+  items: Array<PrecisionPrediction>;
+  next_cursor: Option<string>;
+}
+
+/**
+ * Cursor-based page of Up/Down positions.
+ */
+export interface UpdownPositionsPage {
+  items: Array<readonly [string, UserPosition]>;
+  next_cursor: Option<string>;
+}
+
+/**
+ * Entry in the global leaderboard.
+ */
+export interface LeaderboardEntry {
+  user: string;
+  stats: UserStats;
+}
+
+/**
+ * Cursor-based page of leaderboard entries.
+ */
+export interface LeaderboardPage {
+  items: Array<LeaderboardEntry>;
+  next_cursor: Option<string>;
+}
+
 
 /**
  * Compact historical round summary persisted after resolve or cancel.
@@ -1042,6 +1075,38 @@ export interface Client {
   get_close_buffer_ledgers: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
   get_round_pool_stats: (options?: MethodOptions) => Promise<AssembledTransaction<Option<RoundPoolStats>>>
   get_user_archived_participation: ({user, round_id}: {user: string, round_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Option<UserRoundOutcome>>>
+
+  /**
+   * Construct and simulate a get_precision_predictions_cursor transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns a cursor-based page of Precision-mode predictions for the active round.
+   * 
+   * Pass `cursor` from the previous page's `next_cursor` field, or `None` to
+   * fetch the first page. Each page returns up to `limit` entries (capped at
+   * 100) and a `next_cursor` for the subsequent page. Items are sorted by
+   * user address ascending (deterministic order).
+   */
+  get_precision_predictions_cursor: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<PrecisionPredictionsPage>>
+
+  /**
+   * Construct and simulate a get_updown_positions_cursor transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns a cursor-based page of Up/Down positions for the active round.
+   * Same cursor semantics as `get_precision_predictions_cursor`.
+   */
+  get_updown_positions_cursor: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<UpdownPositionsPage>>
+
+  /**
+   * Construct and simulate a get_leaderboard_by_wins transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns a cursor-based page of the global leaderboard ordered by total
+   * wins descending (address ascending as tiebreaker).
+   */
+  get_leaderboard_by_wins: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<LeaderboardPage>>
+
+  /**
+   * Construct and simulate a get_leaderboard_by_streak transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns a cursor-based page of the global leaderboard ordered by best
+   * streak descending (address ascending as tiebreaker).
+   */
+  get_leaderboard_by_streak: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<LeaderboardPage>>
 
 }
 export class Client extends ContractClient {

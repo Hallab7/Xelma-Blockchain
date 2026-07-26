@@ -8,10 +8,11 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    OracleHeartbeatRecord, OraclePayload, OracleRotationProposal, PendingConfigChange,
-    PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus,
-    RoundPhase, RoundPoolStats, RoundStatus, RuntimeMode, SimulationResult, UserPosition,
-    UserRoundOutcome, UserStats,
+    LeaderboardPage, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
+    PendingConfigChange, PrecisionPrediction, PrecisionPredictionsPage,
+    ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus,
+    RoundPhase, RoundPoolStats, RoundStatus, RuntimeMode, SimulationResult,
+    UpdownPositionsPage, UserPosition, UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -764,6 +765,60 @@ impl VirtualTokenContract {
     /// Does not mutate storage. Returns SimulationResult.
     pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, ContractError> {
         queries::simulate_payout(env, final_price)
+    }
+
+    // ─── Cursor-based paginated queries ─────────────────────────────────────
+
+    /// Returns a cursor-based page of Precision-mode predictions for the active round.
+    ///
+    /// Pass `cursor` from the previous page's `next_cursor` field, or `None` to
+    /// fetch the first page. Each page returns up to `limit` entries (capped at
+    /// `MAX_PAGE_SIZE` = 100) and a `next_cursor` for the subsequent page.
+    /// Items are sorted by user address ascending (deterministic order).
+    ///
+    /// Returns an empty page when no active round exists or the cursor is past
+    /// all entries.
+    pub fn get_precision_predictions_cursor(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> PrecisionPredictionsPage {
+        queries::get_precision_predictions_cursor(env, cursor, limit)
+    }
+
+    /// Returns a cursor-based page of Up/Down positions for the active round.
+    ///
+    /// Each item is an `(Address, UserPosition)` pair sorted by address
+    /// ascending. Same cursor semantics as `get_precision_predictions_cursor`.
+    pub fn get_updown_positions_cursor(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> UpdownPositionsPage {
+        queries::get_updown_positions_cursor(env, cursor, limit)
+    }
+
+    /// Returns a cursor-based page of the global leaderboard ordered by total
+    /// wins descending (address ascending as tiebreaker).
+    ///
+    /// Pass `cursor` from the previous page's `next_cursor`, or `None` for the
+    /// first page. Up to `limit` entries per page (capped at 100).
+    pub fn get_leaderboard_by_wins(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> LeaderboardPage {
+        queries::get_leaderboard_by_wins(env, cursor, limit)
+    }
+
+    /// Returns a cursor-based page of the global leaderboard ordered by best
+    /// streak descending (address ascending as tiebreaker).
+    pub fn get_leaderboard_by_streak(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> LeaderboardPage {
+        queries::get_leaderboard_by_streak(env, cursor, limit)
     }
 }
 
