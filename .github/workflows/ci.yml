@@ -300,7 +300,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4          - name: Install Stellar CLI
         run: |
-          cargo install --locked stellar-cli
+          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
           stellar --version
 
       - name: Download WASM artifact
