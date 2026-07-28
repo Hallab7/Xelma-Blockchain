@@ -138,6 +138,10 @@ pub enum DataKey {
     /// retained on-chain before the oldest are pruned (FIFO). If unset, the protocol
     /// default is used.
     ArchiveRetention,
+    /// Admin-configured blueprint used by `create_next_from_template` to spin
+    /// up the next round without re-specifying `start_price` / `mode` each
+    /// time. Absent means no template is configured.
+    RoundTemplate,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
@@ -516,4 +520,17 @@ pub struct SimulationResult {
     pub precision_total_stake: i128,
     pub fee_amount: i128,
     pub outcomes: Vec<UserRoundOutcome>,
+}
+
+/// Admin-configured blueprint for `create_next_from_template`.
+///
+/// Mirrors the arguments accepted by `create_round` (`start_price`, `mode`)
+/// so a keeper can spin up the next round after a settle/cancel without an
+/// operator re-specifying parameters each time. Validated with the exact
+/// same rules `create_round` applies at creation time.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoundTemplate {
+    pub start_price: u128,
+    pub mode: Option<u32>,
 }

@@ -10,8 +10,8 @@ use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
     OracleHeartbeatRecord, OraclePayload, OracleRotationProposal, PendingConfigChange,
     PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus,
-    RoundPhase, RoundPoolStats, RoundStatus, RuntimeMode, SimulationResult, UserPosition,
-    UserRoundOutcome, UserStats,
+    RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode, SimulationResult,
+    UserPosition, UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -615,6 +615,32 @@ impl VirtualTokenContract {
         mode: Option<u32>,
     ) -> Result<(), ContractError> {
         betting::create_round(env, start_price, mode)
+    }
+
+    /// Stores the admin's blueprint for `create_next_from_template` (admin only).
+    pub fn set_round_template(
+        env: Env,
+        start_price: u128,
+        mode: Option<u32>,
+    ) -> Result<(), ContractError> {
+        config::set_round_template(env, start_price, mode)
+    }
+
+    /// Removes the configured round template (admin only).
+    pub fn clear_round_template(env: Env) -> Result<(), ContractError> {
+        config::clear_round_template(env)
+    }
+
+    /// Returns the configured round template, if any.
+    pub fn get_round_template(env: Env) -> Option<RoundTemplate> {
+        config::get_round_template(env)
+    }
+
+    /// Creates the next round from the configured template (admin only).
+    /// Fails with `RoundAlreadyActive` if a round is already active and
+    /// with `NoRoundTemplate` if no template has been configured.
+    pub fn create_next_from_template(env: Env) -> Result<u64, ContractError> {
+        betting::create_next_from_template(env)
     }
 
     pub fn place_bet(
