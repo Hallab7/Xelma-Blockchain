@@ -845,6 +845,31 @@ pub fn _resolve_precision_mode(
                 }
             }
         }
+    } else if total_pot > 0 {
+        // Nobody revealed a prediction (all-commitment round). There is no
+        // closest-guess winner to forfeit the pot to, so — unlike the
+        // mixed-reveal case — every participant's stake must be refunded in
+        // full rather than silently vanishing from circulation (conservation:
+        // sum_refunds == total_pot, fee == 0, no stats mutation).
+        for i in 0..participants.len() {
+            if let Some(user) = participants.get(i) {
+                let stake = participant_amounts.get(i).unwrap_or(0);
+                if stake > 0 {
+                    _accumulate_pending(env, user.clone(), stake)?;
+                    _persist_user_outcome(
+                        env,
+                        round_id,
+                        1,
+                        &user,
+                        2,
+                        0,
+                        stake,
+                        stake,
+                        UserOutcomeType::Refund,
+                    );
+                }
+            }
+        }
     }
 
     Ok(fee_amount)

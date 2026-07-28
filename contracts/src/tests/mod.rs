@@ -8,6 +8,7 @@ mod chaos_recovery;
 mod commit_reveal_e2e;
 mod config_helpers;
 // mod config_timelock; // upstream bug
+mod conservation;
 mod cost_benchmarks;
 mod edge_cases;
 mod event_coverage;
