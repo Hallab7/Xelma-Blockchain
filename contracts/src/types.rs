@@ -628,7 +628,7 @@ pub struct LeaderboardPage {
     pub items: Vec<LeaderboardEntry>,
     pub next_cursor: Option<Address>,
 }
-n/// Cursor-based page of precision predictions for the active round.
+/// Cursor-based page of precision predictions for the active round.
 ///
 /// `next_cursor` is the last user address in this page, or `None` if the page
 /// is empty or exhausted. Clients should pass this value as the `cursor`
