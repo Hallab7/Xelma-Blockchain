@@ -51,7 +51,7 @@
 //! wiring is required for CI inclusion.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
-use crate::types::{BetSide, DataKey, OraclePayload, RoundArchiveStatus};
+use crate::types::{BetSide, DataKeyCore, DataKeyScoped, OraclePayload, RoundArchiveStatus};
 use proptest::prelude::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
@@ -81,7 +81,7 @@ fn set_fee_bps_now(env: &Env, contract_id: &Address, bps: u32) {
     env.as_contract(contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::ProtocolFeeBps, &bps);
+            .set(&DataKeyCore::ProtocolFeeBps, &bps);
     });
 }
 

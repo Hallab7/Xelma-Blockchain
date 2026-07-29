@@ -6,7 +6,7 @@
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{
-    BetSide, DataKey, OraclePayload, PrecisionPrediction, Round, RoundArchiveStatus, RoundMode,
+    BetSide, DataKeyCore, DataKeyScoped, OraclePayload, PrecisionPrediction, Round, RoundArchiveStatus, RoundMode,
     UserOutcomeType, UserPosition,
 };
 use soroban_sdk::BytesN;
@@ -93,19 +93,19 @@ fn test_resolve_round_price_unchanged() {
         // Store positions in UpDownPositions (new storage location)
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         // Update round pools to match positions
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     // Get balances before resolution
@@ -202,18 +202,18 @@ fn test_resolve_round_price_went_up() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 300_0000000;
         round.pool_down = 150_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     let alice_before = client.balance(&alice);
@@ -303,18 +303,18 @@ fn test_resolve_round_price_went_down() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 200_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     let alice_before = client.balance(&alice);
@@ -506,7 +506,7 @@ fn test_resolve_precision_closest_guess_wins() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     // Advance ledger to allow resolution
@@ -605,7 +605,7 @@ fn test_resolve_precision_tie_splits_pot() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     // Advance ledger
@@ -688,7 +688,7 @@ fn test_resolve_precision_exact_match() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -805,7 +805,7 @@ fn test_resolve_precision_three_way_tie() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -869,7 +869,7 @@ fn test_resolve_precision_single_prediction() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -937,7 +937,7 @@ fn test_resolve_precision_large_differences() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1018,7 +1018,7 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1135,7 +1135,7 @@ fn test_precision_remainder_5way_tie() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1219,7 +1219,7 @@ fn test_precision_no_remainder() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1525,17 +1525,17 @@ fn test_claim_winnings_event_emitted() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -1670,7 +1670,7 @@ fn test_precision_payout_deterministic_same_inputs() {
             );
             env.storage()
                 .persistent()
-                .set(&DataKey::PrecisionPositions, &predictions);
+                .set(&DataKeyCore::PrecisionPositions, &predictions);
         });
 
         env.ledger().with_mut(|li| {
@@ -1755,7 +1755,7 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -2092,7 +2092,7 @@ fn test_precision_payout_conservation_large_tie_set() {
         }
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -2670,18 +2670,18 @@ fn test_outcome_loss_event_updown_legacy_path() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -2850,7 +2850,7 @@ fn test_outcome_loss_event_precision_legacy_path() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -2937,17 +2937,17 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -3429,7 +3429,7 @@ fn sum_pending_payouts(
     let mut total: i128 = 0;
     env.as_contract(contract, || {
         for u in users {
-            let key = crate::types::DataKey::PendingWinnings(u.clone());
+            let key = crate::types::DataKeyScoped::PendingWinnings(u.clone());
             let v: Option<i128> = env.storage().persistent().get(&key);
             total = total
                 .checked_add(v.unwrap_or(0))
@@ -3610,18 +3610,18 @@ fn test_protocol_fee_updown_legacy_conservation() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_000_0000;
         round.pool_down = 50_000_0000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -3760,7 +3760,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -3908,17 +3908,17 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_000_0000;
         round.pool_down = 50_000_0000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);

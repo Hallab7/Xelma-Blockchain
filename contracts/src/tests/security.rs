@@ -4,7 +4,7 @@
 use super::config_helpers::{apply_oracle_max_deviation_bps, apply_oracle_stale_threshold};
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{DataKey, OraclePayload};
+use crate::types::{DataKeyCore, DataKeyScoped, OraclePayload};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -243,7 +243,7 @@ fn test_resolve_round_duplicate_nonce_rejected() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::ConsumedOracleNonce(round.round_id, 42u64), &true);
+            .set(&DataKeyScoped::ConsumedOracleNonce(round.round_id, 42u64), &true);
     });
 
     let result = client.try_resolve_round(&OraclePayload {
@@ -294,7 +294,7 @@ fn test_resolve_round_unique_nonce_resolves() {
         let consumed: bool = env
             .storage()
             .persistent()
-            .get(&DataKey::ConsumedOracleNonce(round.round_id, 7u64))
+            .get(&DataKeyScoped::ConsumedOracleNonce(round.round_id, 7u64))
             .unwrap_or(false);
         assert!(consumed, "resolved nonce must be marked consumed");
     });
@@ -690,7 +690,7 @@ fn test_oracle_deviation_override_allows_over_threshold_and_emits_event() {
         let armed: bool = env
             .storage()
             .persistent()
-            .get(&DataKey::OracleDeviationOverrideArmed)
+            .get(&DataKeyCore::OracleDeviationOverrideArmed)
             .unwrap_or(false);
         assert!(!armed, "override must be cleared after use");
     });
@@ -752,9 +752,9 @@ fn test_resolve_round_nonce_boundary_values() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::ConsumedOracleNonce(round.round_id, 0u64), &true);
+            .set(&DataKeyScoped::ConsumedOracleNonce(round.round_id, 0u64), &true);
         env.storage().persistent().set(
-            &DataKey::ConsumedOracleNonce(round.round_id, u64::MAX),
+            &DataKeyScoped::ConsumedOracleNonce(round.round_id, u64::MAX),
             &true,
         );
     });
