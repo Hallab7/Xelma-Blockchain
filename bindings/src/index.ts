@@ -741,6 +741,22 @@ export interface Client {
   get_recent_archived_rounds: ({limit}: {limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<ArchivedRoundSummary>>>
 
   /**
+   * Construct and simulate a get_user_archive_history transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns paginated archived participation history for a user (newest first).
+   * 
+   * Reads the user's on-chain index of archived round IDs, applies offset/limit
+   * pagination, and resolves each ID to its ArchivedRoundSummary. Stale
+   * entries (rounds pruned by FIFO retention) are silently skipped.
+   * 
+   * Standard pagination semantics:
+   * - offset past the end → empty page
+   * - limit == 0 → empty page
+   * - limit capped at MAX_PAGE_SIZE (100)
+   * - Ordering is newest-first (descending round ID)
+   */
+  get_user_archive_history: ({user, offset, limit}: {user: string, offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<ArchivedRoundSummary>>>
+
+  /**
    * Construct and simulate a place_precision_prediction transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Places a precision prediction on the active round (Precision/Legends mode only)
    * predicted_price: price scaled to 4 decimals (e.g., 0.2297 → 2297)
@@ -964,6 +980,7 @@ export class Client extends ContractClient {
         get_precision_predictions: this.txFromJSON<Array<PrecisionPrediction>>,
         get_oracle_stale_threshold: this.txFromJSON<u64>,
         get_recent_archived_rounds: this.txFromJSON<Array<ArchivedRoundSummary>>,
+        get_user_archive_history: this.txFromJSON<Array<ArchivedRoundSummary>>,
         place_precision_prediction: this.txFromJSON<Result<void>>,
         set_oracle_stale_threshold: this.txFromJSON<Result<void>>,
         get_oracle_max_deviation_bps: this.txFromJSON<Option<u32>>,

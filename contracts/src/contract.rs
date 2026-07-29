@@ -372,6 +372,65 @@ impl VirtualTokenContract {
         result
     }
 
+    /// Returns paginated archived participation history for a user (newest first).
+    ///
+    /// Reads the user's on-chain index of archived round IDs, applies offset/limit
+    /// pagination, and resolves each ID to its [`ArchivedRoundSummary`]. Stale
+    /// entries (rounds pruned by FIFO retention) are silently skipped.
+    ///
+    /// Standard pagination semantics:
+    /// - `offset` past the end → empty page
+    /// - `limit == 0` → empty page
+    /// - `limit` capped at [`MAX_PAGE_SIZE`]
+    /// - Ordering is newest-first (descending round ID)
+    pub fn get_user_archive_history(
+        env: Env,
+        user: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<ArchivedRoundSummary> {
+        let env_ref = &env;
+        let limit = limit.min(MAX_PAGE_SIZE);
+        if limit == 0 {
+            return Vec::new(env_ref);
+        }
+
+        let user_rounds: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserArchivedRoundIds(user))
+            .unwrap_or(Vec::new(env_ref));
+
+        let total = user_rounds.len();
+        if offset >= total {
+            return Vec::new(env_ref);
+        }
+
+        // Read newest-first (the stored list has newest appended at the end).
+        let start = total.saturating_sub(offset + 1);
+        let end = start.saturating_sub(limit.saturating_sub(1));
+        // Walk descending from start down to end (inclusive).
+        let mut idx = start;
+        let mut result: Vec<ArchivedRoundSummary> = Vec::new(env_ref);
+        loop {
+            if let Some(round_id) = user_rounds.get(idx) {
+                if let Some(summary) = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::ArchivedRound(round_id))
+                {
+                    result.push_back(summary);
+                }
+            }
+            if idx == end || result.len() as u32 == limit {
+                break;
+            }
+            idx = idx.saturating_sub(1);
+        }
+
+        result
+    }
+
     pub fn get_admin(env: Env) -> Option<Address> {
         let key = DataKey::Admin;
         Self::_extend_persistent_ttl(&env, &key);
@@ -1873,7 +1932,7 @@ impl VirtualTokenContract {
                     &round,
                     RoundArchiveStatus::FallbackRefund,
                     payload.price,
-                    count,
+                    &threshold_participants,
                 );
                 Self::_refund_under_threshold(&env, &round, &threshold_participants)?;
                 #[allow(deprecated)]
@@ -1909,14 +1968,13 @@ impl VirtualTokenContract {
             .persistent()
             .get(&DataKey::RoundParticipants(round_id))
             .unwrap_or(Vec::new(&env));
-        let participant_count = participants.len();
 
         Self::_archive_round(
             &env,
             &round,
             RoundArchiveStatus::Resolved,
             payload.price,
-            participant_count,
+            &participants,
         );
 
         for i in 0..participants.len() {
@@ -2539,13 +2597,12 @@ impl VirtualTokenContract {
         }
 
         // Clean up participant list and mark round as cancelled
-        let participant_count = participants.len();
         Self::_archive_round(
             &env,
             &round,
             RoundArchiveStatus::Cancelled,
             0,
-            participant_count,
+            &participants,
         );
 
         env.storage()
@@ -2701,13 +2758,14 @@ impl VirtualTokenContract {
         Ok(())
     }
 
-    /// Persists a compact round summary and enforces FIFO archive retention.
+    /// Persists a compact round summary, records per-user participation indices,
+    /// and enforces FIFO archive retention.
     fn _archive_round(
         env: &Env,
         round: &Round,
         status: RoundArchiveStatus,
         final_price: u128,
-        participant_count: u32,
+        participants: &Vec<Address>,
     ) {
         let summary = ArchivedRoundSummary {
             round_id: round.round_id,
@@ -2717,13 +2775,27 @@ impl VirtualTokenContract {
             status,
             pool_up: round.pool_up,
             pool_down: round.pool_down,
-            participant_count,
+            participant_count: participants.len() as u32,
             settled_at_ledger: env.ledger().sequence(),
         };
 
         env.storage()
             .persistent()
             .set(&DataKey::ArchivedRound(round.round_id), &summary);
+
+        // Record per-user participation index.
+        for i in 0..participants.len() {
+            if let Some(user) = participants.get(i) {
+                let index_key = DataKey::UserArchivedRoundIds(user.clone());
+                let mut user_rounds: Vec<u64> = env
+                    .storage()
+                    .persistent()
+                    .get(&index_key)
+                    .unwrap_or(Vec::new(env));
+                user_rounds.push_back(round.round_id);
+                env.storage().persistent().set(&index_key, &user_rounds);
+            }
+        }
 
         let mut recent: Vec<u64> = env
             .storage()

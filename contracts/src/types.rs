@@ -95,6 +95,11 @@ pub enum DataKey {
     LedgerMintCounter(u32),
     /// Mint limit configuration: maximum number of mints allowed per ledger.
     MintLimitConfig,
+    /// Per-user index of archived round IDs the user participated in.
+    /// Written during archiving; read for paginated history queries.
+    /// Not pruned when archived rounds are evicted — stale entries are
+    /// filtered at query time by checking ArchivedRound existence.
+    UserArchivedRoundIds(Address),
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
