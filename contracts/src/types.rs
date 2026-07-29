@@ -467,7 +467,7 @@ pub enum UserOutcomeType {
     Win = 0,
     Loss = 1,
     Refund = 2,
-    Cancel = 3,
+    Void = 3,
 }
 
 #[contracttype]

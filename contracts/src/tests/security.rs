@@ -1474,7 +1474,7 @@ fn test_heartbeat_gate_override_bypasses_block_and_emits_event() {
         let armed: bool = env
             .storage()
             .persistent()
-            .get(&DataKey::HbOverride)
+            .get(&DataKey::OracleDeviationOverrideArmed)
             .unwrap_or(false);
         assert!(!armed, "heartbeat override must be cleared after use");
     });
