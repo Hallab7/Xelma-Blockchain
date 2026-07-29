@@ -677,6 +677,18 @@ impl VirtualTokenContract {
         config::get_close_buffer_ledgers(env)
     }
 
+    /// Sets the early cash-out penalty rate in basis points (admin only).
+    /// `None` disables early cash-out entirely (default).
+    /// `Some(bps)` enables it with the given penalty rate (1–1000 bps).
+    pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
+        config::set_early_cashout_bps(env, bps)
+    }
+
+    /// Returns the configured early cash-out penalty bps, if enabled.
+    pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
+        config::get_early_cashout_bps(env)
+    }
+
     /// Creates a new prediction round (admin only)
     pub fn create_round(
         env: Env,
@@ -776,6 +788,22 @@ impl VirtualTokenContract {
 
     pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
         settlement::claim_winnings(env, user)
+    }
+
+    /// Early cash-out during the Running phase for UpDown rounds.
+    ///
+    /// Allows a bettor to exit their position early, forfeiting a percentage
+    /// of their stake to the protocol treasury. The forfeited amount is
+    /// determined by the `EarlyCashoutBps` config (set by admin).
+    ///
+    /// # Errors
+    /// - `EarlyCashoutDisabled` — feature not enabled (no penalty bps configured)
+    /// - `EarlyCashoutPhaseInvalid` — not in Running phase
+    /// - `EarlyCashoutNotUpDown` — round is not UpDown mode
+    /// - `NoActiveRound` — no active round exists
+    /// - `PositionNotFound` — user has no position in the active round
+    pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
+        betting::cash_out_early(env, user)
     }
 
     pub fn get_active_round(env: Env) -> Option<Round> {
