@@ -7,11 +7,13 @@ use crate::common::{
     DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION,
     MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
     MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PRECISION_PARTICIPANTS_LIMIT,
-    MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS, MIN_ARCHIVE_RETENTION, MIN_CAP_VALUE,
-    MIN_ORACLE_STALE_THRESHOLD,
+    MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_ARCHIVE_RETENTION,
+    MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD, MIN_START_PRICE,
 };
 use crate::errors::ContractError;
-use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange};
+use crate::types::{
+    ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, RoundTemplate,
+};
 use soroban_sdk::{symbol_short, Address, Env};
 
 pub fn set_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
@@ -479,6 +481,104 @@ pub fn get_archive_retention(env: Env) -> u32 {
         .persistent()
         .get(&key)
         .unwrap_or(DEFAULT_ARCHIVE_RETENTION)
+}
+
+// ─── Round templates (create-next keeper) ────────────────────────────────────
+
+/// Stores the admin's blueprint for `create_next_from_template` (admin only).
+///
+/// Validated with the exact same rules `create_round` applies, so a template
+/// can never produce a round that `create_round` itself would reject.
+pub fn set_round_template(
+    env: Env,
+    start_price: u128,
+    mode: Option<u32>,
+) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("set_tmpl"), e);
+    })?;
+
+    _validate_round_template(start_price, mode).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("set_tmpl"), e);
+    })?;
+
+    let key = DataKey::RoundTemplate;
+    env.storage()
+        .persistent()
+        .set(&key, &RoundTemplate { start_price, mode });
+    _extend_persistent_ttl(&env, &key);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("template"), symbol_short!("set")),
+        (start_price, mode.unwrap_or(0)),
+    );
+    Ok(())
+}
+
+/// Removes the configured round template (admin only).
+pub fn clear_round_template(env: Env) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("clr_tmpl"), e);
+    })?;
+
+    let key = DataKey::RoundTemplate;
+    if !env.storage().persistent().has(&key) {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("clr_tmpl"),
+            ContractError::NoRoundTemplate,
+        );
+        return Err(ContractError::NoRoundTemplate);
+    }
+    env.storage().persistent().remove(&key);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("template"), symbol_short!("cleared")),
+        (env.ledger().sequence(),),
+    );
+    Ok(())
+}
+
+/// Returns the configured round template, if any.
+pub fn get_round_template(env: Env) -> Option<RoundTemplate> {
+    let key = DataKey::RoundTemplate;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
+/// Same validation `create_round` performs on `(start_price, mode)`, applied
+/// up front at template-set time so a stored template can never later fail
+/// `create_round`'s own checks for a reason unrelated to round overlap.
+pub fn _validate_round_template(
+    start_price: u128,
+    mode: Option<u32>,
+) -> Result<(), ContractError> {
+    if start_price < MIN_START_PRICE || start_price > MAX_START_PRICE {
+        return Err(ContractError::InvalidStartPrice);
+    }
+    if let Some(m) = mode {
+        if m > 1 {
+            return Err(ContractError::InvalidMode);
+        }
+    }
+    Ok(())
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

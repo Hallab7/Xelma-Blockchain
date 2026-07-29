@@ -413,6 +413,74 @@ refunds, so no new authorization surface is added.
 
 ---
 
+## `("template", "set")` — Round template stored
+
+Emitted when the admin stores or overwrites the round-creation blueprint
+used by `create_next_from_template`.
+
+| Field         | Type          | Description                                    |
+|---------------|---------------|-------------------------------------------------|
+| `start_price` | `u128`        | Starting price the next round will use.         |
+| `mode`        | `u32`         | Round mode: `0` = UpDown, `1` = Precision.       |
+
+**Topics**: `("template", "set")`
+**Source contracts**: `VirtualTokenContract`
+**Emitted by**: `set_round_template`.
+
+---
+
+## `("template", "cleared")` — Round template removed
+
+Emitted when the admin clears the configured round template.
+
+| Field     | Type  | Description                                  |
+|-----------|-------|-----------------------------------------------|
+| `ledger`  | `u32` | Ledger sequence number at which it was cleared.|
+
+**Topics**: `("template", "cleared")`
+**Source contracts**: `VirtualTokenContract`
+**Emitted by**: `clear_round_template`.
+
+---
+
+## `("template", "applied")` — Next round created from template
+
+Emitted when `create_next_from_template` successfully creates a round from
+the stored blueprint. Always accompanied by a `("round", "created")` event
+from the underlying `create_round` call.
+
+| Field         | Type   | Description                                   |
+|---------------|--------|------------------------------------------------|
+| `round_id`    | `u64`  | Id of the newly created round.                  |
+| `start_price` | `u128` | Starting price used (from the template).        |
+| `mode`        | `u32`  | Round mode used: `0` = UpDown, `1` = Precision. |
+
+**Topics**: `("template", "applied")`
+**Source contracts**: `VirtualTokenContract`
+**Emitted by**: `create_next_from_template`.
+
+---
+
+## `("season", "reset")` — Leaderboard season archived and advanced
+
+Emitted when the admin resets the active leaderboard season. The ending
+season's bounded rankings are frozen into a permanent `SeasonArchive` before
+the season id advances; per-user season stats (`SeasonUserStats`) for the
+ended season are never deleted and remain independently queryable.
+
+| Field               | Type  | Description                                          |
+|---------------------|-------|-------------------------------------------------------|
+| `season_id`         | `u32` | Id of the season that was just archived.               |
+| `new_season_id`     | `u32` | Id of the newly-active season (`season_id + 1`).        |
+| `ended_at_ledger`    | `u32` | Ledger sequence number at which the season ended.       |
+| `participant_count` | `u32` | Distinct addresses present in the archived rankings.    |
+
+**Topics**: `("season", "reset")`
+**Source contracts**: `VirtualTokenContract`
+**Emitted by**: `reset_leaderboard_season`.
+
+---
+
 ---
 
 ## Field units quick reference

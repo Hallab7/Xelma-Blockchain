@@ -7,7 +7,8 @@ use crate::common::{
 use crate::config::get_max_precision_participants;
 use crate::errors::ContractError;
 use crate::types::{
-    BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round, RoundMode, UserPosition,
+    BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round, RoundMode, RoundTemplate,
+    UserPosition,
 };
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Vec};
@@ -155,6 +156,53 @@ pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<()
     );
 
     Ok(())
+}
+
+/// Creates the next round from the admin-configured template (admin only).
+///
+/// This is the "keeper" entry point for always-on demos: rather than an
+/// operator re-supplying `start_price` / `mode` after every settle or
+/// cancel, a keeper (holding the admin key) calls this once a round has
+/// left the active state. Round creation is delegated to [`create_round`]
+/// itself, so the single-active-round guard (`RoundAlreadyActive`) is
+/// inherited verbatim — overlap is structurally impossible, not just
+/// checked twice in two places that could drift apart.
+pub fn create_next_from_template(env: Env) -> Result<u64, ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("nxttmpl"), e);
+    })?;
+
+    let template: RoundTemplate = env
+        .storage()
+        .persistent()
+        .get(&DataKey::RoundTemplate)
+        .ok_or(ContractError::NoRoundTemplate)
+        .inspect_err(|&e| {
+            _emit_action_rejected(&env, &admin, symbol_short!("nxttmpl"), e);
+        })?;
+
+    create_round(env.clone(), template.start_price, template.mode)?;
+
+    let round_id: u64 = env
+        .storage()
+        .persistent()
+        .get(&DataKey::LastRoundId)
+        .unwrap_or(0);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("template"), symbol_short!("applied")),
+        (round_id, template.start_price, template.mode.unwrap_or(0)),
+    );
+
+    Ok(round_id)
 }
 
 pub fn place_bet(

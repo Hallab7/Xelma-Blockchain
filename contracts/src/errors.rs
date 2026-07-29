@@ -100,4 +100,6 @@ pub enum ContractError {
     InvalidCommitment = 63,
     /// Reveal salt fails minimum entropy rules (all-zero or constant-byte)
     InvalidSalt = 64,
+    /// `create_next_from_template` called with no round template configured
+    NoRoundTemplate = 65,
 }
