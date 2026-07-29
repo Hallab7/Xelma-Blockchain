@@ -435,7 +435,10 @@ fn precision_all_unrevealed_refunds_ignores_configured_fee() {
     let bob_pay = client.get_pending_winnings(&bob);
     let treasury_delta = client.get_protocol_fee_treasury() - treasury_before;
 
-    assert_eq!(alice_pay, 40, "unrevealed stake must be refunded, not burned");
+    assert_eq!(
+        alice_pay, 40,
+        "unrevealed stake must be refunded, not burned"
+    );
     assert_eq!(bob_pay, 60, "unrevealed stake must be refunded, not burned");
     assert_eq!(treasury_delta, 0, "fee must not apply on a refund path");
     assert_eq!(alice_pay + bob_pay + treasury_delta, 100);

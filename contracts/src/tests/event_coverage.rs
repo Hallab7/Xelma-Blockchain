@@ -93,6 +93,14 @@ fn test_event_coverage_direct_config_setters_emit_audit_event() {
         ConfigChangePayload::ArchiveRetention(128),
         ConfigChangePayload::ArchiveRetention(64),
     );
+
+    client.set_precision_payout_policy(&1);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::PrecisionPayoutPolicy,
+        ConfigChangePayload::PrecisionPayoutPolicy(0),
+        ConfigChangePayload::PrecisionPayoutPolicy(1),
+    );
 }
 
 #[test]
@@ -319,7 +327,7 @@ fn test_event_coverage_resolve_round() {
     );
     assert_eq!(
         data.try_into_val(&env),
-        Ok((1u64, 1_2000000u128, 0u32, Option::<u32>::None))
+        Ok((1u64, 1_2000000u128, 0u32, Option::<u32>::None, 0u32))
     );
 }
 
