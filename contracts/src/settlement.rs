@@ -8,9 +8,9 @@ use crate::types::PendingWinningsUpdatedAtKey;
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, OraclePayload, PrecisionCommitment,
-    PrecisionPrediction, Round, RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
-    UserRoundOutcome, UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, HbGateConfig, OracleHeartbeatRecord,
+    OraclePayload, PrecisionCommitment, PrecisionPrediction, Round, RoundArchiveStatus,
+    RoundMode, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{symbol_short, Address, Env, Map, Vec};
 
@@ -377,6 +377,42 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         return Err(ContractError::OracleNonceReused);
     }
     env.storage().persistent().set(&nonce_key, &true);
+
+    // ─── Oracle heartbeat health gate (Issue #264) ──────────────────────────
+    //
+    // When `HbGateConfig.strict_mode` is enabled, `resolve_round` verifies
+    // that the oracle heartbeat is live before allowing settlement.
+    let hb_config = crate::admin::_load_hb_config(&env);
+
+    if hb_config.strict_mode {
+        let hb_blocked = _check_heartbeat_health_blocked(&env, &hb_config);
+
+        if hb_blocked {
+            if hb_config.override_armed {
+                // Consume the one-shot override
+                crate::admin::_consume_hb_override(&env);
+
+                #[allow(deprecated)]
+                env.events().publish(
+                    (symbol_short!("oracle"), symbol_short!("hoverride")),
+                    (round.round_id,),
+                );
+            } else {
+                #[allow(deprecated)]
+                env.events().publish(
+                    (symbol_short!("oracle"), symbol_short!("hblocked")),
+                    (round.round_id,),
+                );
+                _emit_action_rejected(
+                    &env,
+                    &oracle,
+                    symbol_short!("resolve"),
+                    ContractError::OracleNotLive,
+                );
+                return Err(ContractError::OracleNotLive);
+            }
+        }
+    }
 
     let current_ledger = env.ledger().sequence();
     if current_ledger < round.end_ledger {
@@ -1383,6 +1419,50 @@ pub fn _refund_under_threshold(
         .persistent()
         .remove(&DataKey::PrecisionPositions);
     Ok(())
+}
+
+/// Returns `true` if the oracle heartbeat health gate should block settlement (Issue #264).
+///
+/// Checks:
+/// 1. No heartbeat recorded → blocked
+/// 2. Status = 2 (offline) → blocked
+/// 3. Heartbeat stale beyond (threshold + grace) → blocked
+/// 4. Otherwise → not blocked (allowed)
+pub fn _check_heartbeat_health_blocked(env: &Env, config: &HbGateConfig) -> bool {
+    use crate::common::DEFAULT_ORACLE_STALE_THRESHOLD;
+
+    let heartbeat_key = DataKey::OracleHeartbeat;
+    _extend_persistent_ttl(env, &heartbeat_key);
+    let record: OracleHeartbeatRecord =
+        match env.storage().persistent().get(&heartbeat_key) {
+            Some(r) => r,
+            None => return true, // No heartbeat → blocked
+        };
+
+    // Offline status always blocks
+    if record.status == 2 {
+        return true;
+    }
+
+    // Check staleness with grace period
+    let threshold_key = DataKey::OracleStaleThreshold;
+    _extend_persistent_ttl(env, &threshold_key);
+    let threshold: u64 = env
+        .storage()
+        .persistent()
+        .get(&threshold_key)
+        .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD);
+
+    let grace: u64 = config.grace_seconds;
+
+    let current_time = env.ledger().timestamp();
+    let deadline = record
+        .timestamp
+        .saturating_add(threshold)
+        .saturating_add(grace);
+
+    // Blocked if past the stale threshold + grace period
+    current_time > deadline
 }
 
 pub fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> {

@@ -186,6 +186,36 @@ impl VirtualTokenContract {
         admin::get_oracle_strict_mode(env)
     }
 
+    /// Enables or disables strict mode for oracle heartbeat health at settlement (admin only, Issue #264).
+    pub fn set_hb_strict_mode(env: Env, enabled: bool) -> Result<(), ContractError> {
+        admin::set_hb_strict_mode(env, enabled)
+    }
+
+    /// Returns whether oracle heartbeat strict mode is enabled (Issue #264).
+    pub fn get_hb_strict_mode(env: Env) -> bool {
+        admin::get_hb_strict_mode(env)
+    }
+
+    /// Arms a one-shot override to bypass the heartbeat health gate for the next settlement (admin only, Issue #264).
+    pub fn arm_hb_override(env: Env) -> Result<(), ContractError> {
+        admin::arm_hb_override(env)
+    }
+
+    /// Returns whether the oracle heartbeat override is currently armed (Issue #264).
+    pub fn get_hb_override_armed(env: Env) -> bool {
+        admin::get_hb_override_armed(env)
+    }
+
+    /// Sets the grace period in seconds between heartbeat staleness and settlement block (admin only, Issue #264).
+    pub fn set_hb_grace_seconds(env: Env, seconds: u64) -> Result<(), ContractError> {
+        admin::set_hb_grace_seconds(env, seconds)
+    }
+
+    /// Returns the configured heartbeat grace period in seconds (default 0, Issue #264).
+    pub fn get_hb_grace_seconds(env: Env) -> u64 {
+        admin::get_hb_grace_seconds(env)
+    }
+
     /// Records an oracle heartbeat (oracle only).
     pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractError> {
         admin::update_oracle_heartbeat(env, status)

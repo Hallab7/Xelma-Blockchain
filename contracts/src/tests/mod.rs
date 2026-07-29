@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Test modules for the XLM Price Prediction Market contract.
 
-// mod archive_retention; // upstream bug
+mod archive_retention;
 mod betting;
 mod cei_ordering;
 mod chaos_recovery;
@@ -27,10 +27,8 @@ mod property_invariants;
 mod reference_model;
 mod resolution;
 mod rotation;
-// mod reference_model; // upstream bug: uses std HashMap in no_std context
-// mod resolution; // upstream bug: duplicate type imports
 mod security;
-mod simulate_tests;
+mod status;
 mod storage_benchmarks;
 mod ttl_tests;
 mod windows;

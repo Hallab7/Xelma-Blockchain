@@ -105,4 +105,6 @@ pub enum ContractError {
     /// Pending winnings entry exists but has not yet reached the configured
     /// expiry threshold — caller must wait before reclaiming.
     PendingWinningsNotExpired = 66,
+    /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
+    OracleNotLive = 66,
 }
