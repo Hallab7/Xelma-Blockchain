@@ -496,13 +496,17 @@ export const ContractError = {
    */
   64: {message:"InvalidSalt"},
   /**
-   * `create_next_from_template` called with no round template configured
+   * create_next_from_template called with no round template configured
    */
   65: {message:"NoRoundTemplate"},
   /**
-   * Close-buffer window has frozen — betting closed early but round not fully ended
+   * Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
    */
-  66: {message:"BettingClosed"}
+  66: {message:"OracleNotLive"},
+  /**
+   * Invalid precision payout policy
+   */
+  67: {message:"InvalidPayoutPolicy"}
 }
 
 /**
@@ -552,6 +556,29 @@ export function ContractErrorDecoder(code: number): string {
   return `Unknown contract error code ${code}`;
 }
 
+export interface RoundTemplate {
+  start_price: u128;
+  mode: Option<u32>;
+}
+
+export interface LeaderboardEntry {
+  user: string;
+  stats: UserStats;
+}
+
+export interface SeasonLeaderboardEntry {
+  user: string;
+  wins: u32;
+  best_streak: u32;
+}
+
+export interface SeasonArchive {
+  season_id: u32;
+  ended_at_ledger: u32;
+  wins: Array<SeasonLeaderboardEntry>;
+  streak: Array<SeasonLeaderboardEntry>;
+  participant_count: u32;
+}
 
 export interface Client {
   /**
@@ -1051,6 +1078,26 @@ export interface Client {
   get_round_pool_stats: (options?: MethodOptions) => Promise<AssembledTransaction<Option<RoundPoolStats>>>
   get_user_archived_participation: ({user, round_id}: {user: string, round_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Option<UserRoundOutcome>>>
 
+  set_hb_strict_mode: ({enabled}: {enabled: boolean}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_hb_strict_mode: (options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
+  arm_hb_override: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_hb_override_armed: (options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
+  set_hb_grace_seconds: ({grace_seconds}: {grace_seconds: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_hb_grace_seconds: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  set_precision_payout_policy: ({policy}: {policy: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_precision_payout_policy: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  set_round_template: ({start_price, mode}: {start_price: u128, mode: Option<u32>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  clear_round_template: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_round_template: (options?: MethodOptions) => Promise<AssembledTransaction<Option<RoundTemplate>>>
+  create_next_from_template: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_leaderboard_by_wins: ({offset, limit}: {offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<LeaderboardEntry>>>
+  get_leaderboard_by_streak: ({offset, limit}: {offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<LeaderboardEntry>>>
+  get_current_season_id: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  get_season_user_stats: ({season_id, user}: {season_id: u32, user: string}, options?: MethodOptions) => Promise<AssembledTransaction<UserStats>>
+  reset_leaderboard_season: (options?: MethodOptions) => Promise<AssembledTransaction<Result<u32>>>
+  get_season_archive: ({season_id}: {season_id: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Option<SeasonArchive>>>
+  get_season_leaderboard_by_wins: ({season_id, offset, limit}: {season_id: u32, offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<SeasonLeaderboardEntry>>>
+  get_season_leaderboard_by_streak: ({season_id, offset, limit}: {season_id: u32, offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<SeasonLeaderboardEntry>>>
 }
 export class Client extends ContractClient {
   static async deploy<T = Client>(
@@ -1241,6 +1288,26 @@ export class Client extends ContractClient {
         set_close_buffer_ledgers: this.txFromJSON<Result<void>>,
         get_close_buffer_ledgers: this.txFromJSON<u32>,
         get_round_pool_stats: this.txFromJSON<Option<RoundPoolStats>>,
-        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>
+        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>,
+        set_hb_strict_mode: this.txFromJSON<Result<void>>,
+        get_hb_strict_mode: this.txFromJSON<boolean>,
+        arm_hb_override: this.txFromJSON<Result<void>>,
+        get_hb_override_armed: this.txFromJSON<boolean>,
+        set_hb_grace_seconds: this.txFromJSON<Result<void>>,
+        get_hb_grace_seconds: this.txFromJSON<u32>,
+        set_precision_payout_policy: this.txFromJSON<Result<void>>,
+        get_precision_payout_policy: this.txFromJSON<u32>,
+        set_round_template: this.txFromJSON<Result<void>>,
+        clear_round_template: this.txFromJSON<Result<void>>,
+        get_round_template: this.txFromJSON<Option<RoundTemplate>>,
+        create_next_from_template: this.txFromJSON<Result<void>>,
+        get_leaderboard_by_wins: this.txFromJSON<Array<LeaderboardEntry>>,
+        get_leaderboard_by_streak: this.txFromJSON<Array<LeaderboardEntry>>,
+        get_current_season_id: this.txFromJSON<u32>,
+        get_season_user_stats: this.txFromJSON<UserStats>,
+        reset_leaderboard_season: this.txFromJSON<Result<u32>>,
+        get_season_archive: this.txFromJSON<Option<SeasonArchive>>,
+        get_season_leaderboard_by_wins: this.txFromJSON<Array<SeasonLeaderboardEntry>>,
+        get_season_leaderboard_by_streak: this.txFromJSON<Array<SeasonLeaderboardEntry>>
   }
 }

@@ -843,6 +843,7 @@ Check issues labeled [`good-first-issue`](https://github.com/TevaLabs/Xelma-Bloc
 - **[Bindings Guide](./bindings/README.md)** - TypeScript integration guide
 - **[Wallet Error Guide](./docs/WALLET_ERROR_GUIDE.md)** - Mapping of contract error codes to UI messages
 - **[Test Suite](./contracts/src/tests/)** - Comprehensive test examples
+- **[Demo Scenarios](./docs/DEMO.md)** - Scripted Up-win, Down-win, and Precision-tie demos with end-state assertions
 
 ---
 
