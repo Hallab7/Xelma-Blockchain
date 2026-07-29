@@ -250,3 +250,97 @@ fn bench_cost_get_precision_predictions_page() {
         "get_precision_predictions_page MEM regression: {mem}"
     );
 }
+
+#[test]
+fn bench_cost_resolve_round_medium_set() {
+    let (env, contract_id, _admin, _oracle, client) = setup();
+    client.create_round(&1_0000000u128, &None);
+    let round = client.get_active_round().unwrap();
+
+    for i in 0..25 {
+        let user = Address::generate(&env);
+        client.mint_initial(&user);
+        let side = if i % 2 == 0 {
+            BetSide::Up
+        } else {
+            BetSide::Down
+        };
+        client.place_bet(&user, &10_0000000, &side);
+    }
+
+    env.ledger().with_mut(|li| li.sequence_number = 12);
+    let payload = OraclePayload {
+        price: 2_0000000,
+        timestamp: env.ledger().timestamp(),
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    };
+    let (cpu, mem, _) = measure(&env, || client.resolve_round(&payload));
+    report("resolve_round_medium_n25", cpu, mem);
+    assert!(cpu <= RESOLVE_CPU_MAX);
+    assert!(mem <= RESOLVE_MEM_MAX);
+}
+
+#[test]
+fn bench_cost_resolve_round_max_cap() {
+    let (env, contract_id, _admin, _oracle, client) = setup();
+    client.create_round(&1_0000000u128, &None);
+    let round = client.get_active_round().unwrap();
+
+    for i in 0..100 {
+        let user = Address::generate(&env);
+        client.mint_initial(&user);
+        let side = if i % 2 == 0 {
+            BetSide::Up
+        } else {
+            BetSide::Down
+        };
+        client.place_bet(&user, &10_0000000, &side);
+    }
+
+    env.ledger().with_mut(|li| li.sequence_number = 12);
+    let payload = OraclePayload {
+        price: 2_0000000,
+        timestamp: env.ledger().timestamp(),
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    };
+    let (cpu, mem, _) = measure(&env, || client.resolve_round(&payload));
+    report("resolve_round_max_cap_n100", cpu, mem);
+    assert!(cpu <= RESOLVE_CPU_MAX);
+    assert!(mem <= RESOLVE_MEM_MAX);
+}
+
+#[test]
+fn bench_cost_resolve_precision_round_max_cap() {
+    let (env, contract_id, _admin, _oracle, client) = setup();
+    client.create_round(&1_0000000u128, &Some(1));
+    let round = client.get_active_round().unwrap();
+
+    for i in 0..100u128 {
+        let user = Address::generate(&env);
+        client.mint_initial(&user);
+        client.predict_price(&user, &(1_0000000 + i * 10_000), &10_0000000);
+    }
+
+    env.ledger().with_mut(|li| li.sequence_number = 12);
+    let payload = OraclePayload {
+        price: 1_0000000,
+        timestamp: env.ledger().timestamp(),
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    };
+    let (cpu, mem, _) = measure(&env, || client.resolve_round(&payload));
+    report("resolve_precision_max_cap_n100", cpu, mem);
+    assert!(cpu <= RESOLVE_CPU_MAX);
+    assert!(mem <= RESOLVE_MEM_MAX);
+}

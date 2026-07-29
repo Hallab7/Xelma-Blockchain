@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+extern crate alloc;
+use alloc::vec::Vec as StdVec;
 use crate::errors::ContractError;
 use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, Round, RoundPhase};
 use soroban_sdk::{symbol_short, Address, Env, IntoVal, Symbol, Val, Vec};
