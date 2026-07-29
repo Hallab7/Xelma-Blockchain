@@ -628,3 +628,43 @@ pub struct LeaderboardPage {
     pub items: Vec<LeaderboardEntry>,
     pub next_cursor: Option<Address>,
 }
+n/// Cursor-based page of precision predictions for the active round.
+///
+/// `next_cursor` is the last user address in this page, or `None` if the page
+/// is empty or exhausted. Clients should pass this value as the `cursor`
+/// argument to the next call to fetch the subsequent page deterministically.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrecisionPredictionsPage {
+    pub items: Vec<PrecisionPrediction>,
+    pub next_cursor: Option<Address>,
+}
+
+/// Single entry in a cursor-based Up/Down positions page.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpdownPositionEntry {
+    pub user: Address,
+    pub position: UserPosition,
+}
+
+/// Cursor-based page of Up/Down positions for the active round.
+///
+/// Items are `UpdownPositionEntry` records sorted by address ascending.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpdownPositionsPage {
+    pub items: Vec<UpdownPositionEntry>,
+    pub next_cursor: Option<Address>,
+}
+
+/// Cursor-based page of leaderboard entries.
+///
+/// `next_cursor` is the last user address in this page, or `None` if the page
+/// is exhausted. Pass it as the `cursor` argument to the next call.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeaderboardPage {
+    pub items: Vec<LeaderboardEntry>,
+    pub next_cursor: Option<Address>,
+}

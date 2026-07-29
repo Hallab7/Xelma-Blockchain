@@ -816,7 +816,7 @@ impl VirtualTokenContract {
     }
 
     /// Cursor-based page of the global leaderboard ordered by total wins descending.
-    pub fn get_leaderboard_by_wins_cursor(
+    pub fn get_leaderboard_by_wins(
         env: Env,
         cursor: Option<Address>,
         limit: u32,
@@ -825,7 +825,7 @@ impl VirtualTokenContract {
     }
 
     /// Cursor-based page of the global leaderboard ordered by best streak descending.
-    pub fn get_leaderboard_by_streak_cursor(
+    pub fn get_leaderboard_by_streak(
         env: Env,
         cursor: Option<Address>,
         limit: u32,
@@ -835,15 +835,6 @@ impl VirtualTokenContract {
 
     // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────
 
-    /// Paginated lifetime wins leaderboard (all-time, independent of seasons).
-    pub fn get_leaderboard_by_wins(env: Env, offset: u32, limit: u32) -> Vec<LeaderboardEntry> {
-        leaderboard::get_leaderboard_by_wins(env, offset, limit)
-    }
-
-    /// Paginated lifetime best-streak leaderboard (all-time, independent of seasons).
-    pub fn get_leaderboard_by_streak(env: Env, offset: u32, limit: u32) -> Vec<LeaderboardEntry> {
-        leaderboard::get_leaderboard_by_streak(env, offset, limit)
-    }
 
     /// Returns the id of the currently-active leaderboard season (default 1).
     pub fn get_current_season_id(env: Env) -> u32 {
