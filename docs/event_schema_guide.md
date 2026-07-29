@@ -76,6 +76,19 @@ Emitted when a new user claims their one-time initial allocation.
 * **Topics:** `("mint", "initial")`
 * **Payload:** `(user: Address, amount: i128)`
 
+### 11. Forensic Round Summary
+Emitted when a round is resolved, cancelled, or refunded. Contains compact settlement data.
+* **Topics:** `("round", "summary")`
+* **Payload:** `(round_id: u64, mode: u32, price_start: u128, price_final: u128, participant_count: u32, total_pot: i128, status: u32)`
+  * `mode`: `0` for `UpDown`, `1` for `Precision`
+  * `status`: `0` for `Resolved`, `1` for `Cancelled`, `2` for `FallbackRefund`
+
+### 12. Runtime Mode Transition
+Emitted when the contract's emergency runtime mode is changed by the admin.
+* **Topics:** `("mode", "transition")`
+* **Payload:** `(old_mode: u32, new_mode: u32)`
+  * `mode`: `0` for `Normal`, `1` for `ClaimsOnly`, `2` for `FullyPaused`
+
 ## Section: Protocol fee events (Issue #162)
 
 The optional protocol fee introduces a new top-level event namespace
@@ -126,7 +139,10 @@ Conservations across event streams:
 * For each `fee_collected` event: Σ of `("claim","winnings")` for the
   same round's winners + `fee_amount` == `round.pool_up + round.pool_down`
   (UpDown) or `Σ prediction.amount` (Precision mode, including
-  unrevealed-commitment stakes).
+  unrevealed-commitment stakes that forfeited to the pot).
+* When a Precision round resolves with **zero reveals**, stakes are refunded
+  instead of fee-split: `Σ refund amounts == Σ commitment amounts` and no
+  `fee_collected` event is emitted for that path.
 * Treasury balance monotonically increases across `fee_collected`
   events and monotonically decreases across `fee_withdrawn` events.
 

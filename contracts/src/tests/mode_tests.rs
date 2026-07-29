@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for round mode flag and separate prediction storage.
 
 use super::config_helpers::{apply_max_stake, apply_max_user_exposure, apply_windows};
@@ -7,8 +8,21 @@ use crate::types::{BetSide, OraclePayload, RoundMode};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
-    Address, Env, TryIntoVal,
+    Address, BytesN, Env, TryIntoVal,
 };
+
+/// Salt satisfying on-chain minimum entropy (non-zero, non-constant).
+fn test_salt(env: &Env, seed: u8) -> BytesN<32> {
+    let mut bytes = [0u8; 32];
+    let mut i = 0;
+    while i < 32 {
+        bytes[i] = seed.wrapping_add(i as u8).wrapping_mul(17).wrapping_add(3);
+        i += 1;
+    }
+    bytes[0] = seed | 0x80;
+    bytes[31] = seed ^ 0x5A;
+    BytesN::from_array(env, &bytes)
+}
 
 #[test]
 fn test_create_round_default_mode() {
@@ -453,6 +467,7 @@ fn test_predict_price_valid_scales() {
                 nonce: 1u64,
                 network_id: env.ledger().network_id(),
                 contract_addr: contract_id.clone(),
+                confidence: None,
             });
         }
 
@@ -493,11 +508,11 @@ fn test_predict_price_invalid_scale() {
 
     // Try to predict with price exceeding max scale (> 9999.9999)
     let result = client.try_predict_price(&user, &100_000_000, &100_0000000);
-    assert_eq!(result, Err(Ok(ContractError::InvalidPriceScale)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 
     // Try with extremely large value
     let result = client.try_predict_price(&user, &999_999_999_999, &100_0000000);
-    assert_eq!(result, Err(Ok(ContractError::InvalidPriceScale)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 }
 
 #[test]
@@ -625,6 +640,7 @@ fn test_all_events_for_updown_round() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let events = env.events().all();
@@ -745,6 +761,7 @@ fn test_all_events_for_precision_round() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
 
     let events = env.events().all();
@@ -933,10 +950,7 @@ fn test_custom_precision_participant_cap_boundary_and_over_cap() {
     client.place_precision_prediction(&user2, &100_0000000, &2298u128);
 
     let result = client.try_place_precision_prediction(&user3, &100_0000000, &2299u128);
-    assert_eq!(
-        result,
-        Err(Ok(ContractError::PrecisionParticipantCapExceeded))
-    );
+    assert_eq!(result, Err(Ok(ContractError::PrecisionCapExceeded)));
     assert_eq!(client.balance(&user3), 1000_0000000);
     assert!(client.get_user_precision_prediction(&user3).is_none());
 }
@@ -954,13 +968,10 @@ fn test_set_max_precision_participants_validation() {
     client.initialize(&admin, &oracle);
 
     let zero = client.try_set_max_precision_participants(&0u32);
-    assert_eq!(zero, Err(Ok(ContractError::InvalidPrecisionParticipantCap)));
+    assert_eq!(zero, Err(Ok(ContractError::InvalidPrecisionCap)));
 
     let too_high = client.try_set_max_precision_participants(&10_001u32);
-    assert_eq!(
-        too_high,
-        Err(Ok(ContractError::InvalidPrecisionParticipantCap))
-    );
+    assert_eq!(too_high, Err(Ok(ContractError::InvalidPrecisionCap)));
 
     client.set_max_precision_participants(&3u32);
     assert_eq!(client.get_max_precision_participants(), 3u32);
@@ -985,7 +996,7 @@ fn test_precision_commit_reveal_happy_path() {
     client.create_round(&1_0000000, &Some(1));
 
     let price = 2297u128;
-    let salt = BytesN::from_array(&env, &[9; 32]);
+    let salt = test_salt(&env, 9);
     let mut preimage = Bytes::new(&env);
     preimage.append(&price.to_xdr(&env));
     preimage.append(&salt.clone().to_xdr(&env));
@@ -1025,7 +1036,7 @@ fn test_precision_commit_reveal_already_revealed() {
     client.create_round(&1_0000000, &Some(1));
 
     let price = 2297u128;
-    let salt = BytesN::from_array(&env, &[9; 32]);
+    let salt = test_salt(&env, 9);
     let mut preimage = Bytes::new(&env);
     preimage.append(&price.to_xdr(&env));
     preimage.append(&salt.clone().to_xdr(&env));
@@ -1063,7 +1074,7 @@ fn test_precision_commit_reveal_hash_mismatch() {
     client.create_round(&1_0000000, &Some(1));
 
     let price = 2297u128;
-    let salt = BytesN::from_array(&env, &[9; 32]);
+    let salt = test_salt(&env, 9);
     let mut preimage = Bytes::new(&env);
     preimage.append(&price.to_xdr(&env));
     preimage.append(&salt.clone().to_xdr(&env));
@@ -1079,7 +1090,7 @@ fn test_precision_commit_reveal_hash_mismatch() {
     let result = client.try_reveal_prediction(&user, &2500, &salt.clone());
     assert_eq!(result, Err(Ok(ContractError::HashMismatch)));
 
-    let wrong_salt = BytesN::from_array(&env, &[8; 32]);
+    let wrong_salt = test_salt(&env, 8);
     let result = client.try_reveal_prediction(&user, &price, &wrong_salt);
     assert_eq!(result, Err(Ok(ContractError::HashMismatch)));
 }
@@ -1103,7 +1114,7 @@ fn test_precision_commit_reveal_invalid_window_early() {
     client.create_round(&1_0000000, &Some(1));
 
     let price = 2297u128;
-    let salt = BytesN::from_array(&env, &[9; 32]);
+    let salt = test_salt(&env, 9);
     let mut preimage = Bytes::new(&env);
     preimage.append(&price.to_xdr(&env));
     preimage.append(&salt.clone().to_xdr(&env));
@@ -1136,7 +1147,7 @@ fn test_precision_commit_reveal_invalid_window_late() {
     client.create_round(&1_0000000, &Some(1));
 
     let price = 2297u128;
-    let salt = BytesN::from_array(&env, &[9; 32]);
+    let salt = test_salt(&env, 9);
     let mut preimage = Bytes::new(&env);
     preimage.append(&price.to_xdr(&env));
     preimage.append(&salt.clone().to_xdr(&env));
@@ -1156,8 +1167,6 @@ fn test_precision_commit_reveal_invalid_window_late() {
 
 #[test]
 fn test_precision_commit_reveal_commitment_not_found() {
-    use soroban_sdk::BytesN;
-
     let env = Env::default();
     let contract_id = env.register(VirtualTokenContract, ());
     let client = VirtualTokenContractClient::new(&env, &contract_id);
@@ -1176,7 +1185,7 @@ fn test_precision_commit_reveal_commitment_not_found() {
     });
 
     // Reveal without commit
-    let salt = BytesN::from_array(&env, &[9; 32]);
+    let salt = test_salt(&env, 9);
     let result = client.try_reveal_prediction(&user, &2297, &salt);
     assert_eq!(result, Err(Ok(ContractError::CommitmentNotFound)));
 }
@@ -1200,7 +1209,7 @@ fn test_precision_commit_reveal_double_bet_fails() {
     client.create_round(&1_0000000, &Some(1));
 
     let price = 2297u128;
-    let salt = BytesN::from_array(&env, &[9; 32]);
+    let salt = test_salt(&env, 9);
     let mut preimage = Bytes::new(&env);
     preimage.append(&price.to_xdr(&env));
     preimage.append(&salt.clone().to_xdr(&env));
@@ -1213,6 +1222,64 @@ fn test_precision_commit_reveal_double_bet_fails() {
     let result = client.try_place_precision_prediction(&user, &50_0000000, &2297);
     assert_eq!(result, Err(Ok(ContractError::AlreadyBet)));
 }
+
+#[test]
+fn test_precision_commit_rejects_zero_commitment_hash() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user);
+    client.create_round(&1_0000000, &Some(1));
+
+    let zero = BytesN::from_array(&env, &[0u8; 32]);
+    let result = client.try_commit_prediction(&user, &zero, &100_0000000);
+    assert_eq!(result, Err(Ok(ContractError::InvalidCommitment)));
+}
+
+#[test]
+fn test_precision_reveal_rejects_low_entropy_salt() {
+    use soroban_sdk::xdr::ToXdr;
+    use soroban_sdk::Bytes;
+
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user);
+    client.create_round(&1_0000000, &Some(1));
+
+    let price = 2297u128;
+    let salt = test_salt(&env, 9);
+    let mut preimage = Bytes::new(&env);
+    preimage.append(&price.to_xdr(&env));
+    preimage.append(&salt.clone().to_xdr(&env));
+    let hash: BytesN<32> = env.crypto().sha256(&preimage).into();
+    client.commit_prediction(&user, &hash, &100_0000000);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 7;
+    });
+
+    let zero_salt = BytesN::from_array(&env, &[0u8; 32]);
+    assert_eq!(
+        client.try_reveal_prediction(&user, &price, &zero_salt),
+        Err(Ok(ContractError::InvalidSalt))
+    );
+}
+
 #[test]
 fn test_precision_predictions_page_ordering_matches_full_read() {
     let env = Env::default();

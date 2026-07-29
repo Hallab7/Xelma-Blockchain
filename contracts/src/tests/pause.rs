@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for emergency pause and recovery controls.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
@@ -99,6 +100,7 @@ fn test_mutations_fail_while_paused() {
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
+        confidence: None,
     });
     assert_eq!(resolve_result, Err(Ok(ContractError::ContractPaused)));
 
@@ -122,7 +124,7 @@ fn test_protocol_health_paused() {
 #[test]
 fn test_protocol_health_not_paused_healthy() {
     let env = Env::default();
-    let (client, contract_id, _admin, oracle) = setup_contract(&env);
+    let (client, _contract_id, _admin, _oracle) = setup_contract(&env);
     let user = Address::generate(&env);
 
     // With oracle heartbeat active + no active round → NO_ACTIVE_ROUND

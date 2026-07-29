@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #![no_std]
 //! # XLM Price Prediction Market
 //!
@@ -11,8 +12,18 @@
 //! - Proportional payout distribution
 //! - Comprehensive error handling
 
+#[cfg(test)]
+extern crate std;
+
+mod admin;
+mod betting;
+pub mod common;
+mod config;
 mod contract;
 mod errors;
+mod leaderboard;
+mod queries;
+mod settlement;
 mod types;
 
 #[cfg(test)]
@@ -22,6 +33,7 @@ pub use contract::VirtualTokenContract;
 pub use errors::ContractError;
 pub use types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    PendingConfigChange, PrecisionCommitment, PrecisionPrediction, ProtocolHealthStatus, Round,
-    RoundArchiveStatus, UserPosition, UserStats,
+    LeaderboardEntry, OracleRotationProposal, PendingConfigChange, PrecisionCommitment,
+    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundTemplate,
+    SeasonArchive, SeasonLeaderboardEntry, UserPosition, UserStats,
 };

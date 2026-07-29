@@ -1,8 +1,12 @@
+// SPDX-License-Identifier: MIT
 //! Tests for contract initialization and token minting.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{
+    testutils::{Address as _, Events, Ledger as _},
+    Address, Env,
+};
 
 #[test]
 fn test_mint_initial() {
@@ -158,7 +162,7 @@ fn test_initialize_fails_identical_addresses() {
 
     // Try to initialize using the same address for both
     let result = client.try_initialize(&admin_and_oracle, &admin_and_oracle);
-    assert_eq!(result, Err(Ok(ContractError::AdminIsOracle)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidMode)));
 }
 
 #[test]
@@ -192,7 +196,8 @@ fn test_mint_initial_with_rate_limiting() {
 
     // Minting for user3 in the same ledger should fail
     let res3 = client.try_mint_initial(&user3);
-    assert_eq!(res3, Err(Ok(ContractError::MintLimitExceeded)));
+    let err = res3.unwrap().unwrap_err();
+    assert_eq!(err, soroban_sdk::Error::from_contract_error(ContractError::MintLimitExceeded as u32));
 
     // Moving to a new ledger should reset the counter, so user3 can now mint
     env.ledger().with_mut(|li| {

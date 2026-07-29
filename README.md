@@ -233,7 +233,7 @@ Xelma-Blockchain/
 │   └── README.md              # Bindings usage guide
 │
 ├── target/                    # Build artifacts
-│   └── wasm32-unknown-unknown/
+│   └── wasm32v1-none/
 │       └── release/
 │           └── xelma_contract.wasm  # Compiled contract
 │
@@ -265,7 +265,7 @@ cd Xelma-Blockchain
 
 ```bash
 cd contracts
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 ```
 
 ### 3. Run Tests
@@ -280,7 +280,7 @@ cargo test --workspace --locked
 ```bash
 cd ../../
 stellar contract bindings typescript \
-  --wasm target/wasm32-unknown-unknown/release/xelma_contract.wasm \
+  --wasm target/wasm32v1-none/release/xelma_contract.wasm \
   --output-dir ./bindings \
   --overwrite
 
@@ -408,7 +408,23 @@ Payload: (
 
 **Use Case**: Trigger winner calculations, update leaderboards, notify users of results.
 
-#### 5. Winnings Claimed
+#### 5. Participant Payout Outcome
+Emitted once per participant during round resolution.
+
+```rust
+Topic: ("payout", "outcome")
+Payload: (
+  round_id: u64,          // Round identifier
+  mode: u32,              // 0 = Up/Down, 1 = Precision
+  user: Address,          // Participant address
+  gross_payout: i128,     // Pending winnings credited in stroops; 0 for losses
+  outcome_type: u32       // 0 = loss, 1 = win, 2 = refund
+)
+```
+
+**Use Case**: Reconstruct participant-level settlement outcomes for analytics, UX, and dispute forensics without replaying storage reads.
+
+#### 6. Winnings Claimed
 Emitted when user claims their pending winnings.
 
 ```rust
@@ -421,7 +437,7 @@ Payload: (
 
 **Use Case**: Track payouts, display claim history, calculate platform volume.
 
-#### 6. Windows Updated
+#### 7. Windows Updated
 Emitted when admin updates bet/run window durations.
 
 ```rust
@@ -434,7 +450,7 @@ Payload: (
 
 **Use Case**: Update frontend timers, recalculate round schedules.
 
-#### 7. Initial Mint
+#### 8. Initial Mint
 Emitted when new user mints their first 1000 vXLM.
 
 ```rust
@@ -447,7 +463,7 @@ Payload: (
 
 **Use Case**: Track new users, display welcome messages, analytics.
 
-#### 8. Round Cancelled
+#### 9. Round Cancelled
 Emitted when admin cancels an active round; all stakes are refunded.
 
 ```rust
@@ -460,7 +476,7 @@ Payload: (
 )
 ```
 
-#### 9. Round Fallback (insufficient participants)
+#### 10. Round Fallback (insufficient participants)
 Emitted when a round ends below the minimum-participants threshold; all stakes are refunded.
 
 ```rust
@@ -472,7 +488,7 @@ Payload: (
 )
 ```
 
-#### 10. Oracle Heartbeat
+#### 11. Oracle Heartbeat
 Emitted when the oracle records an on-chain liveness heartbeat.
 
 ```rust
@@ -552,6 +568,10 @@ async function watchForNewRounds(contractId: string) {
 - `initialize(admin, oracle)` - One-time contract setup
 - `create_round(start_price, mode)` - Start new betting round (mode: 0=Up/Down, 1=Precision)
 - `set_windows(bet_ledgers, run_ledgers)` - Configure round timing windows
+- `set_round_template(start_price, mode)` - Store the blueprint used by `create_next_from_template`
+- `clear_round_template()` - Remove the configured round template
+- `create_next_from_template()` - Create the next round from the stored template (fails if a round is already active or no template is set)
+- `reset_leaderboard_season()` - Archive the active leaderboard season's rankings and advance to the next season
 
 ### Oracle Functions:
 - `resolve_round(payload)` - Resolve round and trigger payouts (requires `OraclePayload` with price, timestamp, and round ID)
@@ -565,6 +585,12 @@ async function watchForNewRounds(contractId: string) {
 - `get_max_precision_participants()` - Check the active Precision participant cap
 - `get_precision_predictions()` - View all predictions in current Precision round
 - `get_updown_positions()` - View all positions in current Up/Down round
+- `get_round_template()` - View the configured round template, if any
+- `get_leaderboard_by_wins(offset, limit)` / `get_leaderboard_by_streak(offset, limit)` - Paginated lifetime (all-time) leaderboards, independent of seasons
+- `get_current_season_id()` - Id of the currently-active leaderboard season (default 1)
+- `get_season_user_stats(season_id, user)` - A user's win/loss/streak stats scoped to one season (active or archived)
+- `get_season_leaderboard_by_wins(season_id, offset, limit)` / `get_season_leaderboard_by_streak(season_id, offset, limit)` - Paginated season-scoped leaderboards; transparently served live for the active season or from the frozen archive for a past one
+- `get_season_archive(season_id)` - The frozen snapshot of a past season's final rankings
 
 ---
 
@@ -678,6 +704,8 @@ export ORACLE_ADDRESS="G..."
 - [ ] Post-deployment: configure round windows with `set_windows()`
 - [ ] Post-deployment: verify with `get_admin()` and `get_oracle()`
 
+For the full staged deployment and incident response playbook, see [docs/DEPLOYMENT_RUNBOOK.md](./docs/DEPLOYMENT_RUNBOOK.md). Operators can execute the machine-checkable checklist with `python3 scripts/check_release_checklist.py --network mainnet --strict`.
+
 ### Deployment Script
 
 `scripts/deploy_testnet.sh` performs the following steps:
@@ -704,6 +732,7 @@ We welcome contributions from the community! Start with the maintainer workflow 
 - [GOVERNANCE.md](./GOVERNANCE.md)
 - [SUPPORT.md](./SUPPORT.md)
 - [COMPATIBILITY_POLICY.md](./COMPATIBILITY_POLICY.md) — ABI/storage/event versioning rules
+- [docs/CONTRIBUTOR_MAP.md](./docs/CONTRIBUTOR_MAP.md) — protocol areas, files, tests, and starter tasks
 - [CODEOWNERS](./.github/CODEOWNERS)
 
 Here's how you can help:
@@ -745,7 +774,7 @@ This repository contains both source files and generated artifacts. Understandin
 **1. Build the Smart Contract:**
 ```bash
 cd contracts
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 ```
 
 **2. Regenerate TypeScript Bindings:**
@@ -753,7 +782,7 @@ After building the contract, generate the bindings from the WASM file:
 ```bash
 cd ../
 stellar contract bindings typescript \
-  --wasm target/wasm32-unknown-unknown/release/xelma_contract.wasm \
+  --wasm target/wasm32v1-none/release/xelma_contract.wasm \
   --output-dir ./bindings/src \
   --overwrite
 ```
@@ -785,11 +814,11 @@ cargo test
 2. **If you modified the contract**, regenerate bindings:
    ```bash
    # Build contract
-   cargo build --target wasm32-unknown-unknown --release --package xelma-contract
+   stellar contract build --package xelma-contract
    
    # Regenerate bindings
    stellar contract bindings typescript \
-     --wasm target/wasm32-unknown-unknown/release/xelma_contract.wasm \
+     --wasm target/wasm32v1-none/release/xelma_contract.wasm \
      --output-dir ./bindings/src \
      --overwrite
    
@@ -814,6 +843,7 @@ Check issues labeled [`good-first-issue`](https://github.com/TevaLabs/Xelma-Bloc
 - **[Bindings Guide](./bindings/README.md)** - TypeScript integration guide
 - **[Wallet Error Guide](./docs/WALLET_ERROR_GUIDE.md)** - Mapping of contract error codes to UI messages
 - **[Test Suite](./contracts/src/tests/)** - Comprehensive test examples
+- **[Demo Scenarios](./docs/DEMO.md)** - Scripted Up-win, Down-win, and Precision-tie demos with end-state assertions
 
 ---
 
