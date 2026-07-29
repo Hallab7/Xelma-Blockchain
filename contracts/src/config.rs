@@ -14,7 +14,7 @@ use crate::errors::ContractError;
 use crate::types::{
     ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, RoundTemplate,
 };
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 pub fn set_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
     schedule_windows(env, bet_ledgers, run_ledgers)
@@ -428,6 +428,53 @@ pub fn get_mint_limit(env: Env) -> u32 {
         .unwrap_or(0)
 }
 
+const EPOCH_MINT_BUDGET_KEY: Symbol = symbol_short!("EpMintBgt");
+
+pub fn set_epoch_mint_budget(env: Env, budget: i128) -> Result<(), ContractError> {
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("epch_bgt"), e);
+    })?;
+
+    if budget < 0 {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("epch_bgt"),
+            ContractError::InvalidBetAmount,
+        );
+        return Err(ContractError::InvalidBetAmount);
+    }
+
+    let old_budget: i128 = env
+        .storage()
+        .instance()
+        .get(&EPOCH_MINT_BUDGET_KEY)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&EPOCH_MINT_BUDGET_KEY, &budget);
+    _emit_config_updated(
+        &env,
+        ConfigChangeKind::EpochMintBudget,
+        ConfigChangePayload::EpochMintBudget(old_budget),
+        ConfigChangePayload::EpochMintBudget(budget),
+    );
+    Ok(())
+}
+
+pub fn get_epoch_mint_budget(env: Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&EPOCH_MINT_BUDGET_KEY)
+        .unwrap_or(0)
+}
+
 pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     let admin: Address = env
@@ -818,6 +865,12 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .persistent()
                 .get(&DataKey::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
+        ),
+        ConfigChangeKind::EpochMintBudget => ConfigChangePayload::EpochMintBudget(
+            env.storage()
+                .instance()
+                .get(&EPOCH_MINT_BUDGET_KEY)
+                .unwrap_or(0),
         ),
     }
 }

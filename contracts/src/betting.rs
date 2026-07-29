@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
 use crate::common::{
-    _emit_action_rejected, _extend_persistent_ttl, _set_balance, assert_no_active_round, balance,
-    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_START_PRICE,
+    _current_epoch_id, _emit_action_rejected, _extend_persistent_ttl, _set_balance,
+    assert_no_active_round, balance, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS,
+    MAX_START_PRICE, MIN_START_PRICE,
 };
 use crate::config::get_max_precision_participants;
 use crate::errors::ContractError;
@@ -11,7 +12,7 @@ use crate::types::{
     UserPosition,
 };
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 /// Commitment preimage format (Precision commit-reveal):
 ///
@@ -684,6 +685,49 @@ pub fn mint_initial(env: Env, user: Address) -> i128 {
     }
 
     let initial_amount: i128 = 1000_0000000;
+
+    // ─── Epoch budget check ──────────────────────────────────────────────
+    const EP_BUDGET_KEY: Symbol = symbol_short!("EpMintBgt");
+    let epoch_budget: i128 = env
+        .storage()
+        .instance()
+        .get(&EP_BUDGET_KEY)
+        .unwrap_or(0);
+    if epoch_budget > 0 {
+        let current_epoch = _current_epoch_id(&env);
+        const EP_CONSUMED_KEY: Symbol = symbol_short!("EpMintCsm");
+        const EP_EPOCH_KEY: Symbol = symbol_short!("EpMintEpc");
+        let stored_epoch: u32 = env
+            .storage()
+            .temporary()
+            .get(&EP_EPOCH_KEY)
+            .unwrap_or(0);
+        let consumed: i128 = if stored_epoch == current_epoch {
+            env.storage()
+                .temporary()
+                .get(&EP_CONSUMED_KEY)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let new_consumed = consumed.checked_add(initial_amount);
+        match new_consumed {
+            Some(val) if val <= epoch_budget => {
+                env.storage()
+                    .temporary()
+                    .set(&EP_CONSUMED_KEY, &val);
+                if stored_epoch != current_epoch {
+                    env.storage()
+                        .temporary()
+                        .set(&EP_EPOCH_KEY, &current_epoch);
+                }
+            }
+            _ => {
+                soroban_sdk::panic_with_error!(&env, ContractError::EpochBudgetExceeded);
+            }
+        }
+    }
+
     env.storage().persistent().set(&key, &initial_amount);
     _extend_persistent_ttl(&env, &key);
 

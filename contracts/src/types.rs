@@ -132,6 +132,7 @@ pub enum DataKey {
     LedgerMintCounter(u32),
     /// Mint limit configuration: maximum number of mints allowed per ledger.
     MintLimitConfig,
+
     /// Pending two-step oracle rotation proposal with expiry.
     OracleRotationProposal,
     /// Configurable archive retention limit: maximum number of ArchivedRound entries
@@ -185,6 +186,7 @@ pub enum ConfigChangeKind {
     MintLimit = 9,
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
+    EpochMintBudget = 12,
 }
 
 /// Payload for a scheduled critical config change.
@@ -203,6 +205,7 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
+    EpochMintBudget(i128),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.

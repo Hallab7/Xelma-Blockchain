@@ -93,6 +93,14 @@ fn test_event_coverage_direct_config_setters_emit_audit_event() {
         ConfigChangePayload::ArchiveRetention(128),
         ConfigChangePayload::ArchiveRetention(64),
     );
+
+    client.set_epoch_mint_budget(&5000_0000000);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::EpochMintBudget,
+        ConfigChangePayload::EpochMintBudget(0),
+        ConfigChangePayload::EpochMintBudget(5000_0000000),
+    );
 }
 
 #[test]
