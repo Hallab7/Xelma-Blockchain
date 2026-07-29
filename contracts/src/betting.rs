@@ -264,8 +264,11 @@ pub fn place_bet(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
-    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
+    if current_ledger >= round.bet_end_ledger {
         return Err(ContractError::RoundEnded);
+    }
+    if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
+        return Err(ContractError::BettingClosed);
     }
 
     let user_balance = balance(env.clone(), user.clone());
@@ -395,8 +398,11 @@ pub fn place_precision_prediction(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
-    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
+    if current_ledger >= round.bet_end_ledger {
         return Err(ContractError::RoundEnded);
+    }
+    if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
+        return Err(ContractError::BettingClosed);
     }
 
     let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
@@ -519,8 +525,11 @@ pub fn commit_prediction(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
-    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
+    if current_ledger >= round.bet_end_ledger {
         return Err(ContractError::RoundEnded);
+    }
+    if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
+        return Err(ContractError::BettingClosed);
     }
 
     let user_balance = balance(env.clone(), user.clone());
