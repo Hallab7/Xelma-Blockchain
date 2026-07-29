@@ -588,4 +588,3 @@ pub struct SeasonArchive {
     pub streak: Vec<SeasonLeaderboardEntry>,
     pub participant_count: u32,
 }
-

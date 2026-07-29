@@ -1088,28 +1088,28 @@ export interface Client {
    * 100) and a `next_cursor` for the subsequent page. Items are sorted by
    * user address ascending (deterministic order).
    */
-  get_precision_predictions_cursor: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<PrecisionPredictionsPage>>
+  get_precision_predictions_cursor: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<[Array<PrecisionPrediction>, string | null]>>
 
   /**
    * Construct and simulate a get_updown_positions_cursor transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Returns a cursor-based page of Up/Down positions for the active round.
    * Same cursor semantics as `get_precision_predictions_cursor`.
    */
-  get_updown_positions_cursor: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<UpdownPositionsPage>>
+  get_updown_positions_cursor: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<[Array<[string, UserPosition]>, string | null]>>
 
   /**
    * Construct and simulate a get_leaderboard_by_wins transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Returns a cursor-based page of the global leaderboard ordered by total
    * wins descending (address ascending as tiebreaker).
    */
-  get_leaderboard_by_wins: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<LeaderboardPage>>
+  get_leaderboard_by_wins: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<[Array<LeaderboardEntry>, string | null]>>
 
   /**
    * Construct and simulate a get_leaderboard_by_streak transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Returns a cursor-based page of the global leaderboard ordered by best
    * streak descending (address ascending as tiebreaker).
    */
-  get_leaderboard_by_streak: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<LeaderboardPage>>
+  get_leaderboard_by_streak: ({cursor, limit}: {cursor: Option<string>, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<[Array<LeaderboardEntry>, string | null]>>
 
 }
 export class Client extends ContractClient {
@@ -1302,9 +1302,9 @@ export class Client extends ContractClient {
         get_close_buffer_ledgers: this.txFromJSON<u32>,
         get_round_pool_stats: this.txFromJSON<Option<RoundPoolStats>>,
         get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>,
-        get_precision_predictions_cursor: this.txFromJSON<PrecisionPredictionsPage>,
-        get_updown_positions_cursor: this.txFromJSON<UpdownPositionsPage>,
-        get_leaderboard_by_wins: this.txFromJSON<LeaderboardPage>,
-        get_leaderboard_by_streak: this.txFromJSON<LeaderboardPage>,
+        get_precision_predictions_cursor: this.txFromJSON<[Array<PrecisionPrediction>, string | null]>,
+        get_updown_positions_cursor: this.txFromJSON<[Array<[string, UserPosition]>, string | null]>,
+        get_leaderboard_by_wins: this.txFromJSON<[Array<LeaderboardEntry>, string | null]>,
+        get_leaderboard_by_streak: this.txFromJSON<[Array<LeaderboardEntry>, string | null]>,
   }
 }
