@@ -41,47 +41,45 @@ pub enum RoundPhase {
 ///
 /// Split from `DataKey` to stay under the XDR union 50-case limit
 /// (`VecM<ScSpecUdtUnionCaseV0, 50>` in stellar-xdr).
+/// Storage keys for contract data
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKeyCore {
     Admin,
     Oracle,
-    /// On-chain storage schema version for migration safety.
-    /// If missing, the contract treats it as legacy schema version 1.
     SchemaVersion,
     ActiveRound,
     Positions,          // Legacy key — read-only migration compat
     UpDownPositions,    // Legacy key — read-only migration compat
     PrecisionPositions, // Legacy key — read-only migration compat
+    Positions,
+    UpDownPositions,
+    PrecisionPositions,
+    PendingWinnings(Address),
+    UserStats(Address),
     Paused,
     BetWindowLedgers,
     RunWindowLedgers,
     CloseBufferLedgers,
     LastRoundId,
     /// Maximum stake allowed per individual bet (None = unlimited)
+    Position(u64, Address),
+    PrecisionPosition(u64, Address),
+    PrecisionCommitment(u64, Address),
+    RoundParticipants(u64),
     MaxStake,
-    /// Maximum cumulative exposure per user per round (None = unlimited)
     MaxUserRoundExposure,
-    /// Maximum pending winnings allowed per account (None = unlimited)
     MaxPendingWinnings,
     /// Minimum participant count for competitive settlement; unset = no minimum enforced
+    CancelledRound(u64),
+    ConsumedOracleNonce(u64, u64),
     MinParticipants,
-    /// Oracle heartbeat: last recorded timestamp and status
     OracleHeartbeat,
-    /// Stale-heartbeat threshold in seconds (admin-configurable); unset = 3600 s default
     OracleStaleThreshold,
-    /// Maximum participants accepted in a Precision round; unset = protocol default
     MaxPrecisionParticipants,
-    /// Oracle max deviation threshold in basis points (1 bp = 0.01%).
-    /// If unset, deviation guardrails are disabled.
     OracleMaxDeviationBps,
-    /// One-shot admin override allowing the next settlement to bypass deviation checks.
-    /// Automatically cleared after use.
     OracleDeviationOverrideArmed,
-    /// Minimum oracle confidence threshold in basis points (0–10000).
-    /// If unset, confidence guardrails are disabled.
     OracleMinConfidenceBps,
-    /// When true, payloads with missing confidence are rejected in strict mode.
     OracleStrictMode,
     /// Ordered round ids for archive retention (oldest at index 0).
     RecentArchivedRoundIds,
@@ -90,37 +88,32 @@ pub enum DataKeyCore {
     /// Optional protocol settlement fee in basis points (1 bp = 0.01%).
     /// `None` (key absent) means fee disabled — no behaviour change.
     /// Hard cap on fee is enforced at the contract layer, not by storage shape.
+    ArchivedRound(u64),
+    RecentArchivedRoundIds,
+    UserRoundOutcome(u64, Address),
+    MigratedToV3,
+    PendingConfigChange(ConfigChangeKind),
     ProtocolFeeBps,
-    /// On-chain accumulated protocol fee balance in stroops (i128).
-    /// Admin withdraws via the dedicated withdrawal method; does NOT mix
-    /// into the per-user balance ledger.
     ProtocolFeeTreasury,
     /// Mint limit configuration: maximum number of mints allowed per ledger.
+    LedgerMintCounter(u32),
     MintLimitConfig,
-    /// Pending two-step oracle rotation proposal with expiry.
     OracleRotationProposal,
-    /// Configurable archive retention limit: maximum number of ArchivedRound entries
-    /// retained on-chain before the oldest are pruned (FIFO). If unset, the protocol
-    /// default is used.
     ArchiveRetention,
-    /// Admin-configured blueprint used by `create_next_from_template` to spin
-    /// up the next round without re-specifying `start_price` / `mode` each
-    /// time. Absent means no template is configured.
     RoundTemplate,
-    /// Bounded index of user addresses sorted by lifetime total wins
-    /// descending (all-time leaderboard, independent of seasons).
+    Ext(DataKeyExt),
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKeyExt {
     LeaderboardWins,
-    /// Bounded index of user addresses sorted by lifetime best streak
-    /// descending (all-time leaderboard, independent of seasons).
     LeaderboardStreak,
-    /// Monotonically increasing id of the currently-active leaderboard
-    /// season. Absent is treated as season 1.
     SeasonId,
     /// Bounded index of user addresses in the *active* season sorted by
     /// season-scoped total wins descending.
+    SeasonUserStats(u32, Address),
     SeasonLeaderboardWins,
-    /// Bounded index of user addresses in the *active* season sorted by
-    /// season-scoped best streak descending.
     SeasonLeaderboardStreak,
 }
 
@@ -291,6 +284,22 @@ pub struct OraclePayload {
 pub struct OracleHeartbeatRecord {
     pub timestamp: u64,
     pub status: u32,
+}
+
+/// Heartbeat health gate configuration (Issue #264).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct HbGateConfig {
+    pub strict_mode: bool,
+    pub override_armed: bool,
+    pub grace_seconds: u64,
+}
+
+/// Storage key for heartbeat gate config (separate from DataKey to stay within variant limits, Issue #264).
+#[contracttype]
+#[derive(Clone)]
+pub enum HbGateKey {
+    Config,
 }
 
 #[contracttype]

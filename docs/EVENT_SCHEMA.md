@@ -481,6 +481,37 @@ ended season are never deleted and remain independently queryable.
 
 ---
 
+## `("oracle", "hblocked")` — Heartbeat health gate blocked settlement
+
+Emitted when `resolve_round` is blocked by the heartbeat health gate in strict mode
+(Issue #264). The round remains active; the oracle or admin must address the heartbeat
+state before retrying.
+
+| Position | Field       | Type   | Description                                    |
+|----------|-------------|--------|------------------------------------------------|
+| 0        | `round_id`  | `u64`  | Round id that was blocked from settlement       |
+
+**Topics**: `("oracle", "hblocked")`
+**Source contracts**: `VirtualTokenContract`
+**Emitted by**: `resolve_round` (heartbeat health gate, strict mode).
+
+---
+
+## `("oracle", "hoverride")` — Heartbeat health gate override consumed
+
+Emitted when the admin-armed heartbeat health override is consumed during
+`resolve_round`, allowing settlement to proceed past the gate (Issue #264).
+
+| Position | Field       | Type   | Description                                    |
+|----------|-------------|--------|------------------------------------------------|
+| 0        | `round_id`  | `u64`  | Round id for which the override was consumed    |
+
+**Topics**: `("oracle", "hoverride")`
+**Source contracts**: `VirtualTokenContract`
+**Emitted by**: `resolve_round` (heartbeat health gate override path).
+
+---
+
 ---
 
 ## Field units quick reference
