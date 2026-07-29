@@ -187,7 +187,7 @@ pub fn create_next_from_template(env: Env) -> Result<u64, ContractError> {
         .storage()
         .persistent()
         .get(&DataKey::RoundTemplate)
-        .ok_or(ContractError::NoRoundTemplate)
+        .ok_or(ContractError::CommitmentNotFound)
         .inspect_err(|&e| {
             _emit_action_rejected(&env, &admin, symbol_short!("nxttmpl"), e);
         })?;
@@ -477,7 +477,7 @@ pub fn commit_prediction(
     // Reject clearly invalid commitment placeholders early (before balance
     // reads / deductions) so griefing commits cannot lock liquidity.
     if is_zero_bytes32(&env, &hash) {
-        return Err(ContractError::InvalidCommitment);
+        return Err(ContractError::InvalidPrice);
     }
 
     if amount <= 0 {
@@ -591,7 +591,7 @@ pub fn reveal_prediction(
     // Enforce salt entropy before any storage reads so malformed reveals fail
     // fast with an explicit error (not HashMismatch after a wasted lookup).
     if !salt_has_minimum_entropy(&salt) {
-        return Err(ContractError::InvalidSalt);
+        return Err(ContractError::InvalidPrice);
     }
 
     // Single read of the active round

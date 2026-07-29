@@ -3,6 +3,22 @@ use crate::errors::ContractError;
 use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKey, Round, RoundPhase};
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
+// ─── DataKey overflow workaround (DataKey has 51 variants, XDR limit is 50) ──
+// Moved out of DataKey to get under the limit.
+
+pub fn _migrated_key(env: &Env) -> Symbol {
+    Symbol::new(env, "MigratedV3")
+}
+
+pub fn _legacy_positions_key() -> Symbol {
+    Symbol::new(&Env::default(), "LegPos")
+}
+
+// ─── Dispute / void-to-refund ─────────────────────────────────────────────────
+/// Maximum dispute window in ledgers (~7 days at 5s ledgers).
+pub const MAX_DISPUTE_LEDGERS: u32 = 120_960;
+pub const DEFAULT_DISPUTE_LEDGERS: u32 = 0;
+
 // ─── Economic control limits ─────────────────────────────────────────────────
 pub const MIN_CAP_VALUE: i128 = 1;
 pub const MAX_MIN_PARTICIPANTS: u32 = 10_000;
@@ -50,6 +66,15 @@ pub const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
 /// Bumps/extends the TTL of the given persistent storage key if its remaining TTL
 /// is less than the threshold. Enforces rent policy (Issue #142).
 pub fn _extend_persistent_ttl(env: &Env, key: &DataKey) {
+    if env.storage().persistent().has(key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, TTL_BUMP_THRESHOLD, TTL_BUMP_AMOUNT);
+    }
+}
+
+/// Extends TTL for a Symbol-keyed persistent entry.
+pub fn _extend_ttl_symbol(env: &Env, key: &Symbol) {
     if env.storage().persistent().has(key) {
         env.storage()
             .persistent()

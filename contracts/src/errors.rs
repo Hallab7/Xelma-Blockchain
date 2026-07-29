@@ -96,16 +96,20 @@ pub enum ContractError {
     NoPendingRotation = 54,
     /// Oracle rotation delay has not elapsed yet (must wait MIN_ROTATION_DELAY_SECONDS)
     RotationDelayNotElapsed = 55,
-    /// Invalid archive retention limit
-    InvalidArchiveRetention = 62,
-    /// Commitment hash is malformed (e.g. the all-zero placeholder)
-    InvalidCommitment = 63,
-    /// Reveal salt fails minimum entropy rules (all-zero or constant-byte)
-    InvalidSalt = 64,
-    /// `create_next_from_template` called with no round template configured
-    NoRoundTemplate = 65,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
     OracleNotLive = 66,
-    /// Invalid precision payout policy
-    InvalidPayoutPolicy = 67,
+    /// Betting is closed (buffer freeze), distinct from round-ended (Issue #310)
+    BettingClosed = 70,
+    /// Claim attempted while dispute window is still open.
+    ClaimLocked = 71,
+    /// Void attempted outside the dispute window.
+    DisputeWindowExpired = 72,
+    /// Early cash-out is disabled (EarlyCashoutBps not configured)
+    EarlyCashoutDisabled = 73,
+    /// Early cash-out is only allowed during the Running phase
+    EarlyCashoutPhaseInvalid = 74,
+    /// Early cash-out is only supported for UpDown rounds
+    EarlyCashoutNotUpDown = 75,
+    /// User position not found for requested operation
+    PositionNotFound = 76,
 }

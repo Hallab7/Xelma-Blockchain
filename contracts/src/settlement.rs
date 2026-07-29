@@ -1,17 +1,106 @@
 // SPDX-License-Identifier: MIT
 use crate::admin::{_ensure_not_paused, _require_supported_schema};
 use crate::common::{
-    _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
-    payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
+    _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _extend_ttl_symbol,
+    _legacy_positions_key, _set_balance, balance, payout_add, payout_mul, sort_addresses,
+    DEFAULT_ARCHIVE_RETENTION,
 };
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKey, HbGateConfig, OracleHeartbeatRecord, OraclePayload,
-    PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction, Round, RoundArchiveStatus,
-    RoundMode, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction, ResolvedParticipant, Round,
+    RoundArchiveStatus, RoundMode, RoundSettlement, UserOutcomeType, UserPosition,
+    UserRoundOutcome, UserStats,
 };
-use soroban_sdk::{symbol_short, Address, Env, Map, Vec};
+use soroban_sdk::{symbol_short, Address, Env, Map, Symbol, Vec};
+
+// ─── Symbol-keyed storage helpers (DataKey is at 50-variant XDR limit) ────────
+// We store maps keyed by round_id under fixed Symbol keys to avoid dynamic keys.
+
+fn _resolved_at_map_key() -> Symbol {
+    Symbol::new(&Env::default(), "RslvAtMap")
+}
+
+fn _settlement_map_key() -> Symbol {
+    Symbol::new(&Env::default(), "SttlMap")
+}
+
+fn _pending_finalize_key() -> Symbol {
+    Symbol::new(&Env::default(), "PendFinal")
+}
+
+fn _read_resolved_at(env: &Env, round_id: u64) -> Option<u32> {
+    let key = _resolved_at_map_key();
+    env.storage()
+        .persistent()
+        .get::<_, Map<u64, u32>>(&key)
+        .and_then(|m| m.get(round_id))
+}
+
+fn _write_resolved_at(env: &Env, round_id: u64, ledger: u32) {
+    let key = _resolved_at_map_key();
+    let mut m: Map<u64, u32> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Map::new(env));
+    m.set(round_id, ledger);
+    env.storage().persistent().set(&key, &m);
+    _extend_ttl_symbol(env, &key);
+}
+
+fn _remove_resolved_at(env: &Env, round_id: u64) {
+    let key = _resolved_at_map_key();
+    let mut m: Map<u64, u32> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Map::new(env));
+    m.remove(round_id);
+    if m.len() == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &m);
+        _extend_ttl_symbol(env, &key);
+    }
+}
+
+fn _read_settlement(env: &Env, round_id: u64) -> Option<RoundSettlement> {
+    let key = _settlement_map_key();
+    env.storage()
+        .persistent()
+        .get::<_, Map<u64, RoundSettlement>>(&key)
+        .and_then(|m| m.get(round_id))
+}
+
+fn _write_settlement(env: &Env, round_id: u64, settlement: &RoundSettlement) {
+    let key = _settlement_map_key();
+    let mut m: Map<u64, RoundSettlement> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Map::new(env));
+    m.set(round_id, settlement.clone());
+    env.storage().persistent().set(&key, &m);
+    _extend_ttl_symbol(env, &key);
+}
+
+fn _remove_settlement(env: &Env, round_id: u64) {
+    let key = _settlement_map_key();
+    let mut m: Map<u64, RoundSettlement> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Map::new(env));
+    m.remove(round_id);
+    if m.len() == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &m);
+        _extend_ttl_symbol(env, &key);
+    }
+}
 
 /// Cancels the active round and deterministically refunds all participant stakes.
 pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
@@ -157,6 +246,24 @@ pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
     _require_supported_schema(&env)?;
     user.require_auth();
     _ensure_not_paused(&env)?;
+
+    // Reject claim if any round is still in its dispute window.
+    let dispute_ledgers = crate::config::get_dispute_ledgers(&env);
+    if dispute_ledgers > 0 {
+        let pf_key = _pending_finalize_key();
+        if let Some(pending_ids) = env.storage().persistent().get::<_, Vec<u64>>(&pf_key) {
+            let current = env.ledger().sequence();
+            for i in 0..pending_ids.len() {
+                if let Some(rid) = pending_ids.get(i) {
+                    if let Some(resolved_at) = _read_resolved_at(&env, rid) {
+                        if current < resolved_at + dispute_ledgers {
+                            return Err(ContractError::ClaimLocked);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let key = DataKey::PendingWinnings(user.clone());
     let pending: i128 = env.storage().persistent().get(&key).unwrap_or(0);
@@ -454,9 +561,12 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         }
     }
 
+    let dispute_ledgers = crate::config::get_dispute_ledgers(&env);
+    let skip_payout = dispute_ledgers > 0;
+
     let fee_amount = match round.mode {
         RoundMode::UpDown => {
-            let (one_sided, fee) = _resolve_updown_mode(&env, &round, payload.price)?;
+            let (one_sided, fee) = _resolve_updown_mode(&env, &round, payload.price, skip_payout)?;
             if one_sided {
                 #[allow(deprecated)]
                 env.events().publish(
@@ -466,7 +576,9 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
             }
             fee
         }
-        RoundMode::Precision => _resolve_precision_mode(&env, round_id, payload.price)?,
+        RoundMode::Precision => {
+            _resolve_precision_mode(&env, round_id, payload.price, skip_payout)?
+        }
     };
 
     let participants: Vec<Address> = env
@@ -476,38 +588,104 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         .unwrap_or(Vec::new(&env));
     let participant_count = participants.len();
 
-    _archive_round(
-        &env,
-        &round,
-        RoundArchiveStatus::Resolved,
-        payload.price,
-        participant_count,
-        fee_amount,
-    );
-
-    for i in 0..participants.len() {
-        if let Some(user) = participants.get(i) {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::Position(round_id, user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKey::PrecisionPosition(round_id, user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKey::PrecisionCommitment(round_id, user));
+    if skip_payout {
+        // Dispute window active — defer payouts and keep participant data.
+        // Store settlement data so finalize_round / void_round can consume it.
+        let mut entries = Vec::new(&env);
+        for i in 0..participants.len() {
+            if let Some(user) = participants.get(i) {
+                let outcome_key = DataKey::UserRoundOutcome(round_id, user.clone());
+                if let Some(outcome) =
+                    env.storage().persistent().get::<_, UserRoundOutcome>(&outcome_key)
+                {
+                    entries.push_back(ResolvedParticipant {
+                        user: user.clone(),
+                        amount: outcome.stake,
+                        payout: outcome.payout,
+                        predicted_price: outcome.predicted_price,
+                        prediction_side: outcome.prediction_side,
+                        outcome: outcome.outcome.clone(),
+                    });
+                }
+            }
         }
-    }
-    env.storage()
-        .persistent()
-        .remove(&DataKey::RoundParticipants(round_id));
+        let settlement = RoundSettlement {
+            round_id,
+            mode: match round.mode {
+                RoundMode::UpDown => 0,
+                RoundMode::Precision => 1,
+            },
+            final_price: payload.price,
+            price_start: round.price_start,
+            pool_up: round.pool_up,
+            pool_down: round.pool_down,
+            participants: entries,
+            fee_amount,
+        };
+        _write_settlement(&env, round_id, &settlement);
 
-    env.storage().persistent().remove(&DataKey::ActiveRound);
-    env.storage().persistent().remove(&DataKey::Positions);
-    env.storage().persistent().remove(&DataKey::UpDownPositions);
-    env.storage()
-        .persistent()
-        .remove(&DataKey::PrecisionPositions);
+        _write_resolved_at(&env, round_id, env.ledger().sequence());
+
+        // Track this round as pending finalization.
+        let pf_key = _pending_finalize_key();
+        let mut pending_ids: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&pf_key)
+            .unwrap_or(Vec::new(&env));
+        pending_ids.push_back(round_id);
+        env.storage().persistent().set(&pf_key, &pending_ids);
+        _extend_ttl_symbol(&env, &pf_key);
+
+        // Remove ActiveRound so new rounds can be created.
+        // Participant data (positions, commitments) is preserved for void/finalize.
+        env.storage().persistent().remove(&DataKey::ActiveRound);
+        env.storage().persistent().remove(&_legacy_positions_key());
+        env.storage().persistent().remove(&DataKey::UpDownPositions);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::PrecisionPositions);
+    } else {
+        // No dispute window — immediate settlement (legacy path).
+
+        _archive_round(
+            &env,
+            &round,
+            RoundArchiveStatus::Resolved,
+            payload.price,
+            participant_count,
+            fee_amount,
+        );
+
+        for i in 0..participants.len() {
+            if let Some(user) = participants.get(i) {
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::Position(round_id, user.clone()));
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::PrecisionPosition(round_id, user.clone()));
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::PrecisionCommitment(round_id, user));
+            }
+        }
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RoundParticipants(round_id));
+
+        env.storage().persistent().remove(&DataKey::ActiveRound);
+        let leg_pos = _legacy_positions_key();
+        env.storage().persistent().remove(&leg_pos);
+        env.storage().persistent().remove(&DataKey::UpDownPositions);
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::PrecisionPositions);
+        // Clean up settlement data if stale (should not exist, but be safe).
+        _remove_settlement(&env, round_id);
+        _remove_resolved_at(&env, round_id);
+    }
 
     let mode_value: u32 = match round.mode {
         RoundMode::UpDown => 0,
@@ -535,10 +713,12 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub fn _resolve_updown_mode(
     env: &Env,
     round: &Round,
     final_price: u128,
+    skip_payout: bool,
 ) -> Result<(bool, i128), ContractError> {
     let participants: Vec<Address> = env
         .storage()
@@ -561,7 +741,7 @@ pub fn _resolve_updown_mode(
 
     if !participants.is_empty() {
         if price_unchanged || is_one_sided {
-            _record_refunds_indexed(env, round.round_id, 0, &participants)?;
+            _record_refunds_indexed(env, round.round_id, 0, &participants, skip_payout)?;
         } else if price_went_up {
             fee_amount = _record_winnings_indexed(
                 env,
@@ -570,6 +750,7 @@ pub fn _resolve_updown_mode(
                 BetSide::Up,
                 round.pool_up,
                 round.pool_down,
+                skip_payout,
             )?;
         } else if price_went_down {
             fee_amount = _record_winnings_indexed(
@@ -579,6 +760,7 @@ pub fn _resolve_updown_mode(
                 BetSide::Down,
                 round.pool_down,
                 round.pool_up,
+                skip_payout,
             )?;
         }
     } else {
@@ -589,7 +771,7 @@ pub fn _resolve_updown_mode(
             .unwrap_or(Map::new(env));
         if !positions.is_empty() {
             if price_unchanged {
-                _record_refunds_legacy(env, round.round_id, &positions)?;
+                _record_refunds_legacy(env, round.round_id, &positions, skip_payout)?;
             } else if price_went_up {
                 fee_amount = _record_winnings_legacy(
                     env,
@@ -598,6 +780,7 @@ pub fn _resolve_updown_mode(
                     BetSide::Up,
                     round.pool_up,
                     round.pool_down,
+                    skip_payout,
                 )?;
             } else if price_went_down {
                 fee_amount = _record_winnings_legacy(
@@ -607,6 +790,7 @@ pub fn _resolve_updown_mode(
                     BetSide::Down,
                     round.pool_down,
                     round.pool_up,
+                    skip_payout,
                 )?;
             }
         }
@@ -619,12 +803,15 @@ pub fn _record_refunds_legacy(
     env: &Env,
     round_id: u64,
     positions: &Map<Address, UserPosition>,
+    skip_payout: bool,
 ) -> Result<(), ContractError> {
     let keys: Vec<Address> = positions.keys();
     for i in 0..keys.len() {
         if let Some(user) = keys.get(i) {
             if let Some(position) = positions.get(user.clone()) {
-                _accumulate_pending(env, user.clone(), position.amount)?;
+                if !skip_payout {
+                    _accumulate_pending(env, user.clone(), position.amount)?;
+                }
                 let prediction_side = match position.side {
                     BetSide::Up => 0,
                     BetSide::Down => 1,
@@ -653,6 +840,7 @@ pub fn _record_winnings_legacy(
     winning_side: BetSide,
     winning_pool: i128,
     losing_pool: i128,
+    skip_payout: bool,
 ) -> Result<i128, ContractError> {
     if winning_pool == 0 {
         return Ok(0);
@@ -672,8 +860,10 @@ pub fn _record_winnings_legacy(
                     let payout =
                         payout_mul(position.amount, total_distributable)? / original_winning_pool;
 
-                    _accumulate_pending(env, user.clone(), payout)?;
-                    _update_stats_win(env, user.clone())?;
+                    if !skip_payout {
+                        _accumulate_pending(env, user.clone(), payout)?;
+                        _update_stats_win(env, user.clone())?;
+                    }
 
                     let side_value = match position.side {
                         BetSide::Up => 0,
@@ -707,7 +897,9 @@ pub fn _record_winnings_legacy(
                             0u128,
                         ),
                     );
-                    _update_stats_loss(env, user.clone())?;
+                    if !skip_payout {
+                        _update_stats_loss(env, user.clone())?;
+                    }
 
                     _persist_user_outcome(
                         env,
@@ -790,6 +982,7 @@ pub fn _resolve_precision_mode(
     env: &Env,
     round_id: u64,
     final_price: u128,
+    skip_payout: bool,
 ) -> Result<i128, ContractError> {
     let mut participants: Vec<Address> = env
         .storage()
@@ -807,7 +1000,7 @@ pub fn _resolve_precision_mode(
         if legacy.is_empty() {
             return Ok(0);
         }
-        return _resolve_precision_legacy(env, round_id, &legacy, final_price);
+        return _resolve_precision_legacy(env, round_id, &legacy, final_price, skip_payout);
     }
 
     let mut min_diff: Option<u128> = None;
@@ -897,8 +1090,10 @@ pub fn _resolve_precision_mode(
             if let Some(winner) = winners.get(i) {
                 let payout = payouts.get(i).unwrap_or(0);
 
-                _accumulate_pending(env, winner.user.clone(), payout)?;
-                _update_stats_win(env, winner.user.clone())?;
+                if !skip_payout {
+                    _accumulate_pending(env, winner.user.clone(), payout)?;
+                    _update_stats_win(env, winner.user.clone())?;
+                }
 
                 _persist_user_outcome(
                     env,
@@ -926,7 +1121,9 @@ pub fn _resolve_precision_mode(
                         (symbol_short!("outcome"), symbol_short!("loss")),
                         (user.clone(), round_id, 1u32, stake, 0u32, predicted_price),
                     );
-                    _update_stats_loss(env, user.clone())?;
+                    if !skip_payout {
+                        _update_stats_loss(env, user.clone())?;
+                    }
 
                     _persist_user_outcome(
                         env,
@@ -952,7 +1149,9 @@ pub fn _resolve_precision_mode(
             if let Some(user) = participants.get(i) {
                 let stake = participant_amounts.get(i).unwrap_or(0);
                 if stake > 0 {
-                    _accumulate_pending(env, user.clone(), stake)?;
+                    if !skip_payout {
+                        _accumulate_pending(env, user.clone(), stake)?;
+                    }
                     _persist_user_outcome(
                         env,
                         round_id,
@@ -977,6 +1176,7 @@ pub fn _resolve_precision_legacy(
     round_id: u64,
     predictions_map: &Map<Address, PrecisionPrediction>,
     final_price: u128,
+    skip_payout: bool,
 ) -> Result<i128, ContractError> {
     let predictions = predictions_map.values();
     if predictions.is_empty() {
@@ -1032,8 +1232,10 @@ pub fn _resolve_precision_legacy(
         for i in 0..winners.len() {
             if let Some(winner) = winners.get(i) {
                 let payout = payouts.get(i).unwrap_or(0);
-                _accumulate_pending(env, winner.user.clone(), payout)?;
-                _update_stats_win(env, winner.user.clone())?;
+                if !skip_payout {
+                    _accumulate_pending(env, winner.user.clone(), payout)?;
+                    _update_stats_win(env, winner.user.clone())?;
+                }
 
                 _persist_user_outcome(
                     env,
@@ -1065,7 +1267,9 @@ pub fn _resolve_precision_legacy(
                             pred.predicted_price,
                         ),
                     );
-                    _update_stats_loss(env, pred.user.clone())?;
+                    if !skip_payout {
+                        _update_stats_loss(env, pred.user.clone())?;
+                    }
 
                     _persist_user_outcome(
                         env,
@@ -1091,12 +1295,15 @@ pub fn _record_refunds_indexed(
     round_id: u64,
     round_mode: u32,
     participants: &Vec<Address>,
+    skip_payout: bool,
 ) -> Result<(), ContractError> {
     for i in 0..participants.len() {
         if let Some(user) = participants.get(i) {
             let pos_key = DataKey::Position(round_id, user.clone());
             if let Some(position) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
-                _accumulate_pending(env, user.clone(), position.amount)?;
+                if !skip_payout {
+                    _accumulate_pending(env, user.clone(), position.amount)?;
+                }
                 let prediction_side = match position.side {
                     BetSide::Up => 0,
                     BetSide::Down => 1,
@@ -1125,6 +1332,7 @@ pub fn _record_winnings_indexed(
     winning_side: BetSide,
     winning_pool: i128,
     losing_pool: i128,
+    skip_payout: bool,
 ) -> Result<i128, ContractError> {
     if winning_pool == 0 {
         return Ok(0);
@@ -1144,8 +1352,10 @@ pub fn _record_winnings_indexed(
                     let payout =
                         payout_mul(position.amount, total_distributable)? / original_winning_pool;
 
-                    _accumulate_pending(env, user.clone(), payout)?;
-                    _update_stats_win(env, user.clone())?;
+                    if !skip_payout {
+                        _accumulate_pending(env, user.clone(), payout)?;
+                        _update_stats_win(env, user.clone())?;
+                    }
 
                     let side_value = match position.side {
                         BetSide::Up => 0,
@@ -1179,7 +1389,9 @@ pub fn _record_winnings_indexed(
                             0u128,
                         ),
                     );
-                    _update_stats_loss(env, user.clone())?;
+                    if !skip_payout {
+                        _update_stats_loss(env, user.clone())?;
+                    }
 
                     _persist_user_outcome(
                         env,
@@ -1464,7 +1676,7 @@ pub fn _refund_under_threshold(
         .persistent()
         .remove(&DataKey::RoundParticipants(round_id));
     env.storage().persistent().remove(&DataKey::ActiveRound);
-    env.storage().persistent().remove(&DataKey::Positions);
+    env.storage().persistent().remove(&_legacy_positions_key());
     env.storage().persistent().remove(&DataKey::UpDownPositions);
     env.storage()
         .persistent()
@@ -1513,6 +1725,317 @@ pub fn _check_heartbeat_health_blocked(env: &Env, config: &HbGateConfig) -> bool
 
     // Blocked if past the stale threshold + grace period
     current_time > deadline
+}
+
+// ─── Dispute-window actions (Issue #276) ─────────────────────────────────────
+
+/// Reconstructs a `Round` from a `RoundSettlement` for archive purposes.
+fn _round_from_settlement(_env: &Env, stl: &RoundSettlement) -> Round {
+    Round {
+        round_id: stl.round_id,
+        price_start: stl.price_start,
+        start_ledger: 0,   // not used in archive
+        bet_end_ledger: 0,  // not used in archive
+        end_ledger: 0,      // not used in archive
+        pool_up: stl.pool_up,
+        pool_down: stl.pool_down,
+        mode: if stl.mode == 0 {
+            RoundMode::UpDown
+        } else {
+            RoundMode::Precision
+        },
+    }
+}
+
+/// Anyone may call `void_round` while the dispute window is open for a
+/// resolved round. It refunds every participant their full stake and
+/// archives the round as `Voided`.
+pub fn void_round(env: Env, round_id: u64) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _ensure_not_paused(&env)?;
+
+    let dispute_ledgers = crate::config::get_dispute_ledgers(&env);
+    if dispute_ledgers == 0 {
+        return Err(ContractError::DisputeWindowExpired);
+    }
+
+    // Must have been resolved with a dispute window.
+    let resolved_at: u32 = _read_resolved_at(&env, round_id)
+        .ok_or(ContractError::DisputeWindowExpired)?;
+
+    let current_ledger = env.ledger().sequence();
+    if current_ledger >= resolved_at + dispute_ledgers {
+        // Window has expired — void no longer allowed.
+        return Err(ContractError::DisputeWindowExpired);
+    }
+
+    // Load participants from storage (preserved during dispute resolve).
+    let participants: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::RoundParticipants(round_id))
+        .unwrap_or(Vec::new(&env));
+
+    if participants.is_empty() {
+        return Err(ContractError::NoActiveRound);
+    }
+
+    // Load settlement data for round info (pool amounts, fee, final price).
+    let settlement: RoundSettlement = _read_settlement(&env, round_id)
+        .ok_or(ContractError::NoActiveRound)?;
+
+    // Refund every participant their full stake.
+    for i in 0..participants.len() {
+        if let Some(user) = participants.get(i) {
+            // UpDown
+            let pos_key = DataKey::Position(round_id, user.clone());
+            if let Some(pos) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
+                _accumulate_pending(&env, user.clone(), pos.amount)?;
+                let side = match pos.side {
+                    BetSide::Up => 0,
+                    BetSide::Down => 1,
+                };
+                _persist_user_outcome(
+                    &env,
+                    round_id,
+                    0,
+                    &user,
+                    side,
+                    0,
+                    pos.amount,
+                    pos.amount,
+                    UserOutcomeType::Refund,
+                );
+            }
+            // Precision
+            let pred_key = DataKey::PrecisionPosition(round_id, user.clone());
+            let commit_key = DataKey::PrecisionCommitment(round_id, user.clone());
+            if let Some(pred) = env
+                .storage()
+                .persistent()
+                .get::<_, PrecisionPrediction>(&pred_key)
+            {
+                _accumulate_pending(&env, user.clone(), pred.amount)?;
+                _persist_user_outcome(
+                    &env,
+                    round_id,
+                    1,
+                    &user,
+                    2,
+                    pred.predicted_price,
+                    pred.amount,
+                    pred.amount,
+                    UserOutcomeType::Refund,
+                );
+            } else if let Some(commit) = env
+                .storage()
+                .persistent()
+                .get::<_, PrecisionCommitment>(&commit_key)
+            {
+                _accumulate_pending(&env, user.clone(), commit.amount)?;
+                _persist_user_outcome(
+                    &env,
+                    round_id,
+                    1,
+                    &user,
+                    2,
+                    0,
+                    commit.amount,
+                    commit.amount,
+                    UserOutcomeType::Refund,
+                );
+            }
+        }
+    }
+
+    // Clean up participant storage.
+    for i in 0..participants.len() {
+        if let Some(user) = participants.get(i) {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Position(round_id, user.clone()));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::PrecisionPosition(round_id, user.clone()));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::PrecisionCommitment(round_id, user));
+        }
+    }
+    env.storage()
+        .persistent()
+        .remove(&DataKey::RoundParticipants(round_id));
+
+    let round = _round_from_settlement(&env, &settlement);
+    let participant_count = participants.len();
+
+    _archive_round(
+        &env,
+        &round,
+        RoundArchiveStatus::Voided,
+        settlement.final_price,
+        participant_count as u32,
+        settlement.fee_amount,
+    );
+
+    // Remove dispute tracking data.
+    _remove_settlement(&env, round_id);
+    _remove_resolved_at(&env, round_id);
+    let pf_key = _pending_finalize_key();
+    let pending_ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&pf_key)
+        .unwrap_or(Vec::new(&env));
+    let mut kept = Vec::new(&env);
+    for i in 0..pending_ids.len() {
+        if let Some(id) = pending_ids.get(i) {
+            if id != round_id {
+                kept.push_back(id);
+            }
+        }
+    }
+    env.storage().persistent().set(&pf_key, &kept);
+    if kept.len() > 0 {
+        _extend_ttl_symbol(&env, &pf_key);
+    } else {
+        env.storage().persistent().remove(&pf_key);
+    }
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("round"), symbol_short!("voided")),
+        (
+            round_id,
+            settlement.final_price,
+            participant_count as u32,
+            settlement.fee_amount,
+        ),
+    );
+
+    Ok(())
+}
+
+/// Anyone may call `finalize_round` after the dispute window expires for a
+/// resolved round. It distributes winnings to winners, updates stats, and
+/// archives the round as `Resolved`.
+pub fn finalize_round(env: Env, round_id: u64) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _ensure_not_paused(&env)?;
+
+    let dispute_ledgers = crate::config::get_dispute_ledgers(&env);
+    if dispute_ledgers == 0 {
+        return Err(ContractError::DisputeWindowExpired);
+    }
+
+    // Must have been resolved with a dispute window.
+    let resolved_at: u32 = _read_resolved_at(&env, round_id)
+        .ok_or(ContractError::DisputeWindowExpired)?;
+
+    let current_ledger = env.ledger().sequence();
+    if current_ledger < resolved_at + dispute_ledgers {
+        // Window is still open — cannot finalize yet.
+        return Err(ContractError::ClaimLocked);
+    }
+
+    let participants: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::RoundParticipants(round_id))
+        .unwrap_or(Vec::new(&env));
+
+    if participants.is_empty() {
+        return Err(ContractError::NoActiveRound);
+    }
+
+    let settlement: RoundSettlement = _read_settlement(&env, round_id)
+        .ok_or(ContractError::NoActiveRound)?;
+
+    // Distribute payouts from the stored settlement data.
+    for i in 0..settlement.participants.len() {
+        if let Some(entry) = settlement.participants.get(i) {
+            match entry.outcome {
+                UserOutcomeType::Win => {
+                    _accumulate_pending(&env, entry.user.clone(), entry.payout)?;
+                    _update_stats_win(&env, entry.user.clone())?;
+                }
+                UserOutcomeType::Loss => {
+                    _update_stats_loss(&env, entry.user.clone())?;
+                }
+                UserOutcomeType::Refund => {
+                    _accumulate_pending(&env, entry.user.clone(), entry.payout)?;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Clean up participant storage.
+    for i in 0..participants.len() {
+        if let Some(user) = participants.get(i) {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Position(round_id, user.clone()));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::PrecisionPosition(round_id, user.clone()));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::PrecisionCommitment(round_id, user));
+        }
+    }
+    env.storage()
+        .persistent()
+        .remove(&DataKey::RoundParticipants(round_id));
+
+    let round = _round_from_settlement(&env, &settlement);
+    let participant_count = participants.len();
+
+    _archive_round(
+        &env,
+        &round,
+        RoundArchiveStatus::Resolved,
+        settlement.final_price,
+        participant_count as u32,
+        settlement.fee_amount,
+    );
+
+    // Remove dispute tracking data.
+    _remove_settlement(&env, round_id);
+    _remove_resolved_at(&env, round_id);
+    let pf_key = _pending_finalize_key();
+    let pending_ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&pf_key)
+        .unwrap_or(Vec::new(&env));
+    let mut kept = Vec::new(&env);
+    for i in 0..pending_ids.len() {
+        if let Some(id) = pending_ids.get(i) {
+            if id != round_id {
+                kept.push_back(id);
+            }
+        }
+    }
+    env.storage().persistent().set(&pf_key, &kept);
+    if kept.len() > 0 {
+        _extend_ttl_symbol(&env, &pf_key);
+    } else {
+        env.storage().persistent().remove(&pf_key);
+    }
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("round"), symbol_short!("finalized")),
+        (
+            round_id,
+            settlement.final_price,
+            participant_count as u32,
+            settlement.fee_amount,
+        ),
+    );
+
+    Ok(())
 }
 
 pub fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> {

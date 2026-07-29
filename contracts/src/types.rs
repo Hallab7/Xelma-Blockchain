@@ -55,9 +55,8 @@ pub enum DataKey {
     Oracle,
     SchemaVersion,
     ActiveRound,
-    Positions,
-    UpDownPositions,
-    PrecisionPositions,
+    UpDownPositions,    // Legacy key — read-only migration compat
+    PrecisionPositions, // Legacy key — read-only migration compat
     PendingWinnings(Address),
     UserStats(Address),
     Paused,
@@ -85,7 +84,7 @@ pub enum DataKey {
     ArchivedRound(u64),
     RecentArchivedRoundIds,
     UserRoundOutcome(u64, Address),
-    MigratedToV3,
+    /// Timelocked pending critical config change keyed by change kind.
     PendingConfigChange(ConfigChangeKind),
     ProtocolFeeBps,
     ProtocolFeeTreasury,
@@ -95,6 +94,7 @@ pub enum DataKey {
     ArchiveRetention,
     RoundTemplate,
     PrecisionPayoutPolicy,
+    EarlyCashoutBps,
     Ext(DataKeyExt),
 }
 
@@ -130,6 +130,9 @@ pub enum ConfigChangeKind {
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
     PrecisionPayoutPolicy = 12,
+    /// Dispute window length in ledgers for void-to-refund (Issue #276).
+    /// 0 preserves current behaviour (no dispute window, immediate settlement).
+    DisputeLedgers = 13,
 }
 
 /// Payload for a scheduled critical config change.
@@ -149,6 +152,7 @@ pub enum ConfigChangePayload {
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
     PrecisionPayoutPolicy(u32),
+    DisputeLedgers(u32),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.
@@ -301,6 +305,8 @@ pub enum RoundArchiveStatus {
     Cancelled = 1,
     /// Settlement aborted due to insufficient participants; stakes refunded.
     FallbackRefund = 2,
+    /// Dispute window ended via void; all participants refunded their stake.
+    Voided = 3,
 }
 
 /// Composite protocol health status returned by `get_protocol_health`.
@@ -466,6 +472,8 @@ pub enum RoundStatus {
     Cancelled = 5,
     /// Settlement triggered but insufficient participants; all stakes refunded.
     FallbackRefund = 6,
+    /// Dispute window void; all participants refunded their full stake.
+    Voided = 7,
 }
 
 /// Terminal outcome persisted per user per archived round.
@@ -504,6 +512,34 @@ pub struct SimulationResult {
     pub precision_total_stake: i128,
     pub fee_amount: i128,
     pub outcomes: Vec<UserRoundOutcome>,
+}
+
+/// Per-participant entry in a deferred settlement (dispute window active).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedParticipant {
+    pub user: Address,
+    pub amount: i128,
+    pub payout: i128,
+    pub predicted_price: u128,
+    pub prediction_side: u32,
+    pub outcome: UserOutcomeType,
+}
+
+/// Settlement data stored during dispute-window resolve and consumed by
+/// `finalize_round` (window expired → winners paid) or `void_round`
+/// (void → all refunded). Keyed by `Symbol::new(&env, "Sttlmnt_<id>")`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoundSettlement {
+    pub round_id: u64,
+    pub mode: u32,
+    pub final_price: u128,
+    pub price_start: u128,
+    pub pool_up: i128,
+    pub pool_down: i128,
+    pub participants: Vec<ResolvedParticipant>,
+    pub fee_amount: i128,
 }
 
 /// Admin-configured blueprint for `create_next_from_template`.

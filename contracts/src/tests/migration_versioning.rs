@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Tests for schema versioning and migration guards.
 
+use crate::common::_migrated_key;
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::DataKey;
@@ -99,10 +100,11 @@ fn test_migrate_v2_to_v3_happy_path() {
     client.migrate_schema_v2_to_v3();
     assert_eq!(client.get_schema_version(), 3u32);
 
+    let mig_key = _migrated_key(&env);
     let migrated = env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .get::<_, bool>(&DataKey::MigratedToV3)
+            .get::<_, bool>(&mig_key)
     });
     assert_eq!(migrated, Some(true));
 }

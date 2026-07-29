@@ -4141,7 +4141,7 @@ fn test_precision_payout_policy_config() {
 
     // Reject invalid policy value
     let res = client.try_set_precision_payout_policy(&2);
-    assert_eq!(res, Err(Ok(ContractError::InvalidPayoutPolicy)));
+    assert_eq!(res, Err(Ok(ContractError::InvalidMode)));
     assert_eq!(client.get_precision_payout_policy(), 1);
 
     // Set back to 0 (Equal)

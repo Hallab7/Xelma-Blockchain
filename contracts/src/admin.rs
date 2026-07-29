@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 use crate::common::{
-    _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, CURRENT_SCHEMA_VERSION,
-    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
+    _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, _extend_ttl_symbol,
+    _migrated_key, CURRENT_SCHEMA_VERSION, DEFAULT_BET_WINDOW_LEDGERS,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
 };
 use crate::errors::ContractError;
 use crate::types::{
@@ -145,9 +146,9 @@ pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
     env.storage().persistent().set(&schema_key, &TARGET_VERSION);
     _extend_persistent_ttl(&env, &schema_key);
 
-    env.storage()
-        .persistent()
-        .set(&DataKey::MigratedToV3, &true);
+    let mig_key = _migrated_key(&env);
+    env.storage().persistent().set(&mig_key, &true);
+    _extend_ttl_symbol(&env, &mig_key);
 
     #[allow(deprecated)]
     env.events().publish(

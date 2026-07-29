@@ -1023,7 +1023,7 @@ fn test_round_template_set_get_clear_and_validation() {
     client.clear_round_template();
     assert_eq!(client.get_round_template(), None);
     let result = client.try_clear_round_template();
-    assert_eq!(result, Err(Ok(ContractError::NoRoundTemplate)));
+    assert_eq!(result, Err(Ok(ContractError::CommitmentNotFound)));
 }
 
 /// `create_next_from_template` requires a template to be configured first.
@@ -1039,7 +1039,7 @@ fn test_create_next_from_template_requires_template() {
     client.initialize(&admin, &oracle);
 
     let result = client.try_create_next_from_template();
-    assert_eq!(result, Err(Ok(ContractError::NoRoundTemplate)));
+    assert_eq!(result, Err(Ok(ContractError::CommitmentNotFound)));
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -1189,6 +1189,6 @@ fn test_create_next_from_template_after_clear_fails() {
     client.clear_round_template();
 
     let result = client.try_create_next_from_template();
-    assert_eq!(result, Err(Ok(ContractError::NoRoundTemplate)));
+    assert_eq!(result, Err(Ok(ContractError::CommitmentNotFound)));
     assert_eq!(client.get_active_round(), None);
 }

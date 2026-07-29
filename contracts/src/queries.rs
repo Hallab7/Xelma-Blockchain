@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 use crate::common::{
-    _derive_round_phase, _extend_persistent_ttl, payout_add, payout_mul, sort_addresses,
-    BPS_DENOMINATOR, DEFAULT_ARCHIVE_RETENTION, MAX_PAGE_SIZE,
+    _derive_round_phase, _extend_persistent_ttl, _legacy_positions_key, payout_add, payout_mul,
+    sort_addresses, BPS_DENOMINATOR, DEFAULT_ARCHIVE_RETENTION, MAX_PAGE_SIZE,
 };
 use crate::config::{
     _read_protocol_fee_bps, calculate_protocol_fee_precision, calculate_protocol_fee_updown,
@@ -228,10 +228,11 @@ pub fn get_user_position(env: Env, user: Address) -> Option<UserPosition> {
     if let Some(p) = legacy_updown.get(user.clone()) {
         return Some(p);
     }
+    let leg_key = _legacy_positions_key();
     let legacy_positions: Map<Address, UserPosition> = env
         .storage()
         .persistent()
-        .get(&DataKey::Positions)
+        .get(&leg_key)
         .unwrap_or(Map::new(&env));
     legacy_positions.get(user)
 }

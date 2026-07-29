@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
 use crate::common::{
-    _emit_action_rejected, _emit_config_updated, _extend_persistent_ttl, _set_balance, balance,
-    payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS, DEFAULT_ARCHIVE_RETENTION,
-    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
-    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION,
-    MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
+    _emit_action_rejected, _emit_config_updated, _extend_persistent_ttl, _extend_ttl_symbol,
+    _set_balance, balance, payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS,
+    DEFAULT_ARCHIVE_RETENTION, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS,
+    DEFAULT_DISPUTE_LEDGERS, DEFAULT_MAX_PRECISION_PARTICIPANTS, DEFAULT_ORACLE_STALE_THRESHOLD,
+    DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION, MAX_BET_WINDOW_LEDGERS,
+    MAX_CLOSE_BUFFER_LEDGERS, MAX_DISPUTE_LEDGERS, MAX_MIN_PARTICIPANTS,
     MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PRECISION_PARTICIPANTS_LIMIT,
     MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_ARCHIVE_RETENTION,
     MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD, MIN_START_PRICE,
@@ -15,7 +16,7 @@ use crate::types::{
     ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, PrecisionPayoutPolicy,
     RoundTemplate,
 };
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 pub fn set_windows(env: Env, bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
     schedule_windows(env, bet_ledgers, run_ledgers)
@@ -410,9 +411,9 @@ pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), Contract
             &env,
             &admin,
             symbol_short!("prec_pol"),
-            ContractError::InvalidPayoutPolicy,
+            ContractError::InvalidMode,
         );
-        return Err(ContractError::InvalidPayoutPolicy);
+        return Err(ContractError::InvalidMode);
     }
 
     let key = DataKey::PrecisionPayoutPolicy;
@@ -497,9 +498,9 @@ pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> 
             &env,
             &admin,
             symbol_short!("set_arch"),
-            ContractError::InvalidArchiveRetention,
+            ContractError::WindowOutOfRange,
         );
-        return Err(ContractError::InvalidArchiveRetention);
+        return Err(ContractError::WindowOutOfRange);
     }
 
     let key = DataKey::ArchiveRetention;
@@ -594,9 +595,9 @@ pub fn clear_round_template(env: Env) -> Result<(), ContractError> {
             &env,
             &admin,
             symbol_short!("clr_tmpl"),
-            ContractError::NoRoundTemplate,
+            ContractError::CommitmentNotFound,
         );
-        return Err(ContractError::NoRoundTemplate);
+        return Err(ContractError::CommitmentNotFound);
     }
     env.storage().persistent().remove(&key);
 
@@ -615,20 +616,76 @@ pub fn get_round_template(env: Env) -> Option<RoundTemplate> {
     env.storage().persistent().get(&key)
 }
 
-// ─── Early cash-out ──────────────────────────────────────────────────────────
+// ─── Dispute window (Issue #276) ──────────────────────────────────────────────
 
-/// Sets the early cash-out penalty rate in basis points (admin only).
-/// `None` disables early cash-out entirely (default).
-/// `Some(bps)` enables it with the given penalty rate (1–1000 bps, i.e. 0.01%–10%).
-pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
-    _require_supported_schema(&env)?;
+fn _dispute_ledgers_key(env: &Env) -> Symbol {
+    Symbol::new(env, "DisputeLedgers")
+}
+
+/// Sets the dispute window length in ledgers (admin only, immediate).
+/// `0` preserves current behaviour — no dispute window, immediate settlement.
+pub fn set_dispute_ledgers(env: Env, ledgers: u32) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
         .get(&DataKey::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    _ensure_not_paused(&env).inspect_err(|&e| {
+
+    if ledgers > MAX_DISPUTE_LEDGERS {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("set_dsp"),
+            ContractError::WindowOutOfRange,
+        );
+        return Err(ContractError::WindowOutOfRange);
+    }
+
+    let key = _dispute_ledgers_key(&env);
+    let old: u32 = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DEFAULT_DISPUTE_LEDGERS);
+    env.storage().persistent().set(&key, &ledgers);
+    _extend_ttl_symbol(&env, &key);
+
+    _emit_config_updated(
+        &env,
+        ConfigChangeKind::DisputeLedgers,
+        ConfigChangePayload::DisputeLedgers(old),
+        ConfigChangePayload::DisputeLedgers(ledgers),
+    );
+    Ok(())
+}
+
+pub fn get_dispute_ledgers(env: &Env) -> u32 {
+    let key = _dispute_ledgers_key(env);
+    let v: u32 = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DEFAULT_DISPUTE_LEDGERS);
+    if v > 0 {
+        _extend_ttl_symbol(env, &key);
+    }
+    v
+}
+
+// ─── Early cash-out (Issue #271) ────────────────────────────────────────────
+
+/// Sets the early cash-out penalty rate in basis points (admin only).
+/// `None` disables early cash-out entirely (default).
+pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
+    crate::admin::_require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    crate::admin::_ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("ec_bps"), e);
     })?;
 
@@ -926,6 +983,12 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKey::PrecisionPayoutPolicy)
                 .unwrap_or(0),
         ),
+        ConfigChangeKind::DisputeLedgers => ConfigChangePayload::DisputeLedgers(
+            env.storage()
+                .persistent()
+                .get(&_dispute_ledgers_key(env))
+                .unwrap_or(DEFAULT_DISPUTE_LEDGERS),
+        ),
     }
 }
 
@@ -1081,11 +1144,19 @@ pub fn _apply_config_payload(
             ConfigChangePayload::PrecisionPayoutPolicy(policy),
         ) => {
             if *policy > 1 {
-                return Err(ContractError::InvalidPayoutPolicy);
+                return Err(ContractError::InvalidMode);
             }
             let key = DataKey::PrecisionPayoutPolicy;
             env.storage().persistent().set(&key, policy);
             _extend_persistent_ttl(env, &key);
+        }
+        (ConfigChangeKind::DisputeLedgers, ConfigChangePayload::DisputeLedgers(ledgers)) => {
+            if *ledgers > MAX_DISPUTE_LEDGERS {
+                return Err(ContractError::WindowOutOfRange);
+            }
+            let key = _dispute_ledgers_key(env);
+            env.storage().persistent().set(&key, ledgers);
+            _extend_ttl_symbol(env, &key);
         }
         _ => return Err(ContractError::InvalidMode),
     }
