@@ -13,7 +13,7 @@ use crate::settlement_math::{
     UpDownPayoutEntry,
 };
 use crate::types::{
-    BetSide, DataKey, OraclePayload, PrecisionPrediction, Round, RoundArchiveStatus, RoundMode,
+    BetSide, DataKeyCore, DataKeyScoped, OraclePayload, PrecisionPrediction, Round, RoundArchiveStatus, RoundMode,
     UserOutcomeType, UserPosition,
 };
 use soroban_sdk::BytesN;
@@ -100,19 +100,19 @@ fn test_resolve_round_price_unchanged() {
         // Store positions in UpDownPositions (new storage location)
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         // Update round pools to match positions
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     // Get balances before resolution
@@ -209,18 +209,18 @@ fn test_resolve_round_price_went_up() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 300_0000000;
         round.pool_down = 150_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     let alice_before = client.balance(&alice);
@@ -310,18 +310,18 @@ fn test_resolve_round_price_went_down() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 200_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     let alice_before = client.balance(&alice);
@@ -513,7 +513,7 @@ fn test_resolve_precision_closest_guess_wins() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     // Advance ledger to allow resolution
@@ -612,7 +612,7 @@ fn test_resolve_precision_tie_splits_pot() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     // Advance ledger
@@ -695,7 +695,7 @@ fn test_resolve_precision_exact_match() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -812,7 +812,7 @@ fn test_resolve_precision_three_way_tie() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -876,7 +876,7 @@ fn test_resolve_precision_single_prediction() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -944,7 +944,7 @@ fn test_resolve_precision_large_differences() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1025,7 +1025,7 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1142,7 +1142,7 @@ fn test_precision_remainder_5way_tie() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1226,7 +1226,7 @@ fn test_precision_no_remainder() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1532,17 +1532,17 @@ fn test_claim_winnings_event_emitted() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -1677,7 +1677,7 @@ fn test_precision_payout_deterministic_same_inputs() {
             );
             env.storage()
                 .persistent()
-                .set(&DataKey::PrecisionPositions, &predictions);
+                .set(&DataKeyCore::PrecisionPositions, &predictions);
         });
 
         env.ledger().with_mut(|li| {
@@ -1762,7 +1762,7 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -2099,7 +2099,7 @@ fn test_precision_payout_conservation_large_tie_set() {
         }
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -2677,18 +2677,18 @@ fn test_outcome_loss_event_updown_legacy_path() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -2857,7 +2857,7 @@ fn test_outcome_loss_event_precision_legacy_path() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -2944,17 +2944,17 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -3436,7 +3436,7 @@ fn sum_pending_payouts(
     let mut total: i128 = 0;
     env.as_contract(contract, || {
         for u in users {
-            let key = crate::types::DataKey::PendingWinnings(u.clone());
+            let key = crate::types::DataKeyScoped::PendingWinnings(u.clone());
             let v: Option<i128> = env.storage().persistent().get(&key);
             total = total
                 .checked_add(v.unwrap_or(0))
@@ -3617,18 +3617,18 @@ fn test_protocol_fee_updown_legacy_conservation() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_000_0000;
         round.pool_down = 50_000_0000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -3767,7 +3767,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -3915,17 +3915,17 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_000_0000;
         round.pool_down = 50_000_0000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -4761,4 +4761,175 @@ fn golden_precision_conservation_invariant() {
             assert_eq!(sum_payouts, 0);
         }
     }
+=======
+#[test]
+fn test_precision_payout_policy_config() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // Default policy should be 0 (Equal)
+    assert_eq!(client.get_precision_payout_policy(), 0);
+
+    // Set to 1 (StakeWeighted)
+    client.set_precision_payout_policy(&1);
+    assert_eq!(client.get_precision_payout_policy(), 1);
+
+    // Reject invalid policy value
+    let res = client.try_set_precision_payout_policy(&2);
+    assert_eq!(res, Err(Ok(ContractError::InvalidPayoutPolicy)));
+    assert_eq!(client.get_precision_payout_policy(), 1);
+
+    // Set back to 0 (Equal)
+    client.set_precision_payout_policy(&0);
+    assert_eq!(client.get_precision_payout_policy(), 0);
+}
+
+#[test]
+fn test_resolve_precision_stake_weighted_policy() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let user_c = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // Set policy to 1 (StakeWeighted)
+    client.set_precision_payout_policy(&1);
+
+    client.mint_initial(&user_a);
+    client.mint_initial(&user_b);
+    client.mint_initial(&user_c);
+
+    // Determine user sorting lexicographically
+    let mut sorted_users = std::vec![user_a.clone(), user_b.clone(), user_c.clone()];
+    sorted_users.sort();
+    let lowest_user = sorted_users[0].clone();
+    let middle_user = sorted_users[1].clone();
+    let highest_user = sorted_users[2].clone();
+
+    // Create Precision round (mode 1)
+    client.create_round(&1_0000000, &Some(1));
+
+    // Place predictions (exact guess 1500 for A and B, 2000 for C)
+    client.place_precision_prediction(&lowest_user, &100_0000000i128, &1500u128); // Winner A
+    client.place_precision_prediction(&middle_user, &200_0000000i128, &1500u128); // Winner B
+    client.place_precision_prediction(&highest_user, &300_0000000i128, &2000u128); // Loser C
+
+    // Advance past betting window
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 20;
+    });
+
+    // Resolve at 1500
+    client.resolve_round(&OraclePayload {
+        price: 1500u128,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    // Total pot = 100 + 200 + 300 = 600. Winning stakes = 300.
+    // User A should get (100 * 600) / 300 = 200.
+    // User B should get (200 * 600) / 300 = 400.
+    // User C should get 0.
+    assert_eq!(
+        client.balance(&lowest_user),
+        1000_0000000 - 100_0000000 + 200_0000000
+    );
+    assert_eq!(
+        client.balance(&middle_user),
+        1000_0000000 - 200_0000000 + 400_0000000
+    );
+    assert_eq!(client.balance(&highest_user), 1000_0000000 - 300_0000000);
+
+    // Verify resolved event has the policy code 1 (StakeWeighted) in the 5th element
+    let events = env.events().all();
+    let resolved_event = events
+        .iter()
+        .find(|e| {
+            let (_contract, topics, _data) = e;
+            topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
+                && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+        })
+        .unwrap();
+
+    let resolved_data: (u64, u128, u32, Option<u32>, u32) =
+        resolved_event.2.clone().try_into_val(&env).unwrap();
+    assert_eq!(resolved_data.4, 1); // policy value == 1 (StakeWeighted)
+}
+
+#[test]
+fn test_precision_stake_weighted_conservation_remainder() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // Set policy to 1 (StakeWeighted)
+    client.set_precision_payout_policy(&1);
+
+    client.mint_initial(&user_a);
+    client.mint_initial(&user_b);
+
+    let mut sorted_users = std::vec![user_a.clone(), user_b.clone()];
+    sorted_users.sort();
+    let lowest_user = sorted_users[0].clone();
+    let other_user = sorted_users[1].clone();
+
+    client.create_round(&1_0000000, &Some(1));
+
+    // Place predictions (Total pot = 100)
+    // Lowest user: stake 100. Other user: stake 200. Total = 300.
+    // Proportional payouts from pot 100:
+    // lowest: (100 * 100) / 300 = 33
+    // other: (200 * 100) / 300 = 66
+    // Sum = 99. Remainder = 1.
+    // The remainder goes to the lexicographically lowest winner (lowest_user).
+    // Final payouts: lowest_user = 34, other_user = 66.
+    client.place_precision_prediction(&lowest_user, &100i128, &1500u128);
+    client.place_precision_prediction(&other_user, &200i128, &1500u128);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 20;
+    });
+
+    client.resolve_round(&OraclePayload {
+        price: 1500u128,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    assert_eq!(
+        client.balance(&lowest_user),
+        1000_0000000 - 100i128 + 34i128
+    );
+    assert_eq!(client.balance(&other_user), 1000_0000000 - 200i128 + 66i128);
 }
