@@ -4,12 +4,18 @@ use crate::common::{
     _current_epoch_id, _emit_action_rejected, _extend_persistent_ttl, _set_balance,
     assert_no_active_round, balance, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS,
     MAX_START_PRICE, MIN_START_PRICE,
+    _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance,
+    assert_no_active_round, balance, BPS_DENOMINATOR, DEFAULT_BET_WINDOW_LEDGERS,
+    DEFAULT_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_START_PRICE,
 };
-use crate::config::get_max_precision_participants;
+use crate::config::{
+    _collect_protocol_fee, get_early_cashout_bps, get_max_precision_participants,
+};
 use crate::errors::ContractError;
+use crate::settlement::_persist_user_outcome;
 use crate::types::{
     BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round, RoundMode, RoundTemplate,
-    UserPosition,
+    UserOutcomeType, UserPosition,
 };
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec};
@@ -261,8 +267,11 @@ pub fn place_bet(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
-    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
+    if current_ledger >= round.bet_end_ledger {
         return Err(ContractError::RoundEnded);
+    }
+    if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
+        return Err(ContractError::BettingClosed);
     }
 
     let user_balance = balance(env.clone(), user.clone());
@@ -392,8 +401,11 @@ pub fn place_precision_prediction(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
-    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
+    if current_ledger >= round.bet_end_ledger {
         return Err(ContractError::RoundEnded);
+    }
+    if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
+        return Err(ContractError::BettingClosed);
     }
 
     let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
@@ -516,8 +528,11 @@ pub fn commit_prediction(
         .get::<_, u32>(&DataKey::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
-    if current_ledger >= round.bet_end_ledger || current_ledger >= close_ledger {
+    if current_ledger >= round.bet_end_ledger {
         return Err(ContractError::RoundEnded);
+    }
+    if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
+        return Err(ContractError::BettingClosed);
     }
 
     let user_balance = balance(env.clone(), user.clone());
@@ -640,6 +655,167 @@ pub fn reveal_prediction(
     env.events().publish(
         (symbol_short!("reveal"), symbol_short!("predict")),
         (user, round.round_id, predicted_price, commitment.amount),
+    );
+
+    Ok(())
+}
+
+/// Early cash-out during the Running phase for UpDown rounds.
+///
+/// **Design**: Default-off. The admin must configure `EarlyCashoutBps` to a
+/// non-`None` penalty rate before this entrypoint is usable. During the
+/// Running phase (after betting closes but before the round ends), a bettor
+/// can exit their position early, forfeiting a percentage of their stake to
+/// the protocol treasury. The full original stake is deducted from the pool
+/// so conservation holds exactly at resolution.
+///
+/// **Formula**:
+/// ```text
+/// forfeit = stake * penalty_bps / 10_000
+/// cashout = stake - forfeit
+/// ```
+///
+/// **Conservation invariants**:
+/// - The full stake is removed from `pool_up` or `pool_down` so the pool
+///   strictly matches the sum of remaining active positions.
+/// - The forfeited amount is credited to the protocol fee treasury.
+/// - The user receives `cashout` as pending winnings.
+///
+/// **Restrictions**:
+/// - Only during the Running phase (`bet_end_ledger ≤ ledger < end_ledger`).
+/// - Only for UpDown rounds (not Precision).
+/// - User must have an active position in the current round.
+/// - Feature must be enabled via `EarlyCashoutBps`.
+pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    user.require_auth();
+    _ensure_normal_mode(&env)?;
+
+    // Check early cash-out is enabled
+    let penalty_bps = get_early_cashout_bps(env.clone())
+        .ok_or(ContractError::EarlyCashoutDisabled)?;
+
+    // Single read of the active round
+    let mut round: Round = env
+        .storage()
+        .persistent()
+        .get(&DataKey::ActiveRound)
+        .ok_or(ContractError::NoActiveRound)?;
+
+    // Only UpDown rounds supported
+    if round.mode != RoundMode::UpDown {
+        return Err(ContractError::EarlyCashoutNotUpDown);
+    }
+
+    // Must be in Running phase (betting closed, round not yet ended)
+    let current_ledger = env.ledger().sequence();
+    if current_ledger < round.bet_end_ledger || current_ledger >= round.end_ledger {
+        return Err(ContractError::EarlyCashoutPhaseInvalid);
+    }
+
+    // Retrieve user's position
+    let pos_key = DataKey::Position(round.round_id, user.clone());
+    let position: UserPosition = env
+        .storage()
+        .persistent()
+        .get(&pos_key)
+        .ok_or(ContractError::PositionNotFound)?;
+
+    let stake = position.amount;
+    if stake <= 0 {
+        return Err(ContractError::InvalidBetAmount);
+    }
+
+    // Calculate forfeited amount and cashout
+    let penalty_bps_i128 = penalty_bps as i128;
+    let forfeit = stake
+        .checked_mul(penalty_bps_i128)
+        .ok_or(ContractError::Overflow)?
+        / BPS_DENOMINATOR;
+
+    // If forfeit rounds down to zero (very small stake relative to penalty),
+    // user gets full refund — still remove position from pool.
+    let cashout = stake
+        .checked_sub(forfeit)
+        .ok_or(ContractError::Overflow)?;
+
+    // Deduct full stake from the appropriate pool
+    match position.side {
+        BetSide::Up => {
+            round.pool_up = round
+                .pool_up
+                .checked_sub(stake)
+                .ok_or(ContractError::Overflow)?;
+        }
+        BetSide::Down => {
+            round.pool_down = round
+                .pool_down
+                .checked_sub(stake)
+                .ok_or(ContractError::Overflow)?;
+        }
+    }
+    env.storage()
+        .persistent()
+        .set(&DataKey::ActiveRound, &round);
+
+    // Credit cashout to user's pending winnings
+    if cashout > 0 {
+        _accumulate_pending(&env, user.clone(), cashout)?;
+    }
+
+    // Collect forfeited amount as protocol fee
+    if forfeit > 0 {
+        _collect_protocol_fee(&env, round.round_id, forfeit, Some(penalty_bps))?;
+    }
+
+    // Persist user outcome record for the early exit
+    let prediction_side = match position.side {
+        BetSide::Up => 0,
+        BetSide::Down => 1,
+    };
+    _persist_user_outcome(
+        &env,
+        round.round_id,
+        0,
+        &user,
+        prediction_side,
+        0,
+        stake,
+        cashout,
+        UserOutcomeType::Refund,
+    );
+
+    // Remove user's position
+    env.storage().persistent().remove(&pos_key);
+
+    // Remove user from participant list
+    let participants_key = DataKey::RoundParticipants(round.round_id);
+    let participants: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&participants_key)
+        .unwrap_or(Vec::new(&env));
+    let mut new_participants: Vec<Address> = Vec::new(&env);
+    for i in 0..participants.len() {
+        if let Some(addr) = participants.get(i) {
+            if addr != user {
+                new_participants.push_back(addr);
+            }
+        }
+    }
+    env.storage()
+        .persistent()
+        .set(&participants_key, &new_participants);
+
+    // Emit event
+    let side_value: u32 = match position.side {
+        BetSide::Up => 0,
+        BetSide::Down => 1,
+    };
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("cashout"), symbol_short!("early")),
+        (user, round.round_id, side_value, stake, cashout, forfeit),
     );
 
     Ok(())
