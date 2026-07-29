@@ -8,10 +8,11 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
-    PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
-    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
-    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
+    LeaderboardEntry, LeaderboardPage, OracleHeartbeatRecord, OraclePayload,
+    OracleRotationProposal, PendingConfigChange, PrecisionPrediction, PrecisionPredictionsPage,
+    ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundPhase, RoundPoolStats,
+    RoundStatus, RoundTemplate, RuntimeMode, SeasonArchive, SeasonLeaderboardEntry,
+    SimulationResult, UpdownPositionEntry, UpdownPositionsPage, UserPosition, UserRoundOutcome,
     UserStats,
 };
 
@@ -792,6 +793,44 @@ impl VirtualTokenContract {
     /// Does not mutate storage. Returns SimulationResult.
     pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, ContractError> {
         queries::simulate_payout(env, final_price)
+    }
+
+    // ─── Cursor-based paginated queries ─────────────────────────────────────
+
+    /// Cursor-based page of Precision-mode predictions for the active round.
+    pub fn get_precision_predictions_cursor(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> PrecisionPredictionsPage {
+        queries::get_precision_predictions_cursor(env, cursor, limit)
+    }
+
+    /// Cursor-based page of Up/Down positions for the active round.
+    pub fn get_updown_positions_cursor(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> UpdownPositionsPage {
+        queries::get_updown_positions_cursor(env, cursor, limit)
+    }
+
+    /// Cursor-based page of the global leaderboard ordered by total wins descending.
+    pub fn get_leaderboard_by_wins_cursor(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> LeaderboardPage {
+        queries::get_leaderboard_by_wins(env, cursor, limit)
+    }
+
+    /// Cursor-based page of the global leaderboard ordered by best streak descending.
+    pub fn get_leaderboard_by_streak_cursor(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> LeaderboardPage {
+        queries::get_leaderboard_by_streak(env, cursor, limit)
     }
 
     // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────

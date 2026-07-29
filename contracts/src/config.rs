@@ -566,10 +566,7 @@ pub fn get_round_template(env: Env) -> Option<RoundTemplate> {
 /// Same validation `create_round` performs on `(start_price, mode)`, applied
 /// up front at template-set time so a stored template can never later fail
 /// `create_round`'s own checks for a reason unrelated to round overlap.
-pub fn _validate_round_template(
-    start_price: u128,
-    mode: Option<u32>,
-) -> Result<(), ContractError> {
+pub fn _validate_round_template(start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
     if start_price < MIN_START_PRICE || start_price > MAX_START_PRICE {
         return Err(ContractError::InvalidStartPrice);
     }

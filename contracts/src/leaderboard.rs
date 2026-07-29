@@ -176,7 +176,11 @@ pub fn get_leaderboard_by_wins(env: Env, offset: u32, limit: u32) -> Vec<Leaderb
     }
     let key = DataKey::LeaderboardWins;
     _extend_persistent_ttl(&env, &key);
-    let list: Vec<Address> = env.storage().persistent().get(&key).unwrap_or(Vec::new(&env));
+    let list: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(&env));
 
     let total = list.len();
     if offset >= total {
@@ -203,7 +207,11 @@ pub fn get_leaderboard_by_streak(env: Env, offset: u32, limit: u32) -> Vec<Leade
     }
     let key = DataKey::LeaderboardStreak;
     _extend_persistent_ttl(&env, &key);
-    let list: Vec<Address> = env.storage().persistent().get(&key).unwrap_or(Vec::new(&env));
+    let list: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(&env));
 
     let total = list.len();
     if offset >= total {
@@ -224,7 +232,10 @@ pub fn get_leaderboard_by_streak(env: Env, offset: u32, limit: u32) -> Vec<Leade
 // ─── Seasons ───────────────────────────────────────────────────────────────
 
 pub fn _current_season_id(env: &Env) -> u32 {
-    env.storage().persistent().get(&DataKey::SeasonId).unwrap_or(1)
+    env.storage()
+        .persistent()
+        .get(&DataKey::SeasonId)
+        .unwrap_or(1)
 }
 
 /// Returns the id of the currently-active leaderboard season (default 1).
@@ -464,7 +475,11 @@ pub fn get_season_leaderboard_by_wins(
     if season_id == _current_season_id(&env) {
         let key = DataKey::SeasonLeaderboardWins;
         _extend_persistent_ttl(&env, &key);
-        let list: Vec<Address> = env.storage().persistent().get(&key).unwrap_or(Vec::new(&env));
+        let list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
         let total = list.len();
         if offset >= total {
             return Vec::new(&env);
@@ -506,7 +521,11 @@ pub fn get_season_leaderboard_by_streak(
     if season_id == _current_season_id(&env) {
         let key = DataKey::SeasonLeaderboardStreak;
         _extend_persistent_ttl(&env, &key);
-        let list: Vec<Address> = env.storage().persistent().get(&key).unwrap_or(Vec::new(&env));
+        let list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
         let total = list.len();
         if offset >= total {
             return Vec::new(&env);

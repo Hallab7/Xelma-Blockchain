@@ -1109,7 +1109,9 @@ fn test_create_next_from_template_after_settle() {
     let next_round_id = client.create_next_from_template();
     assert_eq!(next_round_id, round1.round_id + 1);
 
-    let round2 = client.get_active_round().expect("template round must be active");
+    let round2 = client
+        .get_active_round()
+        .expect("template round must be active");
     assert_eq!(round2.round_id, next_round_id);
     assert_eq!(round2.price_start, 2_5000000u128);
     assert_eq!(round2.mode, RoundMode::Precision);
@@ -1127,8 +1129,14 @@ fn test_create_next_from_template_after_settle() {
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("template"))
             && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("applied"))
     });
-    assert!(created_event, "create_next_from_template must emit round/created");
-    assert!(applied_event, "create_next_from_template must emit template/applied");
+    assert!(
+        created_event,
+        "create_next_from_template must emit round/created"
+    );
+    assert!(
+        applied_event,
+        "create_next_from_template must emit template/applied"
+    );
 }
 
 /// Acceptance: cancel → next. After an admin cancellation, the keeper call
@@ -1154,7 +1162,9 @@ fn test_create_next_from_template_after_cancel() {
     let next_round_id = client.create_next_from_template();
     assert_eq!(next_round_id, round1.round_id + 1);
 
-    let round2 = client.get_active_round().expect("template round must be active");
+    let round2 = client
+        .get_active_round()
+        .expect("template round must be active");
     assert_eq!(round2.round_id, next_round_id);
     assert_eq!(round2.price_start, 4_0000000u128);
     assert_eq!(round2.mode, RoundMode::UpDown);
