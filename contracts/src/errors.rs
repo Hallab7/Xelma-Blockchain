@@ -94,6 +94,8 @@ pub enum ContractError {
     MintLimitExceeded = 53,
     /// No pending oracle rotation proposal to accept or cancel
     NoPendingRotation = 54,
+    /// Oracle rotation delay has not elapsed yet (must wait MIN_ROTATION_DELAY_SECONDS)
+    RotationDelayNotElapsed = 55,
     /// Invalid archive retention limit
     InvalidArchiveRetention = 62,
     /// Commitment hash is malformed (e.g. the all-zero placeholder)

@@ -292,6 +292,66 @@ Emitted when the oracle records an on-chain liveness heartbeat.
 | 0        | `timestamp` | `u64` | Unix epoch seconds when the heartbeat was recorded on-chain  |
 | 1        | `status`    | `u32` | Oracle status: `0` = active, `1` = degraded, `2` = offline  |
 
+---
+
+## Oracle rotation events (two-step with mandatory delay)
+
+Oracle rotation uses a two-step flow with a **mandatory 1-hour delay**
+(`MIN_ROTATION_DELAY_SECONDS = 3_600`) between proposal and acceptance.
+This prevents quiet takeovers — even with admin key compromise, operators
+have a full hour to observe the proposal and react.
+
+### `("oracle", "propose")`
+
+Emitted when the admin proposes a new oracle address with an expiry window.
+
+| Position | Field         | Type      | Description                                            |
+|----------|---------------|-----------|--------------------------------------------------------|
+| 0        | `new_oracle`  | `Address` | Proposed new oracle address                            |
+| 1        | `expires_at`  | `u64`     | Unix timestamp when the proposal expires               |
+
+### `("oracle", "accept")`
+
+Emitted when a pending rotation proposal is successfully accepted (after the
+mandatory delay has elapsed and before expiry).
+
+| Position | Field             | Type      | Description                               |
+|----------|-------------------|-----------|-------------------------------------------|
+| 0        | `previous_oracle` | `Address` | Oracle address before the rotation         |
+| 1        | `new_oracle`      | `Address` | New oracle address after the rotation      |
+
+### `("oracle", "cancel")`
+
+Emitted when the admin cancels a pending rotation proposal.
+
+| Position | Field         | Type      | Description                                      |
+|----------|---------------|-----------|--------------------------------------------------|
+| 0        | `new_oracle`  | `Address` | The proposed oracle address that was cancelled    |
+
+### `("oracle", "expired")`
+
+Emitted when an expired proposal is cleaned up (auto-clean in
+`get_oracle_rotation_proposal` or during `accept_oracle_rotation`).
+
+| Position | Field         | Type  | Description                                      |
+|----------|---------------|-------|--------------------------------------------------|
+| 0        | `new_oracle`  | `Address` | The proposed oracle address that expired       |
+| 1        | `proposed_at` | `u64` | Unix timestamp when the proposal was created      |
+| 2        | `expires_at`  | `u64` | Unix timestamp when the proposal expired          |
+
+### `("oracle", "early")`
+
+Emitted when an attempt to accept a rotation proposal is rejected because the
+mandatory delay (`MIN_ROTATION_DELAY_SECONDS`) has not yet elapsed.
+
+| Position | Field           | Type  | Description                                          |
+|----------|-----------------|-------|------------------------------------------------------|
+| 0        | `new_oracle`    | `Address` | The proposed oracle address                       |
+| 1        | `current_ts`    | `u64` | Current ledger timestamp at rejection time            |
+| 2        | `earliest_accept` | `u64` | Timestamp at which acceptance will be allowed       |
+
+---
+
 ### `("mode", "transition")`
 
 Emitted when the contract's emergency runtime mode is changed by the admin.
