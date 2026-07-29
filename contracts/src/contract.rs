@@ -33,6 +33,10 @@ const MAX_ORACLE_STALE_THRESHOLD: u64 = 86_400; // 24 hours
 
 // ─── Oracle rotation expiry ───────────────────────────────────────────────────
 const MIN_ROTATION_EXPIRY_SECONDS: u64 = 60; // 1 minute minimum
+/// Minimum delay between proposing and accepting an oracle rotation.
+/// Prevents quiet takeovers: even with admin key compromise, a 1-hour window
+/// gives operators and monitoring dashboards time to react.
+const MIN_ROTATION_DELAY_SECONDS: u64 = 3_600; // 1 hour
 
 const DEFAULT_BET_WINDOW_LEDGERS: u32 = 6;
 const DEFAULT_RUN_WINDOW_LEDGERS: u32 = 12;
@@ -327,7 +331,7 @@ impl VirtualTokenContract {
         admin.require_auth();
         Self::_ensure_not_paused(&env)?;
 
-        if expires_in_seconds < MIN_ROTATION_EXPIRY_SECONDS {
+        if expires_in_seconds < MIN_ROTATION_DELAY_SECONDS {
             return Err(ContractError::InvalidDuration);
         }
 
@@ -357,10 +361,17 @@ impl VirtualTokenContract {
 
     /// Accepts a pending oracle rotation proposal before expiry (any caller).
     ///
-    /// If the proposal has expired the call returns `RotationExpired` and the
+    /// **Security**: A mandatory `MIN_ROTATION_DELAY_SECONDS` (1 hour) must
+    /// elapse between proposal and acceptance. This prevents quiet one-block
+    /// takeovers — even if the admin key is compromised, the community has a
+    /// full hour to observe the proposal event and react before the oracle
+    /// actually changes.
+    ///
+    /// If the delay has not elapsed the call returns `RotationDelayNotElapsed`.
+    /// If the proposal has expired it returns `NoPendingRotation` and the
     /// stale proposal is removed after emitting `("oracle", "expired")`.
     /// On success the stored oracle address is updated and
-    /// `("oracle", "accept")` is emitted.
+    /// `("oracle", "accept")` is emitted with the previous and new addresses.
     pub fn accept_oracle_rotation(env: Env) -> Result<(), ContractError> {
         Self::_require_supported_schema(&env)?;
         Self::_ensure_not_paused(&env)?;
@@ -373,6 +384,24 @@ impl VirtualTokenContract {
             .ok_or(ContractError::NoPendingRotation)?;
 
         let current_ts = env.ledger().timestamp();
+
+        // Mandatory delay before acceptance (prevents quiet takeovers)
+        let earliest_accept = proposal
+            .proposed_at
+            .checked_add(MIN_ROTATION_DELAY_SECONDS)
+            .ok_or(ContractError::Overflow)?;
+        if current_ts < earliest_accept {
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("oracle"), symbol_short!("early")),
+                (
+                    proposal.new_oracle.clone(),
+                    current_ts,
+                    earliest_accept,
+                ),
+            );
+            return Err(ContractError::RotationDelayNotElapsed);
+        }
 
         if current_ts > proposal.expires_at {
             env.storage().persistent().remove(&key);
