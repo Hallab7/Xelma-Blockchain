@@ -13,6 +13,8 @@ use crate::common::{
 use crate::errors::ContractError;
 use crate::types::{
     ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingConfigChange, RoundTemplate,
+    ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, PrecisionPayoutPolicy,
+    RoundTemplate,
 };
 use soroban_sdk::{symbol_short, Address, Env};
 
@@ -393,6 +395,57 @@ pub fn get_max_precision_participants(env: Env) -> u32 {
         .unwrap_or(DEFAULT_MAX_PRECISION_PARTICIPANTS)
 }
 
+pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), ContractError> {
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("prec_pol"), e);
+    })?;
+
+    if policy > 1 {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("prec_pol"),
+            ContractError::InvalidPayoutPolicy,
+        );
+        return Err(ContractError::InvalidPayoutPolicy);
+    }
+
+    let key = DataKey::PrecisionPayoutPolicy;
+    let old_policy: u32 = env.storage().persistent().get(&key).unwrap_or(0); // Default to 0 = Equal
+    env.storage().persistent().set(&key, &policy);
+    _extend_persistent_ttl(&env, &key);
+    _emit_config_updated(
+        &env,
+        ConfigChangeKind::PrecisionPayoutPolicy,
+        ConfigChangePayload::PrecisionPayoutPolicy(old_policy),
+        ConfigChangePayload::PrecisionPayoutPolicy(policy),
+    );
+    Ok(())
+}
+
+pub fn get_precision_payout_policy(env: Env) -> u32 {
+    let key = DataKey::PrecisionPayoutPolicy;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key).unwrap_or(0) // Default to 0 = Equal
+}
+
+pub fn _read_precision_payout_policy(env: &Env) -> PrecisionPayoutPolicy {
+    let key = DataKey::PrecisionPayoutPolicy;
+    _extend_persistent_ttl(env, &key);
+    let policy_val: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+    if policy_val == 1 {
+        PrecisionPayoutPolicy::StakeWeighted
+    } else {
+        PrecisionPayoutPolicy::Equal
+    }
+}
+
 pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
@@ -563,13 +616,62 @@ pub fn get_round_template(env: Env) -> Option<RoundTemplate> {
     env.storage().persistent().get(&key)
 }
 
+// ─── Early cash-out ──────────────────────────────────────────────────────────
+
+/// Sets the early cash-out penalty rate in basis points (admin only).
+/// `None` disables early cash-out entirely (default).
+/// `Some(bps)` enables it with the given penalty rate (1–1000 bps, i.e. 0.01%–10%).
+pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("ec_bps"), e);
+    })?;
+
+    if let Some(v) = bps {
+        if v == 0 || v > MAX_PROTOCOL_FEE_BPS {
+            _emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("ec_bps"),
+                ContractError::InvalidProtocolFeeBps,
+            );
+            return Err(ContractError::InvalidProtocolFeeBps);
+        }
+    }
+
+    let key = DataKey::EarlyCashoutBps;
+    if let Some(v) = bps {
+        env.storage().persistent().set(&key, &v);
+        _extend_persistent_ttl(&env, &key);
+    } else {
+        env.storage().persistent().remove(&key);
+    }
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("config"), symbol_short!("ec_bps")),
+        (bps,),
+    );
+    Ok(())
+}
+
+/// Returns the configured early cash-out penalty bps, if enabled.
+pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
+    let key = DataKey::EarlyCashoutBps;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
 /// Same validation `create_round` performs on `(start_price, mode)`, applied
 /// up front at template-set time so a stored template can never later fail
 /// `create_round`'s own checks for a reason unrelated to round overlap.
-pub fn _validate_round_template(
-    start_price: u128,
-    mode: Option<u32>,
-) -> Result<(), ContractError> {
+pub fn _validate_round_template(start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
     if start_price < MIN_START_PRICE || start_price > MAX_START_PRICE {
         return Err(ContractError::InvalidStartPrice);
     }
@@ -819,6 +921,12 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKeyCore::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
         ),
+        ConfigChangeKind::PrecisionPayoutPolicy => ConfigChangePayload::PrecisionPayoutPolicy(
+            env.storage()
+                .persistent()
+                .get(&DataKey::PrecisionPayoutPolicy)
+                .unwrap_or(0),
+        ),
     }
 }
 
@@ -968,6 +1076,17 @@ pub fn _apply_config_payload(
                 (symbol_short!("protocol"), symbol_short!("fee_bps")),
                 (*bps,),
             );
+        }
+        (
+            ConfigChangeKind::PrecisionPayoutPolicy,
+            ConfigChangePayload::PrecisionPayoutPolicy(policy),
+        ) => {
+            if *policy > 1 {
+                return Err(ContractError::InvalidPayoutPolicy);
+            }
+            let key = DataKey::PrecisionPayoutPolicy;
+            env.storage().persistent().set(&key, policy);
+            _extend_persistent_ttl(env, &key);
         }
         _ => return Err(ContractError::InvalidMode),
     }

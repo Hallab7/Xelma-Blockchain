@@ -7,8 +7,8 @@ use crate::common::{
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, HbGateConfig, OracleHeartbeatRecord,
-    OraclePayload, PrecisionCommitment, PrecisionPrediction, Round, RoundArchiveStatus,
+    ArchivedRoundSummary, BetSide, DataKey, HbGateConfig, OracleHeartbeatRecord, OraclePayload,
+    PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction, Round, RoundArchiveStatus,
     RoundMode, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{symbol_short, Address, Env, Map, Vec};
@@ -513,10 +513,21 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         RoundMode::UpDown => 0,
         RoundMode::Precision => 1,
     };
+    let policy: u32 = if round.mode == RoundMode::Precision {
+        crate::config::get_precision_payout_policy(env.clone())
+    } else {
+        0
+    };
     #[allow(deprecated)]
     env.events().publish(
         (symbol_short!("round"), symbol_short!("resolved")),
-        (round_id, payload.price, mode_value, payload.confidence),
+        (
+            round_id,
+            payload.price,
+            mode_value,
+            payload.confidence,
+            policy,
+        ),
     );
 
     Ok(())
@@ -717,6 +728,64 @@ pub fn _record_winnings_legacy(
     Ok(fee_amount)
 }
 
+fn _calculate_precision_payouts(
+    env: &Env,
+    winners: &Vec<PrecisionPrediction>,
+    payout_pool: i128,
+) -> Result<Vec<i128>, ContractError> {
+    let policy = crate::config::_read_precision_payout_policy(env);
+    let mut payouts = Vec::new(env);
+    let mut total_paid = 0i128;
+
+    match policy {
+        PrecisionPayoutPolicy::Equal => {
+            let winner_count = winners.len() as i128;
+            if winner_count > 0 {
+                let payout_per_winner = payout_pool / winner_count;
+                for _ in 0..winners.len() {
+                    payouts.push_back(payout_per_winner);
+                    total_paid = payout_add(total_paid, payout_per_winner)?;
+                }
+            }
+        }
+        PrecisionPayoutPolicy::StakeWeighted => {
+            let mut total_winner_stakes = 0i128;
+            for i in 0..winners.len() {
+                if let Some(winner) = winners.get(i) {
+                    total_winner_stakes = payout_add(total_winner_stakes, winner.amount)?;
+                }
+            }
+
+            if total_winner_stakes > 0 {
+                for i in 0..winners.len() {
+                    if let Some(winner) = winners.get(i) {
+                        let payout = payout_mul(winner.amount, payout_pool)? / total_winner_stakes;
+                        payouts.push_back(payout);
+                        total_paid = payout_add(total_paid, payout)?;
+                    }
+                }
+            } else {
+                for _ in 0..winners.len() {
+                    payouts.push_back(0);
+                }
+            }
+        }
+    }
+
+    let remainder = payout_pool
+        .checked_sub(total_paid)
+        .ok_or(ContractError::PayoutOverflow)?;
+
+    if !winners.is_empty() {
+        if let Some(base_payout_0) = payouts.get(0) {
+            let payout_0 = payout_add(base_payout_0, remainder)?;
+            payouts.set(0, payout_0);
+        }
+    }
+
+    Ok(payouts)
+}
+
 pub fn _resolve_precision_mode(
     env: &Env,
     round_id: u64,
@@ -822,19 +891,11 @@ pub fn _resolve_precision_mode(
     if !winners.is_empty() && total_pot > 0 {
         let (payout_pool, fee) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
         fee_amount = fee;
-        let winner_count = winners.len() as i128;
-        let payout_per_winner = payout_pool / winner_count;
-        let remainder = payout_pool % winner_count;
+        let payouts = _calculate_precision_payouts(env, &winners, payout_pool)?;
 
         for i in 0..winners.len() {
             if let Some(winner) = winners.get(i) {
-                let payout = if i == 0 {
-                    payout_per_winner
-                        .checked_add(remainder)
-                        .ok_or(ContractError::Overflow)?
-                } else {
-                    payout_per_winner
-                };
+                let payout = payouts.get(i).unwrap_or(0);
 
                 _accumulate_pending(env, winner.user.clone(), payout)?;
                 _update_stats_win(env, winner.user.clone())?;
@@ -966,17 +1027,11 @@ pub fn _resolve_precision_legacy(
     if !winners.is_empty() && total_pot > 0 {
         let (payout_pool, fee) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
         fee_amount = fee;
-        let winner_count = winners.len() as i128;
-        let payout_per_winner = payout_pool / winner_count;
-        let remainder = payout_pool % winner_count;
+        let payouts = _calculate_precision_payouts(env, &winners, payout_pool)?;
 
         for i in 0..winners.len() {
             if let Some(winner) = winners.get(i) {
-                let payout = if i == 0 {
-                    payout_add(payout_per_winner, remainder)?
-                } else {
-                    payout_per_winner
-                };
+                let payout = payouts.get(i).unwrap_or(0);
                 _accumulate_pending(env, winner.user.clone(), payout)?;
                 _update_stats_win(env, winner.user.clone())?;
 
@@ -1429,11 +1484,10 @@ pub fn _check_heartbeat_health_blocked(env: &Env, config: &HbGateConfig) -> bool
 
     let heartbeat_key = DataKey::OracleHeartbeat;
     _extend_persistent_ttl(env, &heartbeat_key);
-    let record: OracleHeartbeatRecord =
-        match env.storage().persistent().get(&heartbeat_key) {
-            Some(r) => r,
-            None => return true, // No heartbeat → blocked
-        };
+    let record: OracleHeartbeatRecord = match env.storage().persistent().get(&heartbeat_key) {
+        Some(r) => r,
+        None => return true, // No heartbeat → blocked
+    };
 
     // Offline status always blocks
     if record.status == 2 {

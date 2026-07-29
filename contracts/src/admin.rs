@@ -7,6 +7,11 @@ use crate::common::{
 use crate::errors::ContractError;
 use crate::types::{DataKeyCore, OracleHeartbeatRecord, ProtocolHealthStatus, Round, RuntimeMode};
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
+use crate::types::{
+    DataKey, HbGateConfig, HbGateKey, OracleHeartbeatRecord, ProtocolHealthStatus, Round,
+    RuntimeMode,
+};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 /// Initializes the contract with admin and oracle addresses (one-time only)
 pub fn initialize(env: Env, admin: Address, oracle: Address) -> Result<(), ContractError> {
@@ -429,24 +434,31 @@ pub fn _consume_hb_override(env: &Env) -> bool {
 pub fn _load_hb_config(env: &Env) -> HbGateConfig {
     let key = HbGateKey::Config;
     if env.storage().persistent().has(&key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, crate::common::TTL_BUMP_THRESHOLD, crate::common::TTL_BUMP_AMOUNT);
+        env.storage().persistent().extend_ttl(
+            &key,
+            crate::common::TTL_BUMP_THRESHOLD,
+            crate::common::TTL_BUMP_AMOUNT,
+        );
     }
-    env.storage().persistent().get(&key).unwrap_or(HbGateConfig {
-        strict_mode: false,
-        override_armed: false,
-        grace_seconds: 0,
-    })
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(HbGateConfig {
+            strict_mode: false,
+            override_armed: false,
+            grace_seconds: 0,
+        })
 }
 
 /// Saves the heartbeat gate config to persistent storage.
 pub fn _save_hb_config(env: &Env, config: &HbGateConfig) {
     let key = HbGateKey::Config;
     env.storage().persistent().set(&key, config);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, crate::common::TTL_BUMP_THRESHOLD, crate::common::TTL_BUMP_AMOUNT);
+    env.storage().persistent().extend_ttl(
+        &key,
+        crate::common::TTL_BUMP_THRESHOLD,
+        crate::common::TTL_BUMP_AMOUNT,
+    );
 }
 
 /// Records an oracle heartbeat (oracle only).
