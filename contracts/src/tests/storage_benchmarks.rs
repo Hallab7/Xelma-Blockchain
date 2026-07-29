@@ -43,6 +43,7 @@ fn bench_place_bet_writes_single_user_key() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
@@ -91,6 +92,7 @@ fn bench_place_bet_op_count_assertion() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let users: StdVec<Address> = (0..10).map(|_| Address::generate(&env)).collect();
     for u in &users {
@@ -144,6 +146,7 @@ fn bench_resolve_cleans_indexed_keys() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let users: StdVec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
     for u in &users {
@@ -203,6 +206,7 @@ fn bench_large_round_resolves_correctly() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let users: StdVec<Address> = (0..N_LARGE).map(|_| Address::generate(&env)).collect();
     for u in &users {
@@ -286,6 +290,7 @@ fn bench_precision_mode_indexed_keys() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);

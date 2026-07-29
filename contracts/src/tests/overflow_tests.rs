@@ -61,6 +61,7 @@ fn test_claim_winnings_happy_path() {
     let bob = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice); // 1_000_0000000
     client.mint_initial(&bob); //  1_000_0000000
 
@@ -92,6 +93,7 @@ fn test_claim_winnings_overflow_returns_payout_overflow() {
     let user = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user); // sets balance to 1_000_0000000
 
     // Inject i128::MAX as pending winnings directly into storage
@@ -118,6 +120,7 @@ fn test_claim_winnings_overflow_balance_at_max() {
     let user = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Set balance to i128::MAX directly
     env.as_contract(&contract_id, || {
@@ -148,6 +151,7 @@ fn test_record_winnings_mul_overflow_returns_payout_overflow() {
     let alice = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     client.create_round(&1_0000000u128, &None);
@@ -195,6 +199,7 @@ fn test_record_refunds_overflow_returns_payout_overflow() {
     let alice = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     client.create_round(&1_0000000u128, &None);
@@ -234,6 +239,7 @@ fn test_claim_winnings_near_max_succeeds() {
     let user = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // balance = 0, pending = i128::MAX  → new_balance = i128::MAX (no overflow)
     env.as_contract(&contract_id, || {
@@ -259,6 +265,7 @@ fn test_claim_winnings_boundary_max_exact() {
     let user = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     env.as_contract(&contract_id, || {
         let bal_key = DataKey::Balance(user.clone());
@@ -286,6 +293,7 @@ fn test_claim_winnings_boundary_max_minus_one() {
     let user = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     env.as_contract(&contract_id, || {
         let win_key = DataKey::PendingWinnings(user.clone());
@@ -311,6 +319,7 @@ fn test_claim_winnings_repeat_idempotent() {
     let user = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     client.create_round(&1_0000000u128, &None);
@@ -349,6 +358,7 @@ fn test_claim_winnings_zero_pending_no_mutation() {
     let user = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     let bal_before = client.balance(&user);
@@ -369,6 +379,7 @@ fn test_pending_winnings_cap_enforced_on_refund() {
     let alice = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     // Set cap to 50
@@ -405,6 +416,7 @@ fn test_pending_winnings_cap_enforced_on_winnings() {
     let bob = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -440,6 +452,7 @@ fn test_pending_winnings_cap_not_exceeded_succeeds() {
     let bob = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -466,6 +479,7 @@ fn test_pending_winnings_cap_disabled_large_payout_succeeds() {
     let bob = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -491,6 +505,7 @@ fn test_get_max_pending_winnings_returns_configured_value() {
     let oracle = Address::generate(&env);
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     assert_eq!(client.get_max_pending_winnings(), None);
     apply_max_pending_winnings(&env, &client, Some(500_0000000i128));

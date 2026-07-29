@@ -21,6 +21,7 @@ fn test_round_with_no_participants() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create round with no bets
     client.create_round(&1_0000000, &None);
@@ -62,6 +63,7 @@ fn test_round_with_only_one_side() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -107,6 +109,7 @@ fn test_accumulate_pending_winnings() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     // Round 1: Alice bets UP and wins
@@ -198,6 +201,7 @@ fn test_claim_winnings_checked_overflow() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     // Artificially set balance to near i128::MAX and pending winnings to a
@@ -229,6 +233,7 @@ fn test_stats_checked_overflow() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     // Set stats near u32::MAX so the next win overflows total_wins
@@ -286,6 +291,7 @@ fn test_one_sided_pool_emits_event_and_refunds() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -339,6 +345,7 @@ fn test_one_sided_pool_down_side_emits_event_and_refunds() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     // Only DOWN bets placed
@@ -390,6 +397,7 @@ fn test_two_sided_pool_does_not_emit_onesided_event() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 

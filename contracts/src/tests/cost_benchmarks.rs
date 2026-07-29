@@ -84,6 +84,7 @@ fn setup() -> (
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     (env, contract_id, admin, oracle, client)
 }
 

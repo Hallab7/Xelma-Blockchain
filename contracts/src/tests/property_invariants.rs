@@ -49,6 +49,7 @@ proptest! {
 
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
         // Create a simple Up/Down round
         let start_price: u128 = 1_0000000;
@@ -158,6 +159,7 @@ proptest! {
 
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
         // Create a Precision round
         let start_price: u128 = 1_0000000;
@@ -319,6 +321,7 @@ proptest! {
         let oracle = Address::generate(&env);
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
         client.create_round(&1_0000000u128, &None);
 
         let alice   = Address::generate(&env);
@@ -427,6 +430,7 @@ proptest! {
         let oracle = Address::generate(&env);
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
         client.create_round(&1_0000000u128, &Some(1));
 
         let alice   = Address::generate(&env);
@@ -513,6 +517,7 @@ proptest! {
         let oracle = Address::generate(&env);
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
         client.create_round(&1_0000000u128, &None);
 
         let alice = Address::generate(&env);
@@ -594,6 +599,7 @@ proptest! {
         let oracle = Address::generate(&env);
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
         client.create_round(&1_0000000u128, &None);
 
         let alice = Address::generate(&env);

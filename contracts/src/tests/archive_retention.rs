@@ -17,6 +17,7 @@ fn setup_with_oracle() -> (Env, VirtualTokenContractClient<'static>, Address, Ad
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     (env, client, admin, oracle)
 }
 
@@ -148,6 +149,7 @@ fn test_prune_event_emitted() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Set retention to 1
     client.set_archive_retention(&1);
@@ -188,6 +190,7 @@ fn test_retention_change_applies_to_future_writes_only() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create 3 rounds with default retention (128)
     for i in 0..3u64 {
@@ -220,6 +223,7 @@ fn test_get_archived_round_after_prune_returns_none() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.set_archive_retention(&1);
 
@@ -245,6 +249,7 @@ fn test_get_recent_archived_rounds_capped_by_retention() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.set_archive_retention(&3);
 
@@ -265,6 +270,7 @@ fn test_archive_retention_cannot_be_set_by_non_admin() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Don't mock all auths — test that unauthenticated admin fails
     let result = client.try_set_archive_retention(&10);
