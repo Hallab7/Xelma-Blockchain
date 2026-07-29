@@ -8,9 +8,9 @@ use crate::config::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round,
-    RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UserOutcomeType, UserPosition,
-    UserRoundOutcome, UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, PrecisionCommitment, PrecisionPrediction,
+    PendingWinningsUpdatedAtKey, Round, RoundMode, RoundPhase, RoundPoolStats, RoundTemplate,
+    SeasonArchive, SimulationResult, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -202,8 +202,10 @@ pub fn get_user_stats(env: Env, user: Address) -> UserStats {
 
 /// Returns user's unclaimed pending winnings balance
 pub fn get_pending_winnings(env: Env, user: Address) -> i128 {
-    let key = DataKey::PendingWinnings(user);
+    let key = DataKey::PendingWinnings(user.clone());
     _extend_persistent_ttl(&env, &key);
+    let updated_key = PendingWinningsUpdatedAtKey(user);
+    _extend_persistent_ttl(&env, &updated_key);
     env.storage().persistent().get(&key).unwrap_or(0)
 }
 

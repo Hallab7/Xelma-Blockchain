@@ -102,4 +102,7 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Pending winnings entry exists but has not yet reached the configured
+    /// expiry threshold — caller must wait before reclaiming.
+    PendingWinningsNotExpired = 66,
 }

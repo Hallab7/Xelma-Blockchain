@@ -4,6 +4,7 @@ use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
     payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
 };
+use crate::types::PendingWinningsUpdatedAtKey;
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
@@ -169,6 +170,9 @@ pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
     let new_balance = payout_add(current_balance, pending)?;
 
     env.storage().persistent().remove(&key);
+    env.storage()
+        .persistent()
+        .remove(&PendingWinningsUpdatedAtKey(user.clone()));
     _set_balance(&env, user.clone(), new_balance);
 
     #[allow(deprecated)]

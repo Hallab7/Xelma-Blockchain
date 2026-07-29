@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MIT
 use crate::common::{
-    _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, CURRENT_SCHEMA_VERSION,
-    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
+    _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
+    payout_add, CURRENT_SCHEMA_VERSION, DEFAULT_BET_WINDOW_LEDGERS,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, OracleHeartbeatRecord, ProtocolHealthStatus, Round, RuntimeMode};
+use crate::types::{
+    DataKey, OracleHeartbeatRecord, PendingWinningsUpdatedAtKey, ProtocolHealthStatus, Round,
+    RuntimeMode, PENDING_WINNINGS_EXPIRY_KEY,
+};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 /// Initializes the contract with admin and oracle addresses (one-time only)
@@ -568,4 +572,101 @@ pub fn _require_supported_schema(env: &Env) -> Result<u32, ContractError> {
         return Err(ContractError::UnsupportedSchemaVersion);
     }
     Ok(v)
+}
+
+/// Reclaims expired pending winnings from `user` and credits them to the admin.
+///
+/// # Policy
+/// Unclaimed pending winnings older than the configured `PendingWinningsExpiry`
+/// (in ledgers) may be administratively reclaimed. The funds are credited to
+/// the admin's balance as a temporary sink, preserving the conservation
+/// invariant — no value is destroyed.
+///
+/// Emits `("claim", "expired")` on success.
+///
+/// # Errors
+/// - `AdminNotSet` — contract not initialized.
+/// - `ContractPaused` — contract is fully paused.
+/// - `PendingWinningsNotExpired` — entry exists but hasn't reached the expiry threshold.
+/// - `NoActiveRound` — used as a generic "no pending winnings" signal when
+///   the entry doesn't exist or expiry is disabled (0).
+pub fn reclaim_expired_pending_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("reclaim"), e);
+    })?;
+
+    // Read the expiry config. 0 or absent means expiry is disabled.
+    let expiry_key = PENDING_WINNINGS_EXPIRY_KEY;
+    let expiry_ledgers: u32 = env
+        .storage()
+        .persistent()
+        .get(&expiry_key)
+        .unwrap_or(0);
+    if expiry_ledgers == 0 {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("reclaim"),
+            ContractError::NoActiveRound,
+        );
+        return Err(ContractError::NoActiveRound);
+    }
+
+    // Read pending winnings.
+    let pending_key = DataKey::PendingWinnings(user.clone());
+    let pending: i128 = env.storage().persistent().get(&pending_key).unwrap_or(0);
+    if pending == 0 {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("reclaim"),
+            ContractError::NoActiveRound,
+        );
+        return Err(ContractError::NoActiveRound);
+    }
+
+    // Read the ledger when this entry was last updated.
+    let updated_key = PendingWinningsUpdatedAtKey(user.clone());
+    let updated_at: u32 = env
+        .storage()
+        .persistent()
+        .get(&updated_key)
+        .ok_or(ContractError::NoActiveRound)?;
+
+    let current_ledger = env.ledger().sequence();
+    let age = current_ledger.saturating_sub(updated_at);
+
+    if age < expiry_ledgers {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("reclaim"),
+            ContractError::PendingWinningsNotExpired,
+        );
+        return Err(ContractError::PendingWinningsNotExpired);
+    }
+
+    // CEI: remove storage keys before transferring.
+    env.storage().persistent().remove(&pending_key);
+    env.storage().persistent().remove(&updated_key);
+
+    // Credit the admin's balance (conservation: funds are not destroyed).
+    let admin_bal = balance(env.clone(), admin.clone());
+    let new_admin_bal = payout_add(admin_bal, pending)?;
+    _set_balance(&env, admin.clone(), new_admin_bal);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("claim"), symbol_short!("expired")),
+        (user, pending, admin),
+    );
+
+    Ok(pending)
 }

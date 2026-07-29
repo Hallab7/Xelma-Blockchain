@@ -22,6 +22,7 @@ mod migration_versioning;
 mod mode_tests;
 mod overflow_tests;
 mod pause;
+mod pending_winnings_expiry;
 mod property_invariants;
 mod reference_model;
 mod resolution;
