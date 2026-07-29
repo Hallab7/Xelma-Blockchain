@@ -12,8 +12,7 @@ use crate::types::{
     OracleRotationProposal, PendingConfigChange, PrecisionPrediction, PrecisionPredictionsPage,
     ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundPhase, RoundPoolStats,
     RoundStatus, RoundTemplate, RuntimeMode, SeasonArchive, SeasonLeaderboardEntry,
-    SimulationResult, UpdownPositionEntry, UpdownPositionsPage, UserPosition, UserRoundOutcome,
-    UserStats,
+    SimulationResult, UpdownPositionsPage, UserPosition, UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────

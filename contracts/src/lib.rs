@@ -36,5 +36,5 @@ pub use types::{
     LeaderboardEntry, LeaderboardPage, OracleRotationProposal, PendingConfigChange,
     PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage, ProtocolHealthStatus,
     Round, RoundArchiveStatus, RoundTemplate, SeasonArchive, SeasonLeaderboardEntry,
-    UpdownPositionEntry, UpdownPositionsPage, UserPosition, UserStats,
+    UpdownPositionsPage, UserPosition, UserStats,
 };

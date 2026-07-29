@@ -600,21 +600,13 @@ pub struct PrecisionPredictionsPage {
     pub next_cursor: Option<Address>,
 }
 
-/// Single entry in a cursor-based Up/Down positions page.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct UpdownPositionEntry {
-    pub user: Address,
-    pub position: UserPosition,
-}
-
 /// Cursor-based page of Up/Down positions for the active round.
 ///
-/// Items are `UpdownPositionEntry` records sorted by address ascending.
+/// Items are `(Address, UserPosition)` tuples sorted by address ascending.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct UpdownPositionsPage {
-    pub items: Vec<UpdownPositionEntry>,
+    pub items: Vec<(Address, UserPosition)>,
     pub next_cursor: Option<Address>,
 }
 
