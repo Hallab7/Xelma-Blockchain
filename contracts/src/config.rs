@@ -12,6 +12,7 @@ use crate::common::{
 };
 use crate::errors::ContractError;
 use crate::types::{
+    ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingConfigChange, RoundTemplate,
     ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, PrecisionPayoutPolicy,
     RoundTemplate,
 };
@@ -26,7 +27,7 @@ pub fn set_max_stake(env: Env, max_amount: Option<i128>) -> Result<(), ContractE
 }
 
 pub fn get_max_stake(env: Env) -> Option<i128> {
-    let key = DataKey::MaxStake;
+    let key = DataKeyCore::MaxStake;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -36,7 +37,7 @@ pub fn set_max_user_exposure(env: Env, max_exposure: Option<i128>) -> Result<(),
 }
 
 pub fn get_max_user_exposure(env: Env) -> Option<i128> {
-    let key = DataKey::MaxUserRoundExposure;
+    let key = DataKeyCore::MaxUserRoundExposure;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -126,13 +127,13 @@ pub fn set_protocol_fee_bps(env: Env, bps: Option<u32>) -> Result<(), ContractEr
 }
 
 pub fn get_protocol_fee_bps(env: Env) -> Option<u32> {
-    let key = DataKey::ProtocolFeeBps;
+    let key = DataKeyCore::ProtocolFeeBps;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
 
 pub fn get_protocol_fee_treasury(env: Env) -> i128 {
-    let key = DataKey::ProtocolFeeTreasury;
+    let key = DataKeyCore::ProtocolFeeTreasury;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key).unwrap_or(0)
 }
@@ -146,7 +147,7 @@ pub fn withdraw_protocol_fee(
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -157,7 +158,7 @@ pub fn withdraw_protocol_fee(
         return Err(ContractError::InvalidBetAmount);
     }
 
-    let treasury_key = DataKey::ProtocolFeeTreasury;
+    let treasury_key = DataKeyCore::ProtocolFeeTreasury;
     let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
     if amount > current {
         return Err(ContractError::InsufficientBalance);
@@ -184,14 +185,14 @@ pub fn withdraw_protocol_fee(
 pub fn get_pending_config_change(env: Env, kind: ConfigChangeKind) -> Option<PendingConfigChange> {
     env.storage()
         .persistent()
-        .get(&DataKey::PendingConfigChange(kind))
+        .get(&DataKeyScoped::PendingConfigChange(kind))
 }
 
 pub fn apply_scheduled_changes(env: Env, kind: ConfigChangeKind) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     _ensure_normal_mode(&env)?;
 
-    let key = DataKey::PendingConfigChange(kind.clone());
+    let key = DataKeyScoped::PendingConfigChange(kind.clone());
     let pending: PendingConfigChange = env
         .storage()
         .persistent()
@@ -220,14 +221,14 @@ pub fn cancel_config_change(env: Env, kind: ConfigChangeKind) -> Result<(), Cont
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("cncl_cfg"), e);
     })?;
 
-    let key = DataKey::PendingConfigChange(kind.clone());
+    let key = DataKeyScoped::PendingConfigChange(kind.clone());
     let pending: PendingConfigChange = env
         .storage()
         .persistent()
@@ -257,7 +258,7 @@ pub fn cancel_config_change(env: Env, kind: ConfigChangeKind) -> Result<(), Cont
 }
 
 pub fn get_max_pending_winnings(env: Env) -> Option<i128> {
-    let key = DataKey::MaxPendingWinnings;
+    let key = DataKeyCore::MaxPendingWinnings;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -267,7 +268,7 @@ pub fn set_close_buffer_ledgers(env: Env, buffer_ledgers: u32) -> Result<(), Con
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -276,7 +277,7 @@ pub fn set_close_buffer_ledgers(env: Env, buffer_ledgers: u32) -> Result<(), Con
 
     _validate_close_buffer_ledgers(buffer_ledgers)?;
 
-    let key = DataKey::CloseBufferLedgers;
+    let key = DataKeyCore::CloseBufferLedgers;
     let old_buffer: u32 = env
         .storage()
         .persistent()
@@ -295,7 +296,7 @@ pub fn set_close_buffer_ledgers(env: Env, buffer_ledgers: u32) -> Result<(), Con
 }
 
 pub fn get_close_buffer_ledgers(env: Env) -> u32 {
-    let key = DataKey::CloseBufferLedgers;
+    let key = DataKeyCore::CloseBufferLedgers;
     _extend_persistent_ttl(&env, &key);
     env.storage()
         .persistent()
@@ -308,14 +309,14 @@ pub fn set_min_participants(env: Env, min: Option<u32>) -> Result<(), ContractEr
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("min_par"), e);
     })?;
 
-    let key = DataKey::MinParticipants;
+    let key = DataKeyCore::MinParticipants;
     let old_min: Option<u32> = env.storage().persistent().get(&key);
     if let Some(v) = min {
         if v == 0 || v > MAX_MIN_PARTICIPANTS {
@@ -342,7 +343,7 @@ pub fn set_min_participants(env: Env, min: Option<u32>) -> Result<(), ContractEr
 }
 
 pub fn get_min_participants(env: Env) -> Option<u32> {
-    let key = DataKey::MinParticipants;
+    let key = DataKeyCore::MinParticipants;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -351,7 +352,7 @@ pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), Contract
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -368,7 +369,7 @@ pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), Contract
         return Err(ContractError::InvalidPrecisionCap);
     }
 
-    let key = DataKey::MaxPrecisionParticipants;
+    let key = DataKeyCore::MaxPrecisionParticipants;
     let old_max: u32 = env
         .storage()
         .persistent()
@@ -386,7 +387,7 @@ pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), Contract
 }
 
 pub fn get_max_precision_participants(env: Env) -> u32 {
-    let key = DataKey::MaxPrecisionParticipants;
+    let key = DataKeyCore::MaxPrecisionParticipants;
     _extend_persistent_ttl(&env, &key);
     env.storage()
         .persistent()
@@ -449,7 +450,7 @@ pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -459,11 +460,11 @@ pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
     let old_limit: u32 = env
         .storage()
         .instance()
-        .get(&DataKey::MintLimitConfig)
+        .get(&DataKeyCore::MintLimitConfig)
         .unwrap_or(0);
     env.storage()
         .instance()
-        .set(&DataKey::MintLimitConfig, &limit);
+        .set(&DataKeyCore::MintLimitConfig, &limit);
     _emit_config_updated(
         &env,
         ConfigChangeKind::MintLimit,
@@ -476,7 +477,7 @@ pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
 pub fn get_mint_limit(env: Env) -> u32 {
     env.storage()
         .instance()
-        .get(&DataKey::MintLimitConfig)
+        .get(&DataKeyCore::MintLimitConfig)
         .unwrap_or(0)
 }
 
@@ -485,7 +486,7 @@ pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> 
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -502,7 +503,7 @@ pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> 
         return Err(ContractError::InvalidArchiveRetention);
     }
 
-    let key = DataKey::ArchiveRetention;
+    let key = DataKeyCore::ArchiveRetention;
     let old_limit: u32 = env
         .storage()
         .persistent()
@@ -527,7 +528,7 @@ pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> 
 }
 
 pub fn get_archive_retention(env: Env) -> u32 {
-    let key = DataKey::ArchiveRetention;
+    let key = DataKeyCore::ArchiveRetention;
     _extend_persistent_ttl(&env, &key);
     env.storage()
         .persistent()
@@ -550,7 +551,7 @@ pub fn set_round_template(
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -561,7 +562,7 @@ pub fn set_round_template(
         _emit_action_rejected(&env, &admin, symbol_short!("set_tmpl"), e);
     })?;
 
-    let key = DataKey::RoundTemplate;
+    let key = DataKeyCore::RoundTemplate;
     env.storage()
         .persistent()
         .set(&key, &RoundTemplate { start_price, mode });
@@ -581,14 +582,14 @@ pub fn clear_round_template(env: Env) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("clr_tmpl"), e);
     })?;
 
-    let key = DataKey::RoundTemplate;
+    let key = DataKeyCore::RoundTemplate;
     if !env.storage().persistent().has(&key) {
         _emit_action_rejected(
             &env,
@@ -610,7 +611,7 @@ pub fn clear_round_template(env: Env) -> Result<(), ContractError> {
 
 /// Returns the configured round template, if any.
 pub fn get_round_template(env: Env) -> Option<RoundTemplate> {
-    let key = DataKey::RoundTemplate;
+    let key = DataKeyCore::RoundTemplate;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -739,7 +740,7 @@ pub fn _validate_protocol_fee_bps(bps: Option<u32>) -> Result<(), ContractError>
 }
 
 pub fn _read_protocol_fee_bps(env: &Env) -> Option<u32> {
-    let key = DataKey::ProtocolFeeBps;
+    let key = DataKeyCore::ProtocolFeeBps;
     let v: Option<u32> = env.storage().persistent().get(&key);
     if v.is_some() {
         _extend_persistent_ttl(env, &key);
@@ -756,7 +757,7 @@ pub fn _collect_protocol_fee(
     if fee_amount <= 0 {
         return Ok(());
     }
-    let treasury_key = DataKey::ProtocolFeeTreasury;
+    let treasury_key = DataKeyCore::ProtocolFeeTreasury;
     let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
     let new_treasury = current
         .checked_add(fee_amount)
@@ -857,67 +858,67 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
             let bet: u32 = env
                 .storage()
                 .persistent()
-                .get(&DataKey::BetWindowLedgers)
+                .get(&DataKeyCore::BetWindowLedgers)
                 .unwrap_or(DEFAULT_BET_WINDOW_LEDGERS);
             let run: u32 = env
                 .storage()
                 .persistent()
-                .get(&DataKey::RunWindowLedgers)
+                .get(&DataKeyCore::RunWindowLedgers)
                 .unwrap_or(DEFAULT_RUN_WINDOW_LEDGERS);
             ConfigChangePayload::Windows(bet, run)
         }
         ConfigChangeKind::MaxStake => {
-            ConfigChangePayload::MaxStake(env.storage().persistent().get(&DataKey::MaxStake))
+            ConfigChangePayload::MaxStake(env.storage().persistent().get(&DataKeyCore::MaxStake))
         }
         ConfigChangeKind::MaxUserRoundExposure => ConfigChangePayload::MaxUserRoundExposure(
             env.storage()
                 .persistent()
-                .get(&DataKey::MaxUserRoundExposure),
+                .get(&DataKeyCore::MaxUserRoundExposure),
         ),
         ConfigChangeKind::MaxPendingWinnings => ConfigChangePayload::MaxPendingWinnings(
-            env.storage().persistent().get(&DataKey::MaxPendingWinnings),
+            env.storage().persistent().get(&DataKeyCore::MaxPendingWinnings),
         ),
         ConfigChangeKind::OracleStaleThreshold => ConfigChangePayload::OracleStaleThreshold(
             env.storage()
                 .persistent()
-                .get(&DataKey::OracleStaleThreshold)
+                .get(&DataKeyCore::OracleStaleThreshold)
                 .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD),
         ),
         ConfigChangeKind::OracleMaxDeviationBps => ConfigChangePayload::OracleMaxDeviationBps(
             env.storage()
                 .persistent()
-                .get(&DataKey::OracleMaxDeviationBps),
+                .get(&DataKeyCore::OracleMaxDeviationBps),
         ),
         ConfigChangeKind::ProtocolFeeBps => ConfigChangePayload::ProtocolFeeBps(
-            env.storage().persistent().get(&DataKey::ProtocolFeeBps),
+            env.storage().persistent().get(&DataKeyCore::ProtocolFeeBps),
         ),
         ConfigChangeKind::MinParticipants => ConfigChangePayload::MinParticipants(
-            env.storage().persistent().get(&DataKey::MinParticipants),
+            env.storage().persistent().get(&DataKeyCore::MinParticipants),
         ),
         ConfigChangeKind::MaxPrecisionParticipants => {
             ConfigChangePayload::MaxPrecisionParticipants(
                 env.storage()
                     .persistent()
-                    .get(&DataKey::MaxPrecisionParticipants)
+                    .get(&DataKeyCore::MaxPrecisionParticipants)
                     .unwrap_or(DEFAULT_MAX_PRECISION_PARTICIPANTS),
             )
         }
         ConfigChangeKind::MintLimit => ConfigChangePayload::MintLimit(
             env.storage()
                 .instance()
-                .get(&DataKey::MintLimitConfig)
+                .get(&DataKeyCore::MintLimitConfig)
                 .unwrap_or(0),
         ),
         ConfigChangeKind::ArchiveRetention => ConfigChangePayload::ArchiveRetention(
             env.storage()
                 .persistent()
-                .get(&DataKey::ArchiveRetention)
+                .get(&DataKeyCore::ArchiveRetention)
                 .unwrap_or(DEFAULT_ARCHIVE_RETENTION),
         ),
         ConfigChangeKind::CloseBufferLedgers => ConfigChangePayload::CloseBufferLedgers(
             env.storage()
                 .persistent()
-                .get(&DataKey::CloseBufferLedgers)
+                .get(&DataKeyCore::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
         ),
         ConfigChangeKind::PrecisionPayoutPolicy => ConfigChangePayload::PrecisionPayoutPolicy(
@@ -937,14 +938,14 @@ pub fn _schedule_config_change(
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(env).inspect_err(|&e| {
         _emit_action_rejected(env, &admin, symbol_short!("sched"), e);
     })?;
 
-    let key = DataKey::PendingConfigChange(kind.clone());
+    let key = DataKeyScoped::PendingConfigChange(kind.clone());
     if env.storage().persistent().has(&key) {
         _emit_action_rejected(
             env,
@@ -988,12 +989,12 @@ pub fn _apply_config_payload(
             _validate_windows(*bet, *run)?;
             env.storage()
                 .persistent()
-                .set(&DataKey::BetWindowLedgers, bet);
-            _extend_persistent_ttl(env, &DataKey::BetWindowLedgers);
+                .set(&DataKeyCore::BetWindowLedgers, bet);
+            _extend_persistent_ttl(env, &DataKeyCore::BetWindowLedgers);
             env.storage()
                 .persistent()
-                .set(&DataKey::RunWindowLedgers, run);
-            _extend_persistent_ttl(env, &DataKey::RunWindowLedgers);
+                .set(&DataKeyCore::RunWindowLedgers, run);
+            _extend_persistent_ttl(env, &DataKeyCore::RunWindowLedgers);
             #[allow(deprecated)]
             env.events().publish(
                 (symbol_short!("windows"), symbol_short!("updated")),
@@ -1002,7 +1003,7 @@ pub fn _apply_config_payload(
         }
         (ConfigChangeKind::MaxStake, ConfigChangePayload::MaxStake(max)) => {
             _validate_max_stake(*max)?;
-            let key = DataKey::MaxStake;
+            let key = DataKeyCore::MaxStake;
             if let Some(v) = max {
                 env.storage().persistent().set(&key, v);
                 _extend_persistent_ttl(env, &key);
@@ -1012,7 +1013,7 @@ pub fn _apply_config_payload(
         }
         (ConfigChangeKind::CloseBufferLedgers, ConfigChangePayload::CloseBufferLedgers(buffer)) => {
             _validate_close_buffer_ledgers(*buffer)?;
-            let key = DataKey::CloseBufferLedgers;
+            let key = DataKeyCore::CloseBufferLedgers;
             env.storage().persistent().set(&key, buffer);
             _extend_persistent_ttl(env, &key);
         }
@@ -1021,7 +1022,7 @@ pub fn _apply_config_payload(
             ConfigChangePayload::MaxUserRoundExposure(max),
         ) => {
             _validate_max_stake(*max)?;
-            let key = DataKey::MaxUserRoundExposure;
+            let key = DataKeyCore::MaxUserRoundExposure;
             if let Some(v) = max {
                 env.storage().persistent().set(&key, v);
                 _extend_persistent_ttl(env, &key);
@@ -1031,7 +1032,7 @@ pub fn _apply_config_payload(
         }
         (ConfigChangeKind::MaxPendingWinnings, ConfigChangePayload::MaxPendingWinnings(max)) => {
             _validate_max_stake(*max)?;
-            let key = DataKey::MaxPendingWinnings;
+            let key = DataKeyCore::MaxPendingWinnings;
             if let Some(v) = max {
                 env.storage().persistent().set(&key, v);
                 _extend_persistent_ttl(env, &key);
@@ -1044,7 +1045,7 @@ pub fn _apply_config_payload(
             ConfigChangePayload::OracleStaleThreshold(seconds),
         ) => {
             _validate_oracle_stale_threshold(*seconds)?;
-            let key = DataKey::OracleStaleThreshold;
+            let key = DataKeyCore::OracleStaleThreshold;
             env.storage().persistent().set(&key, seconds);
             _extend_persistent_ttl(env, &key);
         }
@@ -1053,7 +1054,7 @@ pub fn _apply_config_payload(
             ConfigChangePayload::OracleMaxDeviationBps(bps),
         ) => {
             _validate_oracle_max_deviation_bps(*bps)?;
-            let key = DataKey::OracleMaxDeviationBps;
+            let key = DataKeyCore::OracleMaxDeviationBps;
             if let Some(v) = bps {
                 env.storage().persistent().set(&key, v);
                 _extend_persistent_ttl(env, &key);
@@ -1063,7 +1064,7 @@ pub fn _apply_config_payload(
         }
         (ConfigChangeKind::ProtocolFeeBps, ConfigChangePayload::ProtocolFeeBps(bps)) => {
             _validate_protocol_fee_bps(*bps)?;
-            let key = DataKey::ProtocolFeeBps;
+            let key = DataKeyCore::ProtocolFeeBps;
             if let Some(v) = bps {
                 env.storage().persistent().set(&key, v);
                 _extend_persistent_ttl(env, &key);

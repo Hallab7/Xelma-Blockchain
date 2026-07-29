@@ -7,7 +7,7 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
+    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped,
     LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
     PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
     RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
@@ -263,7 +263,7 @@ impl VirtualTokenContract {
     pub fn get_protocol_status(env: Env) -> ProtocolStatus {
         if Self::is_paused(env.clone()) {
             ProtocolStatus::Paused
-        } else if env.storage().persistent().has(&DataKey::ActiveRound) {
+        } else if env.storage().persistent().has(&DataKeyCore::ActiveRound) {
             ProtocolStatus::Active
         } else {
             ProtocolStatus::ClaimsOnly
@@ -298,7 +298,7 @@ impl VirtualTokenContract {
         if let Some(active_round) = env
             .storage()
             .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
+            .get::<_, Round>(&DataKeyCore::ActiveRound)
         {
             if active_round.round_id == round_id {
                 let phase = Self::_derive_round_phase(env.ledger().sequence(), &active_round);
@@ -311,7 +311,7 @@ impl VirtualTokenContract {
         }
 
         // Second, check the archived rounds summary
-        let archive_key = DataKey::ArchivedRound(round_id);
+        let archive_key = DataKeyScoped::ArchivedRound(round_id);
         if let Some(archive) = env
             .storage()
             .persistent()
@@ -338,6 +338,21 @@ impl VirtualTokenContract {
         admin::get_oracle_stale_threshold(env)
     }
 
+    /// Auth-gated batch TTL extension for allowlisted storage keys (admin only).
+    ///
+    /// Accepts a vector of `DataKeyCore` variants. Each key is validated against the
+    /// TTL-touch allowlist. Keys that exist in storage have their TTL extended to
+    /// `TTL_BUMP_AMOUNT` (~30 days). Keys not in the allowlist cause the entire
+    /// call to fail with `UnsupportedDataKeyForTtlTouch`. Keys that are in the
+    /// allowlist but absent from storage are silently skipped.
+    ///
+    /// Returns the number of keys whose TTL was actually extended.
+    ///
+    /// Event: `("storage", "touch")` with `(touched, skipped)` counts.
+    pub fn batch_touch_ttl(env: Env, keys: Vec<DataKeyCore>) -> Result<u32, ContractError> {
+        admin::batch_touch_ttl(env, keys)
+    }
+
     // ─── Oracle rotation (two-step with expiry) ─────────────────────────────
 
     /// Proposes a new oracle address with an expiry window (admin only).
@@ -356,7 +371,7 @@ impl VirtualTokenContract {
         let admin: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&DataKeyCore::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
         Self::_ensure_not_paused(&env)?;
@@ -376,7 +391,7 @@ impl VirtualTokenContract {
             expires_at,
         };
 
-        let key = DataKey::OracleRotationProposal;
+        let key = DataKeyCore::OracleRotationProposal;
         env.storage().persistent().set(&key, &proposal);
         Self::_extend_persistent_ttl(&env, &key);
 
@@ -406,7 +421,7 @@ impl VirtualTokenContract {
         Self::_require_supported_schema(&env)?;
         Self::_ensure_not_paused(&env)?;
 
-        let key = DataKey::OracleRotationProposal;
+        let key = DataKeyCore::OracleRotationProposal;
         let proposal: OracleRotationProposal = env
             .storage()
             .persistent()
@@ -447,7 +462,7 @@ impl VirtualTokenContract {
             return Err(ContractError::NoPendingRotation);
         }
 
-        let oracle_key = DataKey::Oracle;
+        let oracle_key = DataKeyCore::Oracle;
         let previous: Address = env
             .storage()
             .persistent()
@@ -477,12 +492,12 @@ impl VirtualTokenContract {
         let admin: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&DataKeyCore::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
         Self::_ensure_not_paused(&env)?;
 
-        let key = DataKey::OracleRotationProposal;
+        let key = DataKeyCore::OracleRotationProposal;
         let proposal: OracleRotationProposal = env
             .storage()
             .persistent()
@@ -502,7 +517,7 @@ impl VirtualTokenContract {
 
     /// Returns the pending oracle rotation proposal, if any.
     pub fn get_oracle_rotation_proposal(env: Env) -> Option<OracleRotationProposal> {
-        let key = DataKey::OracleRotationProposal;
+        let key = DataKeyCore::OracleRotationProposal;
         Self::_extend_persistent_ttl(&env, &key);
         let proposal: Option<OracleRotationProposal> = env.storage().persistent().get(&key);
         if let Some(ref prop) = proposal {
@@ -947,13 +962,13 @@ impl VirtualTokenContract {
 
 impl VirtualTokenContract {
     pub(crate) fn _set_balance(env: &Env, user: Address, amount: i128) {
-        let key = DataKey::Balance(user);
+        let key = DataKeyScoped::Balance(user);
         env.storage().persistent().set(&key, &amount);
         Self::_extend_persistent_ttl(env, &key);
     }
 
     fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
-        let key = DataKey::Paused;
+        let key = DataKeyCore::Paused;
         Self::_extend_persistent_ttl(env, &key);
         let mode = env
             .storage()
@@ -967,7 +982,7 @@ impl VirtualTokenContract {
     }
 
     fn _ensure_normal_mode(env: &Env) -> Result<(), ContractError> {
-        let key = DataKey::Paused;
+        let key = DataKeyCore::Paused;
         Self::_extend_persistent_ttl(env, &key);
         let mode = env
             .storage()
@@ -981,7 +996,7 @@ impl VirtualTokenContract {
     }
 
     fn _set_mode(env: &Env, new_mode: RuntimeMode) -> Result<(), ContractError> {
-        let key = DataKey::Paused;
+        let key = DataKeyCore::Paused;
         let old_mode = env
             .storage()
             .persistent()
@@ -1011,13 +1026,13 @@ impl VirtualTokenContract {
     }
 
     fn _schema_version(env: &Env) -> Option<u32> {
-        env.storage().persistent().get(&DataKey::SchemaVersion)
+        env.storage().persistent().get(&DataKeyCore::SchemaVersion)
     }
 
     fn _require_supported_schema(env: &Env) -> Result<u32, ContractError> {
-        Self::_extend_persistent_ttl(env, &DataKey::SchemaVersion);
-        if env.storage().persistent().has(&DataKey::Admin) {
-            Self::_extend_persistent_ttl(env, &DataKey::Admin);
+        Self::_extend_persistent_ttl(env, &DataKeyCore::SchemaVersion);
+        if env.storage().persistent().has(&DataKeyCore::Admin) {
+            Self::_extend_persistent_ttl(env, &DataKeyCore::Admin);
         }
         let v = Self::_schema_version(env).unwrap_or(1);
         if v == 0 || v > CURRENT_SCHEMA_VERSION {
@@ -1027,7 +1042,7 @@ impl VirtualTokenContract {
     }
 
     fn assert_no_active_round(env: &Env) -> Result<(), ContractError> {
-        if env.storage().persistent().has(&DataKey::ActiveRound) {
+        if env.storage().persistent().has(&DataKeyCore::ActiveRound) {
             return Err(ContractError::RoundAlreadyActive);
         }
 
@@ -1072,10 +1087,10 @@ impl VirtualTokenContract {
 
     /// Accumulates `amount` into a user's pending winnings, enforcing the cap if set (Issue #120).
     ///
-    /// Reads and writes `DataKey::PendingWinnings(user)` in one place, ensuring the cap
+    /// Reads and writes `DataKeyScoped::PendingWinnings(user)` in one place, ensuring the cap
     /// check and overflow protection are applied consistently across all payout paths.
     fn _accumulate_pending(env: &Env, user: Address, amount: i128) -> Result<(), ContractError> {
-        let key = DataKey::PendingWinnings(user);
+        let key = DataKeyScoped::PendingWinnings(user);
         let existing: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         let new_pending = Self::payout_add(existing, amount)?;
 
@@ -1083,7 +1098,7 @@ impl VirtualTokenContract {
         if let Some(cap) = env
             .storage()
             .persistent()
-            .get::<_, i128>(&DataKey::MaxPendingWinnings)
+            .get::<_, i128>(&DataKeyCore::MaxPendingWinnings)
         {
             if new_pending > cap {
                 return Err(ContractError::PendingWinningsCapExceeded);
@@ -1151,7 +1166,7 @@ impl VirtualTokenContract {
     /// Bumps TTL only when the key is present (avoids extra storage writes
     /// on the hot "fee disabled" path through every competitive settlement).
     fn _read_protocol_fee_bps(env: &Env) -> Option<u32> {
-        let key = DataKey::ProtocolFeeBps;
+        let key = DataKeyCore::ProtocolFeeBps;
         let v: Option<u32> = env.storage().persistent().get(&key);
         if v.is_some() {
             Self::_extend_persistent_ttl(env, &key);
@@ -1173,7 +1188,7 @@ impl VirtualTokenContract {
         if fee_amount <= 0 {
             return Ok(());
         }
-        let treasury_key = DataKey::ProtocolFeeTreasury;
+        let treasury_key = DataKeyCore::ProtocolFeeTreasury;
         let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
         let new_treasury = current
             .checked_add(fee_amount)
@@ -1293,7 +1308,7 @@ impl VirtualTokenContract {
         config::_apply_config_payload(env, kind, payload)
     }
 
-    fn _extend_persistent_ttl(env: &Env, key: &DataKey) {
+    fn _extend_persistent_ttl<T: soroban_sdk::IntoVal<soroban_sdk::Env, soroban_sdk::Val>>(env: &Env, key: &T) {
         if env.storage().persistent().has(key) {
             env.storage()
                 .persistent()
