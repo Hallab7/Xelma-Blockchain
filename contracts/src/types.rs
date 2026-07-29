@@ -12,6 +12,15 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Payout policy for Precision mode
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum PrecisionPayoutPolicy {
+    Equal = 0,         // Split payout pool equally among winners (default)
+    StakeWeighted = 1, // Split payout pool proportionally to winner stakes
+}
+
 /// Runtime mode for the contract lifecycle
 #[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -32,19 +41,19 @@ pub enum RuntimeMode {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
 pub enum PolicyAction {
-    /// Round-lifecycle and stake-taking actions: `create_round`, `place_bet`,
+    /// Round-lifecycle and stake-taking actions: `place_bet`,
     /// `place_precision_prediction`, `commit_prediction`, `reveal_prediction`,
-    /// `mint_initial`, `create_next_from_template`. Requires `Normal` mode.
+    /// `mint_initial`. Requires `Normal` mode.
     RoundMutation = 0,
     /// User claims of already-settled winnings: `claim_winnings`. Allowed in
     /// `Normal` and `ClaimsOnly`; blocked only by `FullyPaused`.
     Claim = 1,
     /// Admin lifecycle / config / oracle-management actions: pause/unpause,
     /// `set_runtime_mode`, schedule/apply/cancel config changes, oracle
-    /// rotation, heartbeat + deviation config, templates, migrations.
-    /// Allowed in `Normal` and `ClaimsOnly`; blocked only by `FullyPaused`
-    /// (an admin must always be able to reconfigure or recover the contract
-    /// unless it is fully paused).
+    /// rotation, heartbeat + deviation config, templates, migrations,
+    /// `create_round`, `create_next_from_template`. Allowed in `Normal` and
+    /// `ClaimsOnly`; blocked only by `FullyPaused` (an admin must always be
+    /// able to reconfigure or recover the contract unless it is fully paused).
     AdminConfig = 2,
     /// Oracle settlement of the active round: `resolve_round`, `cancel_round`.
     /// Allowed in `Normal` and `ClaimsOnly`; blocked only by `FullyPaused`.
@@ -66,34 +75,28 @@ pub enum RoundPhase {
     Resolvable = 3,
 }
 
-/// Storage keys for contract data
+/// Parameterless system, config, and metadata storage keys.
+///
+/// Split from `DataKey` to stay under the XDR union 50-case limit
+/// (`VecM<ScSpecUdtUnionCaseV0, 50>` in stellar-xdr).
 #[contracttype]
 #[derive(Clone)]
-pub enum DataKey {
-    Balance(Address),
+pub enum DataKeyCore {
     Admin,
     Oracle,
     SchemaVersion,
     ActiveRound,
-    Positions,
-    UpDownPositions,
-    PrecisionPositions,
-    PendingWinnings(Address),
-    UserStats(Address),
+    Positions,          // Legacy key — read-only migration compat
+    UpDownPositions,    // Legacy key — read-only migration compat
+    PrecisionPositions, // Legacy key — read-only migration compat
     Paused,
     BetWindowLedgers,
     RunWindowLedgers,
     CloseBufferLedgers,
     LastRoundId,
-    Position(u64, Address),
-    PrecisionPosition(u64, Address),
-    PrecisionCommitment(u64, Address),
-    RoundParticipants(u64),
     MaxStake,
     MaxUserRoundExposure,
     MaxPendingWinnings,
-    CancelledRound(u64),
-    ConsumedOracleNonce(u64, u64),
     MinParticipants,
     OracleHeartbeat,
     OracleStaleThreshold,
@@ -102,18 +105,21 @@ pub enum DataKey {
     OracleDeviationOverrideArmed,
     OracleMinConfidenceBps,
     OracleStrictMode,
-    ArchivedRound(u64),
-    RecentArchivedRoundIds,
-    UserRoundOutcome(u64, Address),
-    MigratedToV3,
-    PendingConfigChange(ConfigChangeKind),
     ProtocolFeeBps,
     ProtocolFeeTreasury,
-    LedgerMintCounter(u32),
     MintLimitConfig,
     OracleRotationProposal,
     ArchiveRetention,
     RoundTemplate,
+    RecentArchivedRoundIds,
+    MigratedToV3,
+    PrecisionPayoutPolicy,
+    /// Admin-configured per-epoch mint budget cap (anti-sybil faucet limit, Issue #275).
+    EpochMintBudget,
+    /// Admin-configured early cash-out penalty in basis points (Issue #271); unset = feature disabled.
+    EarlyCashoutBps,
+    /// Admin-configured, timelocked minimum bet / dust-protection floor (Issue #269).
+    /// `None` (key absent) disables the check entirely — any positive amount accepted.
     MinBet,
     Ext(DataKeyExt),
 }
@@ -127,6 +133,49 @@ pub enum DataKeyExt {
     SeasonUserStats(u32, Address),
     SeasonLeaderboardWins,
     SeasonLeaderboardStreak,
+}
+
+/// Parameterised and round-scoped storage keys.
+///
+/// Split from `DataKey` to stay under the XDR union 50-case limit.
+/// These variants carry per-user, per-round, or compound-key payloads.
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKeyScoped {
+    /// User financial balance
+    Balance(Address),
+    /// User pending winnings accumulator
+    PendingWinnings(Address),
+    /// User performance statistics
+    UserStats(Address),
+    /// Per-user UpDown position: (round_id, address) → UserPosition
+    Position(u64, Address),
+    /// Per-user Precision prediction: (round_id, address) → PrecisionPrediction
+    PrecisionPosition(u64, Address),
+    /// Per-user Precision commitment: (round_id, address) → PrecisionCommitment
+    PrecisionCommitment(u64, Address),
+    /// Ordered participant list for a round: round_id → Vec<Address>
+    RoundParticipants(u64),
+    /// Marker for a cancelled round: round_id → true
+    CancelledRound(u64),
+    /// Per-round consumed oracle nonce: (round_id, nonce) → true.
+    /// Used to reject duplicate oracle payload submissions for the same round.
+    ConsumedOracleNonce(u64, u64),
+    /// Per-user outcome record for a specific archived round (round_id, user).
+    /// Persisted at settlement for user history queries without event replay.
+    UserRoundOutcome(u64, Address),
+    /// Timelocked pending critical config change keyed by change kind.
+    PendingConfigChange(ConfigChangeKind),
+    /// Per-ledger mint counter: wraps the explicit ledger sequence number.
+    LedgerMintCounter(u32),
+    /// Compact post-settlement summary keyed by round id for historical queries.
+    ArchivedRound(u64),
+    /// Per-season, per-user win/loss/streak stats: (season_id, address) →
+    /// UserStats, scoped independently of the lifetime `UserStats` totals so
+    /// a season reset never touches lifetime history.
+    SeasonUserStats(u32, Address),
+    /// Frozen snapshot of a season's final rankings, written when the season
+    /// is reset. Seasons are never deleted — this is a permanent archive.
     SeasonArchive(u32),
 }
 
@@ -149,7 +198,11 @@ pub enum ConfigChangeKind {
     MintLimit = 9,
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
-    MinBet = 12,
+    PrecisionPayoutPolicy = 12,
+    /// Admin-configured per-epoch mint budget cap (Issue #275).
+    EpochMintBudget = 13,
+    /// Admin-configured minimum bet / dust protection floor (Issue #269).
+    MinBet = 14,
 }
 
 /// Payload for a scheduled critical config change.
@@ -168,6 +221,8 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
+    PrecisionPayoutPolicy(u32),
+    EpochMintBudget(i128),
     MinBet(Option<i128>),
 }
 
@@ -233,7 +288,7 @@ pub struct OraclePayload {
     /// The oracle service must generate a unique value per submission for a
     /// given round (e.g. a monotonic counter or random 64-bit value). The
     /// contract records each consumed nonce under
-    /// `DataKey::ConsumedOracleNonce(round_id, nonce)` and rejects any reuse,
+    /// `DataKeyScoped::ConsumedOracleNonce(round_id, nonce)` and rejects any reuse,
     /// making resolution idempotent against accidental duplicate submissions.
     pub nonce: u64,
     /// SHA-256 hash of the network passphrase this payload targets.
@@ -268,17 +323,10 @@ pub struct AttestationConfig {
 }
 
 /// Storage key for the attestation signing key config (Issue #263).
-///
-/// Uses a distinct variant name (not `Config`) so this never collides in
-/// storage with other single-variant key enums (`HbGateKey`,
-/// `DeviationConfigKey`) — Soroban's `#[contracttype]` XDR encoding is keyed
-/// by the enum's exported spec identity, but sharing a variant name across
-/// enums with identical shape has been observed to alias to the same
-/// persistent storage slot, causing type-mismatch aborts on read.
 #[contracttype]
 #[derive(Clone)]
 pub enum AttestationConfigKey {
-    AttestationConfig,
+    Config,
 }
 
 /// Oracle liveness record, updated by the oracle service on each heartbeat call.
@@ -334,11 +382,10 @@ pub struct DeviationConfig {
 }
 
 /// Storage key for the deviation guardrail config (Issue #266).
-/// Distinct variant name — see [`AttestationConfigKey`] doc comment for why.
 #[contracttype]
 #[derive(Clone)]
 pub enum DeviationConfigKey {
-    DeviationConfig,
+    Config,
 }
 
 /// A single recorded settlement price sample, used to build the TWAP

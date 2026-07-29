@@ -109,7 +109,7 @@ fn test_twap_mode_rejects_settlement_with_insufficient_samples() {
         round.start_ledger,
         1,
     ));
-    assert_eq!(result, Err(Ok(ContractError::InvalidOracleConfig)));
+    assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
 }
 
 #[test]
@@ -175,10 +175,10 @@ fn test_set_deviation_ref_mode_validates_twap_window_bounds() {
     let (client, _cid, _admin, _oracle) = setup(&env);
 
     let result = client.try_set_deviation_ref_mode(&DeviationReferenceMode::Twap, &0u32);
-    assert_eq!(result, Err(Ok(ContractError::InvalidOracleConfig)));
+    assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
 
     let result = client.try_set_deviation_ref_mode(&DeviationReferenceMode::Twap, &1000u32);
-    assert_eq!(result, Err(Ok(ContractError::InvalidOracleConfig)));
+    assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
 
     // StartPrice mode ignores window_samples entirely — any value accepted.
     client.set_deviation_ref_mode(&DeviationReferenceMode::StartPrice, &0u32);

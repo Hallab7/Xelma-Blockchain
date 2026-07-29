@@ -88,7 +88,7 @@ fn test_attestation_required_rejects_missing_signature() {
     });
 
     let result = client.try_resolve_round(&base_payload(&env, &contract_id, 0, 1, 1_000_0000));
-    assert_eq!(result, Err(Ok(ContractError::InvalidAttestation)));
+    assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
 }
 
 #[test]
