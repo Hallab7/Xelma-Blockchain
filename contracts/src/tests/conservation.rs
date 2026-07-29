@@ -36,6 +36,15 @@
 //! |10 | Precision | Mixed reveal (forfeit-to-pot)    | on  | no        | [`precision_mixed_reveal_forfeit_fee_enabled_exact_conservation`] |
 //! |11 | Precision | Cancel (mixed reveal/commit)     | on (must not apply) | n/a | [`precision_cancel_mixed_reveal_ignores_configured_fee`] |
 //! |12 | Precision | Fallback refund (mixed reveal/commit) | on (must not apply) | n/a | [`precision_fallback_refund_mixed_reveal_ignores_configured_fee`] |
+//! |13 | UpDown    | Early cash-out (10% penalty)        | n/a (penalty→treasury) | n/a | [`early_cashout_conservation_pins_exact_forfeit`] |
+//! |14 | UpDown    | Early cash-out disabled              | n/a                    | n/a | [`early_cashout_disabled_rejects_call`] |
+//! |15 | UpDown    | Early cash-out betting phase          | n/a                    | n/a | [`early_cashout_betting_phase_rejected`] |
+//! |16 | UpDown    | Early cash-out after end              | n/a                    | n/a | [`early_cashout_after_end_rejected`] |
+//! |17 | Precision | Early cash-out rejected               | n/a                    | n/a | [`early_cashout_precision_mode_rejected`] |
+//! |18 | UpDown    | Early cash-out + settlement fee       | on (settlement only)   | n/a | [`early_cashout_with_settlement_fee_conservation`] |
+//! |19 | UpDown    | Early cash-out zero forfeit           | n/a                    | n/a | [`early_cashout_zero_forfeit_full_refund`] |
+//! |20 | UpDown    | Early cash-out no position            | n/a                    | n/a | [`early_cashout_no_position_rejected`] |
+//! |21 | UpDown    | Early cash-out double call            | n/a                    | n/a | [`early_cashout_double_call_rejected`] |
 //!
 //! Rows 9–10 guard a real regression: `_resolve_precision_mode` used to drop
 //! every committed-but-unrevealed stroop on the floor when **nobody**
@@ -51,7 +60,7 @@
 //! wiring is required for CI inclusion.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
-use crate::types::{BetSide, DataKey, OraclePayload, RoundArchiveStatus};
+use crate::types::{BetSide, DataKeyCore, DataKeyScoped, OraclePayload, RoundArchiveStatus};
 use proptest::prelude::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
@@ -81,7 +90,7 @@ fn set_fee_bps_now(env: &Env, contract_id: &Address, bps: u32) {
     env.as_contract(contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::ProtocolFeeBps, &bps);
+            .set(&DataKeyCore::ProtocolFeeBps, &bps);
     });
 }
 
@@ -426,7 +435,10 @@ fn precision_all_unrevealed_refunds_ignores_configured_fee() {
     let bob_pay = client.get_pending_winnings(&bob);
     let treasury_delta = client.get_protocol_fee_treasury() - treasury_before;
 
-    assert_eq!(alice_pay, 40, "unrevealed stake must be refunded, not burned");
+    assert_eq!(
+        alice_pay, 40,
+        "unrevealed stake must be refunded, not burned"
+    );
     assert_eq!(bob_pay, 60, "unrevealed stake must be refunded, not burned");
     assert_eq!(treasury_delta, 0, "fee must not apply on a refund path");
     assert_eq!(alice_pay + bob_pay + treasury_delta, 100);
@@ -545,7 +557,305 @@ fn precision_fallback_refund_mixed_reveal_ignores_configured_fee() {
     );
 }
 
+// ─── Early cash-out conservation ────────────────────────────────────────────
+
+/// Helper: writes early cash-out bps directly into storage, bypassing the
+/// admin setter (mirrors `set_fee_bps_now` convention).
+fn set_ec_bps_now(env: &Env, contract_id: &Address, bps: u32) {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::EarlyCashoutBps, &bps);
+    });
+}
+
+/// Row 13 — Early cash-out with 10% penalty: user forfeits 10% to treasury,
+/// remaining participants benefit from the full pool conservation.
+/// Conservation identity: cashout + treasury_delta_at_cashout == stake.
+#[test]
+fn early_cashout_conservation_pins_exact_forfeit() {
+    let env = Env::default();
+    let (client, contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.mint_initial(&alice);
+    client.mint_initial(&bob);
+
+    client.create_round(&1_000u128, &None);
+    client.place_bet(&alice, &100, &BetSide::Up);
+    client.place_bet(&bob, &50, &BetSide::Down);
+    set_ec_bps_now(&env, &contract_id, 1_000); // 10% penalty
+
+    // Advance to Running phase (ledger 6 >= bet_end_ledger)
+    env.ledger().with_mut(|li| li.sequence_number = 7);
+
+    let alice_pending_before = client.get_pending_winnings(&alice);
+    let treasury_before = client.get_protocol_fee_treasury();
+    client.cash_out_early(&alice);
+
+    let alice_cashout = client.get_pending_winnings(&alice) - alice_pending_before;
+    let treasury_delta = client.get_protocol_fee_treasury() - treasury_before;
+
+    // 100 * 1000 / 10000 = 10 forfeited, 90 returned
+    assert_eq!(alice_cashout, 90);
+    assert_eq!(treasury_delta, 10);
+    assert_eq!(alice_cashout + treasury_delta, 100);
+
+    // Alice's position should be gone
+    assert!(client.get_user_position(&alice).is_none());
+
+    // Bob's position remains intact
+    let bobs_pos = client.get_user_position(&bob).unwrap();
+    assert_eq!(bobs_pos.amount, 50);
+
+    // Pool should be reduced by full stake
+    let round = client.get_active_round().unwrap();
+    assert_eq!(round.pool_up, 0, "pool_up should be 0 after alice cashed out");
+    assert_eq!(round.pool_down, 50);
+
+    // Resolve the round — Bob wins (price down). Bob's 50 in pool_down wins
+    // against 0 in pool_up (since alice cashed out).
+    // This is a one-sided pool now, so bob gets refunded, not winnings.
+    // Conservation check: bob's payout should equal his stake.
+    env.ledger().with_mut(|li| li.sequence_number = 12);
+    let bob_pending_before = client.get_pending_winnings(&bob);
+    let treasury_before_resolve = client.get_protocol_fee_treasury();
+    resolve_at(&env, &client, &contract_id, 900u128); // price down
+
+    let bob_pay = client.get_pending_winnings(&bob) - bob_pending_before;
+    let resolve_treasury_delta = client.get_protocol_fee_treasury() - treasury_before_resolve;
+
+    // One-sided pool (up=0) → both sides refunded. Bob gets his 50 back.
+    assert_eq!(bob_pay, 50);
+    assert_eq!(resolve_treasury_delta, 0);
+    assert_eq!(client.get_active_round(), None);
+}
+
+/// Row 14 — Early cash-out disabled: error when feature not enabled.
+#[test]
+fn early_cashout_disabled_rejects_call() {
+    let env = Env::default();
+    let (client, _contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    client.mint_initial(&alice);
+
+    client.create_round(&1_000u128, &None);
+    client.place_bet(&alice, &100, &BetSide::Up);
+
+    // Advance to Running phase
+    env.ledger().with_mut(|li| li.sequence_number = 7);
+
+    // Feature not enabled — should fail
+    let result = client.try_cash_out_early(&alice);
+    assert!(result.is_err());
+}
+
+/// Row 15 — Early cash-out during Betting phase: rejected.
+#[test]
+fn early_cashout_betting_phase_rejected() {
+    let env = Env::default();
+    let (client, contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    client.mint_initial(&alice);
+
+    client.create_round(&1_000u128, &None);
+    client.place_bet(&alice, &100, &BetSide::Up);
+    set_ec_bps_now(&env, &contract_id, 500);
+
+    // Still in Betting phase (ledger 0 < bet_end_ledger 6)
+    let result = client.try_cash_out_early(&alice);
+    assert!(result.is_err());
+}
+
+/// Row 16 — Early cash-out after round ended: rejected.
+#[test]
+fn early_cashout_after_end_rejected() {
+    let env = Env::default();
+    let (client, contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    client.mint_initial(&alice);
+
+    client.create_round(&1_000u128, &None);
+    client.place_bet(&alice, &100, &BetSide::Up);
+    set_ec_bps_now(&env, &contract_id, 500);
+
+    // Advance past end_ledger (12)
+    env.ledger().with_mut(|li| li.sequence_number = 13);
+
+    let result = client.try_cash_out_early(&alice);
+    assert!(result.is_err());
+}
+
+/// Row 17 — Early cash-out on Precision round: rejected.
+#[test]
+fn early_cashout_precision_mode_rejected() {
+    let env = Env::default();
+    let (client, contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    client.mint_initial(&alice);
+
+    client.create_round(&1_000u128, &Some(1)); // Precision mode
+    client.place_precision_prediction(&alice, &100, &1_005u128);
+    set_ec_bps_now(&env, &contract_id, 500);
+
+    // Advance to Running phase
+    env.ledger().with_mut(|li| li.sequence_number = 7);
+
+    let result = client.try_cash_out_early(&alice);
+    assert!(result.is_err());
+}
+
+/// Row 18 — Conservation with fee enabled: early cash-out forfeit goes to
+/// treasury, then normal settlement with protocol fee on the remaining pot
+/// still conserves exactly.
+#[test]
+fn early_cashout_with_settlement_fee_conservation() {
+    let env = Env::default();
+    let (client, contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let charlie = Address::generate(&env);
+    client.mint_initial(&alice);
+    client.mint_initial(&bob);
+    client.mint_initial(&charlie);
+
+    client.create_round(&1_000u128, &None);
+    client.place_bet(&alice, &200, &BetSide::Up);
+    client.place_bet(&bob, &100, &BetSide::Down);
+    client.place_bet(&charlie, &100, &BetSide::Down);
+
+    // Enable both early cash-out (5% penalty) and settlement fee (10%)
+    set_ec_bps_now(&env, &contract_id, 500);
+    set_fee_bps_now(&env, &contract_id, 1_000);
+
+    // Alice cashes out during Running phase
+    env.ledger().with_mut(|li| li.sequence_number = 7);
+    let alice_pending_before = client.get_pending_winnings(&alice);
+    let treasury_before = client.get_protocol_fee_treasury();
+    client.cash_out_early(&alice);
+
+    let alice_cashout = client.get_pending_winnings(&alice) - alice_pending_before;
+    let ec_treasury_delta = client.get_protocol_fee_treasury() - treasury_before;
+
+    // 5% penalty on 200 = 10 forfeit, 190 cashout
+    assert_eq!(alice_cashout, 190);
+    assert_eq!(ec_treasury_delta, 10);
+
+    // Remaining pool: up=0, down=200
+    let round = client.get_active_round().unwrap();
+    assert_eq!(round.pool_up, 0);
+    assert_eq!(round.pool_down, 200);
+
+    // Resolve — price up (one-sided: up=0, down=200). Refund for both.
+    env.ledger().with_mut(|li| li.sequence_number = 12);
+    let bob_pending_before = client.get_pending_winnings(&bob);
+    let charlie_pending_before = client.get_pending_winnings(&charlie);
+    let treasury_before_resolve = client.get_protocol_fee_treasury();
+    resolve_at(&env, &client, &contract_id, 1_100u128); // price up
+
+    let bob_pay = client.get_pending_winnings(&bob) - bob_pending_before;
+    let charlie_pay = client.get_pending_winnings(&charlie) - charlie_pending_before;
+    let resolve_treasury_delta =
+        client.get_protocol_fee_treasury() - treasury_before_resolve;
+
+    // One-sided pool → refund, no fee applied
+    assert_eq!(bob_pay, 100);
+    assert_eq!(charlie_pay, 100);
+    assert_eq!(resolve_treasury_delta, 0);
+
+    // Total conservation: cashout + refunds + treasury == original stakes
+    assert_eq!(
+        alice_cashout + bob_pay + charlie_pay + ec_treasury_delta + resolve_treasury_delta,
+        400,
+        "full round conservation including early cash-out penalty"
+    );
+}
+
+/// Row 19 — Full refund on zero forfeit (stake too small relative to bps).
+#[test]
+fn early_cashout_zero_forfeit_full_refund() {
+    let env = Env::default();
+    let (client, contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.mint_initial(&alice);
+    client.mint_initial(&bob);
+
+    client.create_round(&1_000u128, &None);
+    client.place_bet(&alice, &5, &BetSide::Up);
+    client.place_bet(&bob, &100, &BetSide::Down);
+    set_ec_bps_now(&env, &contract_id, 100); // 1% → 5 * 100 / 10000 = 0
+
+    env.ledger().with_mut(|li| li.sequence_number = 7);
+    let alice_pending_before = client.get_pending_winnings(&alice);
+    let treasury_before = client.get_protocol_fee_treasury();
+    client.cash_out_early(&alice);
+
+    let alice_cashout = client.get_pending_winnings(&alice) - alice_pending_before;
+    let treasury_delta = client.get_protocol_fee_treasury() - treasury_before;
+
+    // Forfeit = 5 * 100 / 10000 = 0 (floor), full refund
+    assert_eq!(alice_cashout, 5);
+    assert_eq!(treasury_delta, 0);
+    assert_eq!(alice_cashout + treasury_delta, 5);
+
+    // Pool should be reduced by full 5
+    let round = client.get_active_round().unwrap();
+    assert_eq!(round.pool_up, 0);
+    assert_eq!(round.pool_down, 100);
+}
+
+/// Row 20 — User with no position calling cash-out: PositionNotFound error.
+#[test]
+fn early_cashout_no_position_rejected() {
+    let env = Env::default();
+    let (client, contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.mint_initial(&alice);
+    client.mint_initial(&bob);
+
+    client.create_round(&1_000u128, &None);
+    client.place_bet(&alice, &100, &BetSide::Up);
+    set_ec_bps_now(&env, &contract_id, 500);
+
+    // Bob never placed a bet
+    env.ledger().with_mut(|li| li.sequence_number = 7);
+    let result = client.try_cash_out_early(&bob);
+    assert!(result.is_err());
+}
+
+/// Row 21 — Double cash-out: second call fails (position already removed).
+#[test]
+fn early_cashout_double_call_rejected() {
+    let env = Env::default();
+    let (client, contract_id, _admin, _oracle) = setup_contract(&env);
+
+    let alice = Address::generate(&env);
+    client.mint_initial(&alice);
+
+    client.create_round(&1_000u128, &None);
+    client.place_bet(&alice, &100, &BetSide::Up);
+    set_ec_bps_now(&env, &contract_id, 500);
+
+    env.ledger().with_mut(|li| li.sequence_number = 7);
+    client.cash_out_early(&alice);
+
+    // Second call should fail — position was removed
+    let result = client.try_cash_out_early(&alice);
+    assert!(result.is_err());
+}
+
 // ─── Small-random coverage on top of the fixed matrix ───────────────────────
+
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(20))]

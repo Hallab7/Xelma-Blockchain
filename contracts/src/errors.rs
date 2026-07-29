@@ -94,6 +94,8 @@ pub enum ContractError {
     MintLimitExceeded = 53,
     /// No pending oracle rotation proposal to accept or cancel
     NoPendingRotation = 54,
+    /// Oracle rotation delay has not elapsed yet (must wait MIN_ROTATION_DELAY_SECONDS)
+    RotationDelayNotElapsed = 55,
     /// Invalid archive retention limit
     InvalidArchiveRetention = 62,
     /// Commitment hash is malformed (e.g. the all-zero placeholder)
@@ -102,18 +104,24 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Epoch mint budget has been fully consumed
+    EpochBudgetExceeded = 66,
+    /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
+    OracleNotLive = 67,
+    /// Invalid precision payout policy
+    InvalidPayoutPolicy = 68,
     /// Multi-feed resolution: fewer observations survived outlier rejection
     /// than the configured quorum threshold.
-    InsufficientOracleQuorum = 66,
+    InsufficientOracleQuorum = 71,
     /// Multi-feed resolution: payload contains fewer observations than the
     /// configured minimum.
-    TooFewObservations = 67,
+    TooFewObservations = 72,
     /// Multi-feed resolution: outlier observations would dominate the result
     /// (too many rejected, cannot form quorum).
-    OracleOutlierRejected = 68,
+    OracleOutlierRejected = 73,
     /// Multi-feed payload contains duplicate source identifiers.
-    DuplicateOracleSource = 69,
+    DuplicateOracleSource = 74,
     /// Multi-feed payload has observations that are not sorted or sources
     /// are out of expected range.
-    InvalidObservationOrder = 70,
+    InvalidObservationOrder = 75
 }
