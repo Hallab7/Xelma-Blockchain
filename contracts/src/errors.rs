@@ -102,4 +102,6 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Close-buffer window has frozen — betting closed early but round not fully ended
+    BettingClosed = 66,
 }

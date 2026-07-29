@@ -494,7 +494,15 @@ export const ContractError = {
   /**
    * Reveal salt fails minimum entropy rules (all-zero or constant-byte)
    */
-  64: {message:"InvalidSalt"}
+  64: {message:"InvalidSalt"},
+  /**
+   * `create_next_from_template` called with no round template configured
+   */
+  65: {message:"NoRoundTemplate"},
+  /**
+   * Close-buffer window has frozen — betting closed early but round not fully ended
+   */
+  66: {message:"BettingClosed"}
 }
 
 /**

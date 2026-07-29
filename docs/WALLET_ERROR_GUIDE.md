@@ -55,6 +55,8 @@ This guide maps each smart‑contract error defined in `contracts/src/errors.rs`
 | `0x30` | 48 | InvalidPrecisionParticipantCap | Precision participant cap is out of range (must be 1–10000) | "Invalid precision participant cap."
 | `0x3f` | 63 | InvalidCommitment | Commitment hash is malformed (e.g. all-zero placeholder) | "Invalid commitment hash."
 | `0x40` | 64 | InvalidSalt | Reveal salt fails minimum entropy rules | "Invalid reveal salt."
+| `0x41` | 65 | NoRoundTemplate | `create_next_from_template` called with no round template configured | "No round template configured."
+| `0x42` | 66 | BettingClosed | Close-buffer window has frozen; betting is closed early but the round has not fully ended | "Betting is closed early. Round not yet ended."
 
 ## Integration Walkthroughs
 ### 1. Handling errors in a Freighter wallet
