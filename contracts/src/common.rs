@@ -60,20 +60,21 @@ pub fn _extend_persistent_ttl<T: IntoVal<Env, Val>>(env: &Env, key: &T) {
     }
 }
 
+extern crate alloc;
+use alloc::vec::Vec as StdVec;
+
 pub fn sort_addresses(addresses: Vec<Address>) -> Vec<Address> {
-    let mut sorted = Vec::new(addresses.env());
+    if addresses.len() <= 1 {
+        return addresses;
+    }
+    let mut native_vec: StdVec<Address> = StdVec::with_capacity(addresses.len() as usize);
     for addr in addresses.iter() {
-        let mut inserted = false;
-        for i in 0..sorted.len() {
-            if addr < sorted.get_unchecked(i) {
-                sorted.insert(i, addr.clone());
-                inserted = true;
-                break;
-            }
-        }
-        if !inserted {
-            sorted.push_back(addr);
-        }
+        native_vec.push(addr);
+    }
+    native_vec.sort_unstable();
+    let mut sorted = Vec::new(addresses.env());
+    for addr in native_vec {
+        sorted.push_back(addr);
     }
     sorted
 }
