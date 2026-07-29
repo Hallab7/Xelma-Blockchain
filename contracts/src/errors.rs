@@ -104,4 +104,6 @@ pub enum ContractError {
     NoRoundTemplate = 65,
     /// Oracle payload timestamp is outside the round-relative economic window
     OracleTimestampOutsideWindow = 66,
+    /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
+    OracleNotLive = 66,
 }

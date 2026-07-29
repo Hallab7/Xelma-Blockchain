@@ -4,7 +4,7 @@ use crate::common::{
     DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, OracleHeartbeatRecord, ProtocolHealthStatus, Round, RuntimeMode};
+use crate::types::{DataKey, HbGateConfig, HbGateKey, OracleHeartbeatRecord, ProtocolHealthStatus, Round, RuntimeMode};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 /// Initializes the contract with admin and oracle addresses (one-time only)
@@ -333,6 +333,119 @@ pub fn get_oracle_strict_mode(env: Env) -> bool {
     let key = DataKey::OracleStrictMode;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Enables or disables strict mode for oracle heartbeat health at settlement (admin only, Issue #264).
+///
+/// When enabled, `resolve_round` will reject settlement if the oracle heartbeat is not live,
+/// unless an admin override is armed or the heartbeat is within the configured grace period.
+pub fn set_hb_strict_mode(env: Env, enabled: bool) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    let mut config = _load_hb_config(&env);
+    config.strict_mode = enabled;
+    _save_hb_config(&env, &config);
+    Ok(())
+}
+
+/// Returns whether oracle heartbeat strict mode is enabled.
+pub fn get_hb_strict_mode(env: Env) -> bool {
+    _load_hb_config(&env).strict_mode
+}
+
+/// Arms a one-shot override to bypass the heartbeat health gate for the next settlement (admin only, Issue #264).
+///
+/// Consumed automatically when the next `resolve_round` call passes the heartbeat health gate
+/// while the override is armed. Does not persist across rounds.
+pub fn arm_hb_override(env: Env) -> Result<(), ContractError> {
+    let admin_key = DataKey::Admin;
+    _extend_persistent_ttl(&env, &admin_key);
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&admin_key)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("arm_hovr"), e);
+    })?;
+
+    let mut config = _load_hb_config(&env);
+    config.override_armed = true;
+    _save_hb_config(&env, &config);
+    Ok(())
+}
+
+/// Returns whether the oracle heartbeat override is currently armed.
+pub fn get_hb_override_armed(env: Env) -> bool {
+    _load_hb_config(&env).override_armed
+}
+
+/// Sets the grace period in seconds between heartbeat staleness and settlement block (admin only, Issue #264).
+///
+/// When the oracle heartbeat is stale (past `OracleStaleThreshold`), the contract allows an additional
+/// `grace_seconds` window before the heartbeat health gate blocks settlement in strict mode.
+/// Default is 0 (no grace period).
+pub fn set_hb_grace_seconds(env: Env, seconds: u64) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    let mut config = _load_hb_config(&env);
+    config.grace_seconds = seconds;
+    _save_hb_config(&env, &config);
+    Ok(())
+}
+
+/// Returns the configured heartbeat grace period in seconds (default 0).
+pub fn get_hb_grace_seconds(env: Env) -> u64 {
+    _load_hb_config(&env).grace_seconds
+}
+
+/// Consumes the heartbeat override if armed (called from settlement).
+/// Returns true if the override was consumed.
+pub fn _consume_hb_override(env: &Env) -> bool {
+    let config = _load_hb_config(env);
+    if config.override_armed {
+        let mut new_config = config.clone();
+        new_config.override_armed = false;
+        _save_hb_config(env, &new_config);
+        true
+    } else {
+        false
+    }
+}
+
+/// Loads the heartbeat gate config, returning defaults if unset.
+pub fn _load_hb_config(env: &Env) -> HbGateConfig {
+    let key = HbGateKey::Config;
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, crate::common::TTL_BUMP_THRESHOLD, crate::common::TTL_BUMP_AMOUNT);
+    }
+    env.storage().persistent().get(&key).unwrap_or(HbGateConfig {
+        strict_mode: false,
+        override_armed: false,
+        grace_seconds: 0,
+    })
+}
+
+/// Saves the heartbeat gate config to persistent storage.
+pub fn _save_hb_config(env: &Env, config: &HbGateConfig) {
+    let key = HbGateKey::Config;
+    env.storage().persistent().set(&key, config);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, crate::common::TTL_BUMP_THRESHOLD, crate::common::TTL_BUMP_AMOUNT);
 }
 
 /// Records an oracle heartbeat (oracle only).
