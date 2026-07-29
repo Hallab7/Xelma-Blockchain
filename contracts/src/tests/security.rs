@@ -4,7 +4,7 @@
 use super::config_helpers::{apply_oracle_max_deviation_bps, apply_oracle_stale_threshold};
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{DataKey, OraclePayload};
+use crate::types::{DataKey, HbGateConfig, HbGateKey, OraclePayload};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -1471,12 +1471,16 @@ fn test_heartbeat_gate_override_bypasses_block_and_emits_event() {
 
     // Override is one-shot — must be consumed
     env.as_contract(&contract_id, || {
-        let armed: bool = env
+        let config: HbGateConfig = env
             .storage()
             .persistent()
-            .get(&DataKey::HbOverride)
-            .unwrap_or(false);
-        assert!(!armed, "heartbeat override must be cleared after use");
+            .get(&HbGateKey::Config)
+            .unwrap_or(HbGateConfig {
+                strict_mode: false,
+                override_armed: false,
+                grace_seconds: 0,
+            });
+        assert!(!config.override_armed, "heartbeat override must be cleared after use");
     });
 }
 

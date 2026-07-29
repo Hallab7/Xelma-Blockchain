@@ -724,7 +724,7 @@ fn test_cancel_round_emits_event() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("cancel"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
     assert!(
         cancel_event.is_some(),

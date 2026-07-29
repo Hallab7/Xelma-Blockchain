@@ -394,19 +394,32 @@ Payload: (
 
 **Use Case**: Track predictions, show leaderboard before resolution, display user guesses.
 
-#### 4. Round Resolved
-Emitted when oracle resolves a round with final price.
+#### 4. Round Summary (Canonical Terminal Event)
+Emitted exactly once per terminal round transition — competitive resolution,
+admin cancellation, or min-participants fallback. Replaces the previously
+separate `("round", "resolved")`, `("round", "cancelled")`, and
+`("round", "fallback")` events.
 
 ```rust
-Topic: ("round", "resolved")
+Topic: ("round", "summary")
 Payload: (
-  round_id: u64,          // Round identifier
-  final_price: u128,      // Actual final price (4 decimals)
-  mode: u32               // 0 = Up/Down, 1 = Precision
+  version: u32,              // Schema version (0 for this layout)
+  round_id: u64,             // Round identifier
+  status: u32,               // 0 = Resolved, 1 = Cancelled, 2 = FallbackRefund
+  mode: u32,                 // 0 = Up/Down, 1 = Precision
+  price_start: u128,         // Starting price (4 decimals)
+  price_final: u128,         // Settlement price or 0 for cancel/fallback
+  pool_up: i128,             // Up-side pool at terminal time (stroops)
+  pool_down: i128,           // Down-side pool at terminal time (stroops)
+  participant_count: u32,    // Total unique participants
+  total_pot: i128,           // Total accumulated round pot (stroops)
+  fee_amount: i128,          // Protocol fees collected (stroops)
+  settled_at_ledger: u32,    // Ledger sequence when archived
+  confidence: Option<u32>    // Oracle confidence in bps (None for cancel/fallback)
 )
 ```
 
-**Use Case**: Trigger winner calculations, update leaderboards, notify users of results.
+**Use Case**: Single canonical event for all terminal round states. Indexers should listen for this event and ignore legacy topic names.
 
 #### 5. Participant Payout Outcome
 Emitted once per participant during round resolution.
@@ -463,32 +476,7 @@ Payload: (
 
 **Use Case**: Track new users, display welcome messages, analytics.
 
-#### 9. Round Cancelled
-Emitted when admin cancels an active round; all stakes are refunded.
-
-```rust
-Topic: ("round", "cancelled")
-Payload: (
-  round_id: u64,   // Cancelled round
-  reason: u32,     // Admin-supplied reason code
-  pool_up: i128,   // Up-side pool at cancellation (stroops)
-  pool_down: i128  // Down-side pool at cancellation (stroops)
-)
-```
-
-#### 10. Round Fallback (insufficient participants)
-Emitted when a round ends below the minimum-participants threshold; all stakes are refunded.
-
-```rust
-Topic: ("round", "fallback")
-Payload: (
-  round_id: u64,          // Round that triggered the fallback
-  participant_count: u32, // Actual participant count
-  min_required: u32       // Configured minimum that was not met
-)
-```
-
-#### 11. Oracle Heartbeat
+#### 9. Oracle Heartbeat
 Emitted when the oracle records an on-chain liveness heartbeat.
 
 ```rust

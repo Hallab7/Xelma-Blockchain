@@ -1290,12 +1290,12 @@ fn test_round_resolved_event_emitted() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
 
     assert!(
         resolved_event.is_some(),
-        "Round resolved event should be emitted"
+        "Round summary event should be emitted"
     );
 }
 
@@ -1960,11 +1960,11 @@ fn test_min_participants_fallback_event_emitted() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("fallback"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
     assert!(
         fallback_event.is_some(),
-        "Fallback event must be emitted when min-participants threshold is not met"
+        "Fallback summary event must be emitted when min-participants threshold is not met"
     );
 }
 

@@ -213,8 +213,7 @@ payload meanings must remain stable. Additive events are allowed when documented
 in `docs/EVENT_SCHEMA.md`.
 
 Canonical event classes:
-- Round lifecycle: `("round", "created")`, `("round", "resolved")`,
-  `("round", "cancelled")`, `("round", "fallback")`.
+- Round lifecycle: `("round", "created")`, `("round", "summary")`.
 - User actions: `("mint", "initial")`, `("bet", "placed")`,
   `("predict", "price")`, `("claim", "winnings")`.
 - Configuration/liveness: `("windows", "updated")`,

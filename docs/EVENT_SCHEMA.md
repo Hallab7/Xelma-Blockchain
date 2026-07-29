@@ -87,19 +87,33 @@ Emitted when a user submits a Precision mode price prediction.
 
 ---
 
-### `("round", "resolved")`
+### `("round", "summary")`
 
-Emitted when a round is settled competitively by the oracle.
+Emitted exactly once per terminal round transition — competitive resolution,
+admin cancellation, or min-participants fallback. Replaces the previously
+separate `("round", "resolved")`, `("round", "cancelled")`, and
+`("round", "fallback")` events.
 
-| Position | Field         | Type   | Description                                      |
-|----------|---------------|--------|--------------------------------------------------|
-| 0        | `round_id`    | `u64`  | Round that was resolved                          |
-| 1        | `final_price` | `u128` | Closing price reported by the oracle (4 dec.)    |
-| 2        | `mode`        | `u32`  | Round mode: `0` = UpDown, `1` = Precision        |
+This is the **canonical terminal round event**. Indexers should listen for
+`("round", "summary")` and ignore legacy topic names.
 
----
+The payload carries the full terminal state of the round:
 
-### `("payout", "outcome")`
+| Position | Field               | Type         | Description                                                                 |
+|----------|---------------------|--------------|-----------------------------------------------------------------------------|
+| 0        | `version`           | `u32`        | Schema version tag (`0` for this layout). Reserved for future field changes. |
+| 1        | `round_id`          | `u64`        | Monotonically increasing round identifier                                   |
+| 2        | `status`            | `u32`        | Terminal status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund       |
+| 3        | `mode`              | `u32`        | Round mode: `0` = UpDown, `1` = Precision                                   |
+| 4        | `price_start`       | `u128`       | Opening price at round start (4 decimal places)                             |
+| 5        | `price_final`       | `u128`       | Settlement price from oracle, or `0` for cancelled/fallback rounds           |
+| 6        | `pool_up`           | `i128`       | Total Up-side pool at terminal time (stroops)                                |
+| 7        | `pool_down`         | `i128`       | Total Down-side pool at terminal time (stroops)                              |
+| 8        | `participant_count` | `u32`        | Total unique user participants                                               |
+| 9        | `total_pot`         | `i128`       | Total accumulated round pot (stroops)                                        |
+| 10       | `fee_amount`        | `i128`       | Protocol fees collected (stroops), `0` for non-competitive paths             |
+| 11       | `settled_at_ledger` | `u32`        | Ledger sequence number when the round was archived                           |
+| 12       | `confidence`        | `Option<u32>` | Oracle confidence in basis points (`None` for cancel / fallback)            |
 
 Emitted once per participant during round resolution after that participant's settlement
 outcome is known. Indexers can use these events to reconstruct the complete participant-level
@@ -127,7 +141,7 @@ at the top of this file).*
 
 Emitted per losing participant whenever a round settles competitively
 (Issue #168).  Complements the implicit "winner" signal from pending-winnings
-accumulation and the explicit `("round", "fallback")` refund event so that
+accumulation so that
 analytics, user notifications, and indexers can detect losses without
 inferring them from the absence of payout events.
 
@@ -160,50 +174,6 @@ commitments forfeit to the pot and **do** emit this loss event
 | 5        | `predicted_price`| `u128`    | Precision guess (4 decimal places). `0` for UpDown mode or unrevealed   |
 
 ---
-
-### `("round", "cancelled")`
-
-Emitted when an admin explicitly cancels an active round. All stakes are refunded.
-
-| Position | Field       | Type   | Description                                             |
-|----------|-------------|--------|---------------------------------------------------------|
-| 0        | `round_id`  | `u64`  | Round that was cancelled                                |
-| 1        | `reason`    | `u32`  | Admin-supplied reason code (application-defined)        |
-| 2        | `pool_up`   | `i128` | Total Up-side pool at cancellation time (in stroops)    |
-| 3        | `pool_down` | `i128` | Total Down-side pool at cancellation time (in stroops)  |
-
----
-
-### `("round", "fallback")`
-
-Emitted when a round ends below the configured minimum-participants threshold.
-All stakes are refunded; no competitive settlement occurs.
-
-| Position | Field               | Type  | Description                                         |
-|----------|---------------------|-------|-----------------------------------------------------|
-| 0        | `round_id`          | `u64` | Round that triggered the fallback                   |
-| 1        | `participant_count` | `u32` | Actual number of participants at resolution time    |
-| 2        | `min_required`      | `u32` | Configured minimum that was not met                 |
-
----
-
-### `("round", "summary")`
-
-Emitted when a round is resolved, cancelled, or refunded. Contains compact settlement data.
-
-| Position | Field               | Type   | Description                                                           |
-|----------|---------------------|--------|-----------------------------------------------------------------------|
-| 0        | `round_id`          | `u64`  | Round identifier                                                      |
-| 1        | `mode`              | `u32`  | Round mode: `0` = UpDown, `1` = Precision                             |
-| 2        | `price_start`       | `u128` | Opening price at round start (4 dec.)                                 |
-| 3        | `price_final`       | `u128` | Settlement price (or `0` for administrative cancellation) (4 dec.)    |
-| 4        | `participant_count` | `u32`  | Total unique user participants in the round                           |
-| 5        | `total_pot`         | `i128` | Total accumulated round pot (in stroops)                              |
-| 6        | `fee_amount`        | `i128` | Total protocol fees collected from the round pot (in stroops)         |
-| 7        | `status`            | `u32`  | Round status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund   |
-
----
-
 
 ### `("claim", "winnings")`
 
@@ -345,7 +315,7 @@ use soroban_sdk::{symbol_short, testutils::{Events, TryIntoVal}, Env};
 let events = env.events().all();
 let resolved = events.iter().find(|(_, topics, _)| {
     topics.get(0).and_then(|t| t.try_into_val(&env).ok()) == Some(symbol_short!("round"))
-        && topics.get(1).and_then(|t| t.try_into_val(&env).ok()) == Some(symbol_short!("resolved"))
+        && topics.get(1).and_then(|t| t.try_into_val(&env).ok()) == Some(symbol_short!("summary"))
 });
 ```
 
