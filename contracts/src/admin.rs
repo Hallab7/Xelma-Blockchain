@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 use crate::common::{
     _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, CURRENT_SCHEMA_VERSION,
-    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
+    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_HEARTBEAT_GRACE_SECONDS,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
+    MAX_ORACLE_HEARTBEAT_GRACE_SECONDS, MIN_ORACLE_HEARTBEAT_GRACE_SECONDS,
 };
 use crate::errors::ContractError;
 use crate::types::{DataKey, OracleHeartbeatRecord, ProtocolHealthStatus, Round, RuntimeMode};
@@ -506,6 +508,240 @@ pub fn get_oracle_stale_threshold(env: Env) -> u64 {
         .get(&key)
         .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD)
 }
+
+// ─── Heartbeat health enforcement (Issue #264) ───────────────────────────────
+
+/// Arms a one-shot override to bypass heartbeat-health checks for the next settlement (admin only).
+///
+/// Emits `(oracle, hb_arm_ovr)` so auditors/indexers can track when the
+/// safety rail was intentionally disengaged.
+pub fn arm_oracle_heartbeat_override(env: Env) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin_key = DataKey::Admin;
+    _extend_persistent_ttl(&env, &admin_key);
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&admin_key)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("arm_hb"), e);
+    })?;
+
+    let override_key = DataKey::OracleHeartbeatOverrideArmed;
+    env.storage().persistent().set(&override_key, &true);
+    _extend_persistent_ttl(&env, &override_key);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("oracle"), symbol_short!("hb_arm_ovr")),
+        (admin,),
+    );
+
+    Ok(())
+}
+
+/// Sets the heartbeat grace period in seconds (admin only).
+///
+/// The grace period is an additional window beyond `OracleStaleThreshold`
+/// during which settlement is still permitted when heartbeat strict mode
+/// is disabled. Range: 0–86400 s (24 hours).
+pub fn set_oracle_heartbeat_grace(env: Env, seconds: u64) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+
+    if !(MIN_ORACLE_HEARTBEAT_GRACE_SECONDS..=MAX_ORACLE_HEARTBEAT_GRACE_SECONDS)
+        .contains(&seconds)
+    {
+        return Err(ContractError::InvalidDuration);
+    }
+
+    let key = DataKey::OracleHeartbeatGraceSeconds;
+    env.storage().persistent().set(&key, &seconds);
+    _extend_persistent_ttl(&env, &key);
+    Ok(())
+}
+
+/// Enables or disables heartbeat strict mode (admin only).
+///
+/// When enabled, settlement is blocked unless the oracle heartbeat is
+/// active (status 0) and fresh (within the stale threshold). No grace
+/// period and no degraded-status allowance.
+pub fn set_oracle_heartbeat_strict_mode(env: Env, enabled: bool) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+
+    let key = DataKey::OracleHeartbeatStrictMode;
+    env.storage().persistent().set(&key, &enabled);
+    _extend_persistent_ttl(&env, &key);
+    Ok(())
+}
+
+/// Returns the configured heartbeat grace period, or the default (600 s).
+pub fn get_oracle_heartbeat_grace(env: Env) -> u64 {
+    let key = DataKey::OracleHeartbeatGraceSeconds;
+    _extend_persistent_ttl(&env, &key);
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DEFAULT_ORACLE_HEARTBEAT_GRACE_SECONDS)
+}
+
+/// Returns whether heartbeat strict mode is enabled.
+pub fn get_oracle_heartbeat_strict_mode(env: Env) -> bool {
+    let key = DataKey::OracleHeartbeatStrictMode;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Returns true if the heartbeat override is armed.
+pub fn is_oracle_heartbeat_override_armed(env: Env) -> bool {
+    let key = DataKey::OracleHeartbeatOverrideArmed;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Enforces heartbeat health policy before settlement can proceed.
+///
+/// # Allow/Deny Matrix
+///
+/// | Heartbeat        | Strict | In Grace | Override | Result |
+/// |------------------|--------|----------|----------|--------|
+/// | Active+Fresh     | any    | any      | any      | ALLOW  |
+/// | Degraded+Fresh   | no     | any      | any      | ALLOW  |
+/// | Degraded+Fresh   | yes    | any      | not      | DENY   |
+/// | Stale (any)      | no     | yes      | not      | ALLOW  |
+/// | Stale (any)      | no     | no       | not      | DENY   |
+/// | Stale (any)      | yes    | any      | not      | DENY   |
+/// | Offline (2)      | any    | any      | not      | DENY   |
+/// | No heartbeat     | n/a    | n/a      | not      | DENY   |
+/// | ANY              | any    | any      | armed    | ALLOW* |
+///
+/// \* Override is consumed (one-shot), emitting `(oracle, hb_override)`.
+pub fn _enforce_heartbeat_health(env: &Env, oracle: &Address) -> Result<(), ContractError> {
+    // ── 1. Check one-shot override first ──────────────────────────────────
+    let override_key = DataKey::OracleHeartbeatOverrideArmed;
+    _extend_persistent_ttl(env, &override_key);
+    let override_armed: bool = env
+        .storage()
+        .persistent()
+        .get(&override_key)
+        .unwrap_or(false);
+
+    if override_armed {
+        env.storage().persistent().remove(&override_key);
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("oracle"), symbol_short!("hb_override")),
+            (oracle.clone(),),
+        );
+        return Ok(());
+    }
+
+    // ── 2. Check heartbeat exists ────────────────────────────────────────
+    let heartbeat_key = DataKey::OracleHeartbeat;
+    _extend_persistent_ttl(env, &heartbeat_key);
+    let record: OracleHeartbeatRecord = match env.storage().persistent().get(&heartbeat_key) {
+        Some(r) => r,
+        None => {
+            _emit_action_rejected(
+                env,
+                oracle,
+                symbol_short!("resolve"),
+                ContractError::OracleHeartbeatUnhealthy,
+            );
+            return Err(ContractError::OracleHeartbeatUnhealthy);
+        }
+    };
+
+    // ── 3. Check strict mode ─────────────────────────────────────────────
+    let strict_key = DataKey::OracleHeartbeatStrictMode;
+    _extend_persistent_ttl(env, &strict_key);
+    let strict_mode: bool = env
+        .storage()
+        .persistent()
+        .get(&strict_key)
+        .unwrap_or(false);
+
+    // ── 4. Determine freshness against stale threshold ───────────────────
+    let threshold_key = DataKey::OracleStaleThreshold;
+    _extend_persistent_ttl(env, &threshold_key);
+    let stale_threshold: u64 = env
+        .storage()
+        .persistent()
+        .get(&threshold_key)
+        .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD);
+
+    let current_time = env.ledger().timestamp();
+    let is_fresh = current_time <= record.timestamp.saturating_add(stale_threshold);
+
+    // ── 5. Status-based decisions ────────────────────────────────────────
+    match record.status {
+        // Active (0) — allow if fresh
+        0 => {
+            if is_fresh {
+                return Ok(());
+            }
+        }
+        // Degraded (1) — allow if fresh AND non-strict
+        1 => {
+            if is_fresh && !strict_mode {
+                return Ok(());
+            }
+        }
+        // Offline (2) — always deny (no grace for explicit offline)
+        2 => {
+            // Fall through to denial
+        }
+        _ => {
+            // Unknown status — deny, no grace period
+            // (update_oracle_heartbeat prevents status > 2, but defensive)
+        }
+    }
+
+    // ── 6. Grace period (only for known stale statuses, non-strict) ──────
+    if (record.status == 0 || record.status == 1) && !strict_mode {
+        let grace_key = DataKey::OracleHeartbeatGraceSeconds;
+        _extend_persistent_ttl(env, &grace_key);
+        let grace: u64 = env
+            .storage()
+            .persistent()
+            .get(&grace_key)
+            .unwrap_or(DEFAULT_ORACLE_HEARTBEAT_GRACE_SECONDS);
+
+        let within_grace = current_time
+            <= record
+                .timestamp
+                .saturating_add(stale_threshold)
+                .saturating_add(grace);
+
+        if within_grace {
+            return Ok(());
+        }
+    }
+
+    // ── 7. Deny settlement ───────────────────────────────────────────────
+    _emit_action_rejected(
+        env,
+        oracle,
+        symbol_short!("resolve"),
+        ContractError::OracleHeartbeatUnhealthy,
+    );
+    Err(ContractError::OracleHeartbeatUnhealthy)
+}
+
+// ─── Internal mode helpers ──────────────────────────────────────────────────
 
 pub fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
     let key = DataKey::Paused;

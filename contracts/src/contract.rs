@@ -304,6 +304,41 @@ impl VirtualTokenContract {
         admin::get_oracle_stale_threshold(env)
     }
 
+    // ─── Heartbeat health enforcement (Issue #264) ───────────────────────────
+
+    /// Arms a one-shot override to bypass heartbeat-health checks for the next settlement (admin only).
+    pub fn arm_oracle_heartbeat_override(env: Env) -> Result<(), ContractError> {
+        admin::arm_oracle_heartbeat_override(env)
+    }
+
+    /// Sets the heartbeat grace period in seconds (admin only).
+    pub fn set_oracle_heartbeat_grace(env: Env, seconds: u64) -> Result<(), ContractError> {
+        admin::set_oracle_heartbeat_grace(env, seconds)
+    }
+
+    /// Enables or disables heartbeat strict mode (admin only).
+    pub fn set_oracle_heartbeat_strict_mode(
+        env: Env,
+        enabled: bool,
+    ) -> Result<(), ContractError> {
+        admin::set_oracle_heartbeat_strict_mode(env, enabled)
+    }
+
+    /// Returns the configured heartbeat grace period, or the default (600 s).
+    pub fn get_oracle_heartbeat_grace(env: Env) -> u64 {
+        admin::get_oracle_heartbeat_grace(env)
+    }
+
+    /// Returns whether heartbeat strict mode is enabled.
+    pub fn get_oracle_heartbeat_strict_mode(env: Env) -> bool {
+        admin::get_oracle_heartbeat_strict_mode(env)
+    }
+
+    /// Returns true if the heartbeat override is armed.
+    pub fn is_oracle_heartbeat_override_armed(env: Env) -> bool {
+        admin::is_oracle_heartbeat_override_armed(env)
+    }
+
     // ─── Oracle rotation (two-step with expiry) ─────────────────────────────
 
     /// Proposes a new oracle address with an expiry window (admin only).

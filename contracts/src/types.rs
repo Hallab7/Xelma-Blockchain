@@ -164,6 +164,16 @@ pub enum DataKey {
     /// Frozen snapshot of a season's final rankings, written when the season
     /// is reset. Seasons are never deleted — this is a permanent archive.
     SeasonArchive(u32),
+    /// Grace period in seconds beyond `OracleStaleThreshold` during which
+    /// the oracle may still resolve rounds with a stale heartbeat.
+    /// Unset = `DEFAULT_ORACLE_HEARTBEAT_GRACE_SECONDS` (600 s).
+    OracleHeartbeatGraceSeconds,
+    /// One-shot admin override allowing the next settlement to bypass
+    /// heartbeat-health checks. Automatically cleared after use.
+    OracleHeartbeatOverrideArmed,
+    /// When true, settlement is blocked unless the oracle heartbeat is
+    /// active (status 0) and fresh — no grace period, no degraded allowance.
+    OracleHeartbeatStrictMode,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.

@@ -102,4 +102,7 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Oracle heartbeat is unhealthy (stale, offline, or unknown) and no
+    /// override is armed — settlement blocked.
+    OracleHeartbeatUnhealthy = 66,
 }

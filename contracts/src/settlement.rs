@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-use crate::admin::{_ensure_not_paused, _require_supported_schema};
+use crate::admin::{
+    _enforce_heartbeat_health, _ensure_not_paused, _require_supported_schema,
+};
 use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
     payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
@@ -241,6 +243,11 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
     _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &oracle, symbol_short!("resolve"), e);
     })?;
+
+    // Heartbeat health enforcement (Issue #264) — must come before any
+    // state mutation (nonce consumption) so a stale oracle cannot race
+    // the admin override.
+    _enforce_heartbeat_health(&env, &oracle)?;
 
     let round: Round = env
         .storage()
