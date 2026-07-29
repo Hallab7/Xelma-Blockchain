@@ -676,6 +676,14 @@ impl VirtualTokenContract {
         config::get_mint_limit(env)
     }
 
+    pub fn set_epoch_mint_budget(env: Env, budget: i128) -> Result<(), ContractError> {
+        config::set_epoch_mint_budget(env, budget)
+    }
+
+    pub fn get_epoch_mint_budget(env: Env) -> i128 {
+        config::get_epoch_mint_budget(env)
+    }
+
     pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> {
         config::set_archive_retention(env, limit)
     }

@@ -104,6 +104,8 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Epoch mint budget has been fully consumed
+    EpochBudgetExceeded = 66,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
     OracleNotLive = 66,
     /// Invalid precision payout policy

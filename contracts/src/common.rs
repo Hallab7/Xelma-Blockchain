@@ -46,6 +46,7 @@ pub const DEFAULT_ARCHIVE_RETENTION: u32 = 128;
 pub const MIN_ARCHIVE_RETENTION: u32 = 1;
 pub const MAX_ARCHIVE_RETENTION: u32 = 10_000;
 pub const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
+pub const EPOCH_LEDGERS: u32 = 1440; // ~2 hours at 5s/ledger
 
 /// Bumps/extends the TTL of the given persistent storage key if its remaining TTL
 /// is less than the threshold. Enforces rent policy (Issue #142).
@@ -156,4 +157,8 @@ pub fn _set_balance(env: &Env, user: Address, amount: i128) {
     let key = DataKeyScoped::Balance(user);
     env.storage().persistent().set(&key, &amount);
     _extend_persistent_ttl(env, &key);
+}
+
+pub fn _current_epoch_id(env: &Env) -> u32 {
+    env.ledger().sequence() / EPOCH_LEDGERS
 }
