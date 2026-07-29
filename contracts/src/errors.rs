@@ -102,4 +102,6 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
+    OracleNotLive = 66,
 }
