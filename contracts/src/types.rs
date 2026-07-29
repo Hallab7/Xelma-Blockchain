@@ -291,6 +291,22 @@ pub struct OracleHeartbeatRecord {
     pub status: u32,
 }
 
+/// Heartbeat health gate configuration (Issue #264).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct HbGateConfig {
+    pub strict_mode: bool,
+    pub override_armed: bool,
+    pub grace_seconds: u64,
+}
+
+/// Storage key for heartbeat gate config (separate from DataKey to stay within variant limits, Issue #264).
+#[contracttype]
+#[derive(Clone)]
+pub enum HbGateKey {
+    Config,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Round {
