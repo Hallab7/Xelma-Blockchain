@@ -171,7 +171,7 @@ fn bench_resolve_cleans_indexed_keys() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     env.as_contract(&contract_id, || {
         // Participant list removed
@@ -237,7 +237,7 @@ fn bench_large_round_resolves_correctly() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Each UP winner should have pending = bet + (bet/winning_pool) * losing_pool
     //   = 10_0000000 + (10_0000000 / (30 * 10_0000000)) * (30 * 10_0000000)
@@ -330,7 +330,7 @@ fn bench_precision_mode_indexed_keys() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Bob wins entire pot (3 * 10_0000000)
     assert_eq!(client.get_pending_winnings(&bob), 30_0000000);

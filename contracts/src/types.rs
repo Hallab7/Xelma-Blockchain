@@ -22,6 +22,35 @@ pub enum RuntimeMode {
     FullyPaused = 2,
 }
 
+/// Policy action class consumed by the central [`PolicyGate`](crate::admin::_policy_gate).
+///
+/// Every mutating entrypoint declares which class of action it performs, and
+/// the gate enforces the single mode × action matrix documented on
+/// `_policy_gate` — instead of each entrypoint hand-rolling its own mode
+/// check that can drift from the others as new methods are added (Issue #261).
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum PolicyAction {
+    /// Round-lifecycle and stake-taking actions: `create_round`, `place_bet`,
+    /// `place_precision_prediction`, `commit_prediction`, `reveal_prediction`,
+    /// `mint_initial`, `create_next_from_template`. Requires `Normal` mode.
+    RoundMutation = 0,
+    /// User claims of already-settled winnings: `claim_winnings`. Allowed in
+    /// `Normal` and `ClaimsOnly`; blocked only by `FullyPaused`.
+    Claim = 1,
+    /// Admin lifecycle / config / oracle-management actions: pause/unpause,
+    /// `set_runtime_mode`, schedule/apply/cancel config changes, oracle
+    /// rotation, heartbeat + deviation config, templates, migrations.
+    /// Allowed in `Normal` and `ClaimsOnly`; blocked only by `FullyPaused`
+    /// (an admin must always be able to reconfigure or recover the contract
+    /// unless it is fully paused).
+    AdminConfig = 2,
+    /// Oracle settlement of the active round: `resolve_round`, `cancel_round`.
+    /// Allowed in `Normal` and `ClaimsOnly`; blocked only by `FullyPaused`.
+    Settlement = 3,
+}
+
 /// Lifecycle phase of an active round, derived from ledger windows.
 ///
 /// Semantics (given `start_ledger`, `bet_end_ledger`, `end_ledger`):
@@ -85,6 +114,7 @@ pub enum DataKey {
     OracleRotationProposal,
     ArchiveRetention,
     RoundTemplate,
+    MinBet,
     Ext(DataKeyExt),
 }
 
@@ -119,6 +149,7 @@ pub enum ConfigChangeKind {
     MintLimit = 9,
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
+    MinBet = 12,
 }
 
 /// Payload for a scheduled critical config change.
@@ -137,6 +168,7 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
+    MinBet(Option<i128>),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.
@@ -214,6 +246,39 @@ pub struct OraclePayload {
     /// When `None`, the payload is treated as a legacy submission.
     /// When strict mode is enabled, `None` is rejected.
     pub confidence: Option<u32>,
+    /// Optional detached ed25519 signature over the domain-separated
+    /// attestation message built from every other field above (Issue #263).
+    /// Required and verified whenever an `AttestationKey` is configured;
+    /// ignored (may be `None`) otherwise, preserving pre-#263 behaviour where
+    /// `oracle.require_auth()` account authentication is the only check.
+    pub attestation: Option<BytesN<64>>,
+}
+
+/// ed25519 public key used to verify oracle attestation signatures, and
+/// whether attestation is currently required (Issue #263).
+///
+/// Grouped into one struct (mirroring `HbGateConfig`) to stay within the
+/// `DataKey` variant budget. When `key` is `None`, `resolve_round` performs
+/// no signature verification — only `oracle.require_auth()`, exactly as
+/// before this feature existed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttestationConfig {
+    pub key: Option<BytesN<32>>,
+}
+
+/// Storage key for the attestation signing key config (Issue #263).
+///
+/// Uses a distinct variant name (not `Config`) so this never collides in
+/// storage with other single-variant key enums (`HbGateKey`,
+/// `DeviationConfigKey`) — Soroban's `#[contracttype]` XDR encoding is keyed
+/// by the enum's exported spec identity, but sharing a variant name across
+/// enums with identical shape has been observed to alias to the same
+/// persistent storage slot, causing type-mismatch aborts on read.
+#[contracttype]
+#[derive(Clone)]
+pub enum AttestationConfigKey {
+    AttestationConfig,
 }
 
 /// Oracle liveness record, updated by the oracle service on each heartbeat call.
@@ -239,6 +304,57 @@ pub struct HbGateConfig {
 #[derive(Clone)]
 pub enum HbGateKey {
     Config,
+}
+
+/// Which reference price oracle deviation is measured against (Issue #266).
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum DeviationReferenceMode {
+    /// Deviation vs the round's fixed `price_start` (legacy behaviour, default).
+    StartPrice = 0,
+    /// Deviation vs a simple average of the last `window_samples` settled
+    /// oracle prices (a coarse TWAP proxy — one sample is recorded per
+    /// settled round, so "time-weighted" here means "weighted equally over
+    /// the last N settlements" rather than a continuous-time integral).
+    Twap = 1,
+}
+
+/// Oracle deviation guardrail configuration (Issue #266).
+///
+/// Grouped into a single struct (mirroring the `HbGateConfig` pattern) to
+/// stay within the `DataKey` variant budget instead of adding one key per field.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviationConfig {
+    pub reference_mode: DeviationReferenceMode,
+    /// Number of trailing settlement samples averaged for `Twap` mode.
+    /// Ignored in `StartPrice` mode. Must be >= `MIN_TWAP_WINDOW_SAMPLES`.
+    pub window_samples: u32,
+}
+
+/// Storage key for the deviation guardrail config (Issue #266).
+/// Distinct variant name — see [`AttestationConfigKey`] doc comment for why.
+#[contracttype]
+#[derive(Clone)]
+pub enum DeviationConfigKey {
+    DeviationConfig,
+}
+
+/// A single recorded settlement price sample, used to build the TWAP
+/// reference in `Twap` mode (Issue #266).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PriceSample {
+    pub price: u128,
+    pub timestamp: u64,
+}
+
+/// Storage key for the bounded ring of recent price samples (Issue #266).
+#[contracttype]
+#[derive(Clone)]
+pub enum TwapSamplesKey {
+    Samples,
 }
 
 #[contracttype]

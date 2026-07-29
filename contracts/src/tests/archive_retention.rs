@@ -45,7 +45,7 @@ fn create_and_resolve_round(
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 }
 
 #[test]

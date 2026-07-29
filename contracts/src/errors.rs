@@ -104,4 +104,14 @@ pub enum ContractError {
     NoRoundTemplate = 65,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
     OracleNotLive = 66,
+    /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
+    BelowMinBet = 67,
+    /// Action is not permitted under the current policy gate mode (Issue #261)
+    PolicyGateBlocked = 68,
+    /// Oracle deviation/attestation configuration is invalid: bad reference mode,
+    /// insufficient TWAP samples, or no attestation key configured (Issue #266, #263)
+    InvalidOracleConfig = 69,
+    /// Oracle attestation failed verification: bad signature or domain mismatch
+    /// (network/contract/round binding, Issue #263)
+    InvalidAttestation = 70,
 }

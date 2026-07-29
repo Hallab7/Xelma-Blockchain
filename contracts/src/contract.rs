@@ -8,11 +8,11 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
-    PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
-    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
-    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
-    UserStats,
+    DeviationReferenceMode, LeaderboardEntry, OracleHeartbeatRecord, OraclePayload,
+    OracleRotationProposal, PolicyAction, PendingConfigChange, PrecisionPrediction, PriceSample,
+    ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundPhase, RoundPoolStats,
+    RoundStatus, RoundTemplate, RuntimeMode, SeasonArchive, SeasonLeaderboardEntry,
+    SimulationResult, UserPosition, UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -140,6 +140,13 @@ impl VirtualTokenContract {
         admin::set_runtime_mode(env, mode)
     }
 
+    /// Returns whether `action` is currently permitted under the PolicyGate
+    /// for the contract's runtime mode (Issue #261). Read-only; does not
+    /// mutate state. See [`admin::_policy_gate`] for the full matrix.
+    pub fn is_action_allowed(env: Env, action: PolicyAction) -> bool {
+        admin::_policy_gate(&env, action).is_ok()
+    }
+
     pub fn get_admin(env: Env) -> Option<Address> {
         admin::get_admin(env)
     }
@@ -156,6 +163,43 @@ impl VirtualTokenContract {
     /// Returns the configured oracle max deviation bps, if set.
     pub fn get_oracle_max_deviation_bps(env: Env) -> Option<u32> {
         admin::get_oracle_max_deviation_bps(env)
+    }
+
+    /// Sets the oracle deviation reference mode — `StartPrice` (default) or
+    /// `Twap` — and, for `Twap`, the trailing sample window size (admin only, Issue #266).
+    pub fn set_deviation_ref_mode(
+        env: Env,
+        mode: DeviationReferenceMode,
+        window_samples: u32,
+    ) -> Result<(), ContractError> {
+        admin::set_deviation_ref_mode(env, mode, window_samples)
+    }
+
+    /// Returns the configured deviation reference mode (default `StartPrice`, Issue #266).
+    pub fn get_deviation_ref_mode(env: Env) -> DeviationReferenceMode {
+        admin::get_deviation_ref_mode(env)
+    }
+
+    /// Returns the configured TWAP window size in samples (Issue #266).
+    pub fn get_deviation_window_samples(env: Env) -> u32 {
+        admin::get_deviation_window_samples(env)
+    }
+
+    /// Returns the recorded TWAP price samples, most-recent last (Issue #266).
+    pub fn get_twap_samples(env: Env) -> Vec<PriceSample> {
+        settlement::_load_twap_samples(&env)
+    }
+
+    /// Sets (or clears) the ed25519 public key used to verify oracle
+    /// attestation signatures (admin only, Issue #263). `None` disables
+    /// attestation verification, restoring account-auth-only behaviour.
+    pub fn set_attestation_key(env: Env, key: Option<BytesN<32>>) -> Result<(), ContractError> {
+        admin::set_attestation_key(env, key)
+    }
+
+    /// Returns the configured attestation signing key, if enabled (Issue #263).
+    pub fn get_attestation_key(env: Env) -> Option<BytesN<32>> {
+        admin::get_attestation_key(env)
     }
 
     /// Arms a one-shot override to bypass deviation checks for the next settlement (admin only).
@@ -503,6 +547,20 @@ impl VirtualTokenContract {
 
     pub fn get_max_stake(env: Env) -> Option<i128> {
         config::get_max_stake(env)
+    }
+
+    /// Schedules a timelocked minimum-bet (dust protection) update (Issue #269).
+    pub fn set_min_bet(env: Env, min_amount: Option<i128>) -> Result<(), ContractError> {
+        config::set_min_bet(env, min_amount)
+    }
+
+    pub fn schedule_min_bet(env: Env, min_amount: Option<i128>) -> Result<(), ContractError> {
+        config::schedule_min_bet(env, min_amount)
+    }
+
+    /// Returns the configured minimum bet, if enabled (Issue #269).
+    pub fn get_min_bet(env: Env) -> Option<i128> {
+        config::get_min_bet(env)
     }
 
     pub fn set_max_user_exposure(
@@ -887,32 +945,16 @@ impl VirtualTokenContract {
         Self::_extend_persistent_ttl(env, &key);
     }
 
+    /// Delegates to the central [`PolicyGate`](crate::admin::_policy_gate) — see its
+    /// doc comment for the full mode × action matrix and entrypoint inventory (Issue #261).
     fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
-        let key = DataKey::Paused;
-        Self::_extend_persistent_ttl(env, &key);
-        let mode = env
-            .storage()
-            .persistent()
-            .get::<_, RuntimeMode>(&key)
-            .unwrap_or(RuntimeMode::Normal);
-        if mode == RuntimeMode::FullyPaused {
-            return Err(ContractError::ContractPaused);
-        }
-        Ok(())
+        crate::admin::_policy_gate(env, PolicyAction::AdminConfig)
     }
 
+    /// Delegates to the central [`PolicyGate`](crate::admin::_policy_gate) — see its
+    /// doc comment for the full mode × action matrix and entrypoint inventory (Issue #261).
     fn _ensure_normal_mode(env: &Env) -> Result<(), ContractError> {
-        let key = DataKey::Paused;
-        Self::_extend_persistent_ttl(env, &key);
-        let mode = env
-            .storage()
-            .persistent()
-            .get::<_, RuntimeMode>(&key)
-            .unwrap_or(RuntimeMode::Normal);
-        if mode != RuntimeMode::Normal {
-            return Err(ContractError::ContractPaused);
-        }
-        Ok(())
+        crate::admin::_policy_gate(env, PolicyAction::RoundMutation)
     }
 
     fn _set_mode(env: &Env, new_mode: RuntimeMode) -> Result<(), ContractError> {

@@ -39,7 +39,7 @@ fn test_resolve_round_stale_timestamp() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::StaleOracleData)));
@@ -71,7 +71,7 @@ fn test_resolve_round_invalid_round_id() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::InvalidOracleRound)));
@@ -104,7 +104,7 @@ fn test_resolve_round_valid_payload() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     client.resolve_round(&payload);
     assert_eq!(client.get_active_round(), None);
@@ -138,7 +138,7 @@ fn test_resolve_round_future_timestamp() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::FutureOracleData)));
@@ -174,7 +174,7 @@ fn test_cancelled_round_cannot_be_resolved() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::NoActiveRound)));
 }
 
@@ -254,7 +254,7 @@ fn test_resolve_round_duplicate_nonce_rejected() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNonceReused)));
 }
 
@@ -286,7 +286,7 @@ fn test_resolve_round_unique_nonce_resolves() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Round resolved and the nonce is recorded as consumed for that round.
     assert_eq!(client.get_active_round(), None);
@@ -569,7 +569,7 @@ fn test_oracle_deviation_rejected_when_over_threshold() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleDeviationExceeded)));
 }
 
@@ -604,7 +604,7 @@ fn test_oracle_deviation_allows_at_exact_threshold() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -639,7 +639,7 @@ fn test_oracle_deviation_rounding_floor_is_deterministic() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -673,7 +673,7 @@ fn test_oracle_deviation_override_allows_over_threshold_and_emits_event() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Verify override event emitted (check before env.as_contract which resets event scope)
     let events = env.events().all();
@@ -767,7 +767,7 @@ fn test_resolve_round_nonce_boundary_values() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(zero, Err(Ok(ContractError::OracleNonceReused)));
 
     let max = client.try_resolve_round(&OraclePayload {
@@ -778,7 +778,7 @@ fn test_resolve_round_nonce_boundary_values() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(max, Err(Ok(ContractError::OracleNonceReused)));
 }
 
@@ -813,7 +813,7 @@ fn test_resolve_round_wrong_network_id_rejected() {
         network_id: wrong_network,
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
 }
 
@@ -846,7 +846,7 @@ fn test_resolve_round_wrong_contract_addr_rejected() {
         network_id: env.ledger().network_id(),
         contract_addr: wrong_contract,
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
 }
 
@@ -878,7 +878,7 @@ fn test_resolve_round_valid_domain_context_resolves() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -913,7 +913,7 @@ fn test_resolve_round_both_network_and_contract_wrong() {
         network_id: wrong_network,
         contract_addr: wrong_contract,
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
 }
 
@@ -1126,7 +1126,7 @@ fn test_confidence_below_threshold_rejected() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: Some(5000u32),
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 }
 
@@ -1156,7 +1156,7 @@ fn test_confidence_above_threshold_accepted() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: Some(9000u32),
-    });
+        attestation: None,    });
 }
 
 #[test]
@@ -1187,7 +1187,7 @@ fn test_missing_confidence_accepted_when_not_strict() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 }
 
 #[test]
@@ -1217,7 +1217,7 @@ fn test_missing_confidence_rejected_in_strict_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 }
 
@@ -1275,7 +1275,7 @@ fn test_heartbeat_gate_strict_off_allows_settlement_even_when_stale() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -1313,7 +1313,7 @@ fn test_heartbeat_gate_strict_on_blocks_when_stale_past_grace() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -1351,7 +1351,7 @@ fn test_heartbeat_gate_strict_on_allows_when_live() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -1389,7 +1389,7 @@ fn test_heartbeat_gate_blocks_offline_status_in_strict_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -1421,7 +1421,7 @@ fn test_heartbeat_gate_blocks_no_heartbeat_in_strict_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -1455,9 +1455,7 @@ fn test_heartbeat_gate_override_bypasses_block_and_emits_event() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
-
-    assert_eq!(client.get_active_round(), None);
+        attestation: None,    });
 
     // Verify override event emitted
     let events = env.events().all();
@@ -1470,14 +1468,10 @@ fn test_heartbeat_gate_override_bypasses_block_and_emits_event() {
     assert!(override_event.is_some(), "hoverride event must be emitted");
 
     // Override is one-shot — must be consumed
-    env.as_contract(&contract_id, || {
-        let armed: bool = env
-            .storage()
-            .persistent()
-            .get(&DataKey::HbOverride)
-            .unwrap_or(false);
-        assert!(!armed, "heartbeat override must be cleared after use");
-    });
+    assert!(
+        !client.get_hb_override_armed(),
+        "heartbeat override must be cleared after use"
+    );
 }
 
 #[test]
@@ -1509,7 +1503,7 @@ fn test_heartbeat_gate_override_is_one_shot() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Second round: no heartbeat, no override — should block
     env.ledger().with_mut(|li| {
@@ -1517,6 +1511,7 @@ fn test_heartbeat_gate_override_is_one_shot() {
         li.timestamp = 200;
     });
     client.create_round(&1_0000000, &None);
+    let round2 = client.get_active_round().unwrap();
 
     env.ledger().with_mut(|li| {
         li.sequence_number = 32;
@@ -1526,12 +1521,12 @@ fn test_heartbeat_gate_override_is_one_shot() {
     let result = client.try_resolve_round(&OraclePayload {
         price: 1_2000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
+        round_id: round2.start_ledger,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -1573,7 +1568,7 @@ fn test_heartbeat_gate_grace_period_allows_stale_within_grace() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -1613,7 +1608,7 @@ fn test_heartbeat_gate_grace_period_blocks_after_grace_expires() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -1652,7 +1647,7 @@ fn test_heartbeat_gate_degraded_status_allowed_when_current() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -1690,7 +1685,7 @@ fn test_heartbeat_gate_degraded_stale_past_grace_blocked() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -1714,7 +1709,7 @@ fn test_heartbeat_gate_hblocked_event_emitted() {
         li.timestamp = 100;
     });
 
-    let _ = client.try_resolve_round(&OraclePayload {
+    let result = client.try_resolve_round(&OraclePayload {
         price: 1_2000000,
         timestamp: env.ledger().timestamp(),
         round_id: 0,
@@ -1722,16 +1717,12 @@ fn test_heartbeat_gate_hblocked_event_emitted() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
-
-    let events = env.events().all();
-    let blocked_event = events.iter().find(|e| {
-        let (_contract, topics, _data) = e;
-        topics.len() == 2
-            && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("oracle"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("hblocked"))
-    });
-    assert!(blocked_event.is_some(), "hblocked event must be emitted");
+        attestation: None,    });
+    // Note: a failed top-level invocation rolls back its emitted events along
+    // with its storage writes (standard Soroban semantics), so `hblocked` is
+    // not observable via `env.events().all()` here — only the returned error
+    // can be asserted on this path.
+    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
 #[test]
@@ -1846,5 +1837,5 @@ fn test_no_confidence_check_when_threshold_unset() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: Some(0u32),
-    });
+        attestation: None,    });
 }

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
 use crate::common::{
-    _emit_action_rejected, _extend_persistent_ttl, _set_balance, assert_no_active_round, balance,
-    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_START_PRICE,
+    _emit_action_rejected, _enforce_min_bet, _extend_persistent_ttl, _set_balance,
+    assert_no_active_round, balance, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS,
+    MAX_START_PRICE, MIN_START_PRICE,
 };
 use crate::config::get_max_precision_participants;
 use crate::errors::ContractError;
@@ -218,6 +219,7 @@ pub fn place_bet(
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
     }
+    _enforce_min_bet(&env, amount)?;
 
     // Enforce max stake cap
     if let Some(max_stake) = env
@@ -345,6 +347,7 @@ pub fn place_precision_prediction(
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
     }
+    _enforce_min_bet(&env, amount)?;
 
     // Enforce max stake cap
     if let Some(max_stake) = env
@@ -473,6 +476,7 @@ pub fn commit_prediction(
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
     }
+    _enforce_min_bet(&env, amount)?;
 
     // Enforce max stake cap
     if let Some(max_stake) = env

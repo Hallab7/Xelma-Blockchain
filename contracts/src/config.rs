@@ -30,6 +30,29 @@ pub fn get_max_stake(env: Env) -> Option<i128> {
     env.storage().persistent().get(&key)
 }
 
+/// Schedules a timelocked minimum-bet (dust protection) update (Issue #269).
+pub fn set_min_bet(env: Env, min_amount: Option<i128>) -> Result<(), ContractError> {
+    schedule_min_bet(env, min_amount)
+}
+
+pub fn schedule_min_bet(env: Env, min_amount: Option<i128>) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _validate_min_bet(min_amount)?;
+    _schedule_config_change(
+        &env,
+        ConfigChangeKind::MinBet,
+        ConfigChangePayload::MinBet(min_amount),
+    )
+}
+
+/// Returns the configured minimum bet, if enabled. `None` disables the check
+/// entirely, preserving pre-#269 behaviour (any positive amount accepted).
+pub fn get_min_bet(env: Env) -> Option<i128> {
+    let key = DataKey::MinBet;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
 pub fn set_max_user_exposure(env: Env, max_exposure: Option<i128>) -> Result<(), ContractError> {
     schedule_max_user_exposure(env, max_exposure)
 }
@@ -612,6 +635,15 @@ pub fn _validate_max_stake(max_amount: Option<i128>) -> Result<(), ContractError
     Ok(())
 }
 
+pub fn _validate_min_bet(min_amount: Option<i128>) -> Result<(), ContractError> {
+    if let Some(v) = min_amount {
+        if v < MIN_CAP_VALUE {
+            return Err(ContractError::InvalidBetAmount);
+        }
+    }
+    Ok(())
+}
+
 pub fn _validate_oracle_stale_threshold(seconds: u64) -> Result<(), ContractError> {
     if !(MIN_ORACLE_STALE_THRESHOLD..=MAX_ORACLE_STALE_THRESHOLD).contains(&seconds) {
         return Err(ContractError::InvalidDuration);
@@ -819,6 +851,9 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKey::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
         ),
+        ConfigChangeKind::MinBet => {
+            ConfigChangePayload::MinBet(env.storage().persistent().get(&DataKey::MinBet))
+        }
     }
 }
 
@@ -948,6 +983,16 @@ pub fn _apply_config_payload(
             _validate_oracle_max_deviation_bps(*bps)?;
             let key = DataKey::OracleMaxDeviationBps;
             if let Some(v) = bps {
+                env.storage().persistent().set(&key, v);
+                _extend_persistent_ttl(env, &key);
+            } else {
+                env.storage().persistent().remove(&key);
+            }
+        }
+        (ConfigChangeKind::MinBet, ConfigChangePayload::MinBet(min)) => {
+            _validate_min_bet(*min)?;
+            let key = DataKey::MinBet;
+            if let Some(v) = min {
                 env.storage().persistent().set(&key, v);
                 _extend_persistent_ttl(env, &key);
             } else {

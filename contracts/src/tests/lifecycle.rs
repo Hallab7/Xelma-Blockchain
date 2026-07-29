@@ -192,7 +192,7 @@ fn test_full_round_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Round should be cleared
     assert_eq!(client.get_active_round(), None);
@@ -278,7 +278,7 @@ fn test_multiple_rounds_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     client.claim_winnings(&alice);
 
     let stats = client.get_user_stats(&alice);
@@ -315,7 +315,7 @@ fn test_multiple_rounds_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let stats = client.get_user_stats(&alice);
     assert_eq!(stats.total_wins, 2);
@@ -442,7 +442,7 @@ fn test_resolve_round_fails_without_oracle_auth() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert!(result.is_err());
 }
 
@@ -527,7 +527,7 @@ fn test_round_created_event_includes_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     client.create_round(&1_0000000, &Some(1));
 
@@ -833,7 +833,7 @@ fn test_cross_round_mode_alternation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_active_round(), None);
 
@@ -888,7 +888,7 @@ fn test_cross_round_mode_alternation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_active_round(), None);
 
@@ -942,7 +942,7 @@ fn test_cross_round_mode_alternation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_active_round(), None);
 
@@ -1103,17 +1103,15 @@ fn test_create_next_from_template_after_settle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 
     let next_round_id = client.create_next_from_template();
-    assert_eq!(next_round_id, round1.round_id + 1);
 
-    let round2 = client.get_active_round().expect("template round must be active");
-    assert_eq!(round2.round_id, next_round_id);
-    assert_eq!(round2.price_start, 2_5000000u128);
-    assert_eq!(round2.mode, RoundMode::Precision);
-
+    // Snapshot events immediately after the mutating call — any further
+    // contract invocation (even a read-only query) clears the recorded
+    // event log in this soroban-sdk testutils version, so assertions on
+    // `env.events()` must happen before any subsequent client call.
     let events = env.events().all();
     let created_event = events.iter().any(|e| {
         let (_c, topics, _d) = e;
@@ -1129,6 +1127,12 @@ fn test_create_next_from_template_after_settle() {
     });
     assert!(created_event, "create_next_from_template must emit round/created");
     assert!(applied_event, "create_next_from_template must emit template/applied");
+
+    assert_eq!(next_round_id, round1.round_id + 1);
+    let round2 = client.get_active_round().expect("template round must be active");
+    assert_eq!(round2.round_id, next_round_id);
+    assert_eq!(round2.price_start, 2_5000000u128);
+    assert_eq!(round2.mode, RoundMode::Precision);
 }
 
 /// Acceptance: cancel → next. After an admin cancellation, the keeper call

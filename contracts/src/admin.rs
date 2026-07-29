@@ -2,10 +2,15 @@
 use crate::common::{
     _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, CURRENT_SCHEMA_VERSION,
     DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
+    MAX_TWAP_WINDOW_SAMPLES, MIN_TWAP_WINDOW_SAMPLES,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, HbGateConfig, HbGateKey, OracleHeartbeatRecord, ProtocolHealthStatus, Round, RuntimeMode};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use crate::types::{
+    AttestationConfig, AttestationConfigKey, DataKey, DeviationConfig, DeviationConfigKey,
+    DeviationReferenceMode, HbGateConfig, HbGateKey, OracleHeartbeatRecord, PolicyAction,
+    ProtocolHealthStatus, Round, RuntimeMode,
+};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, Symbol};
 
 /// Initializes the contract with admin and oracle addresses (one-time only)
 pub fn initialize(env: Env, admin: Address, oracle: Address) -> Result<(), ContractError> {
@@ -274,6 +279,148 @@ pub fn arm_oracle_deviation_override(env: Env) -> Result<(), ContractError> {
     env.storage().persistent().set(&override_key, &true);
     _extend_persistent_ttl(&env, &override_key);
     Ok(())
+}
+
+/// Loads the deviation guardrail config, returning the `StartPrice` default if unset (Issue #266).
+pub fn _load_deviation_config(env: &Env) -> DeviationConfig {
+    let key = DeviationConfigKey::DeviationConfig;
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            crate::common::TTL_BUMP_THRESHOLD,
+            crate::common::TTL_BUMP_AMOUNT,
+        );
+    }
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DeviationConfig {
+            reference_mode: DeviationReferenceMode::StartPrice,
+            window_samples: MIN_TWAP_WINDOW_SAMPLES,
+        })
+}
+
+fn _save_deviation_config(env: &Env, config: &DeviationConfig) {
+    let key = DeviationConfigKey::DeviationConfig;
+    env.storage().persistent().set(&key, config);
+    env.storage().persistent().extend_ttl(
+        &key,
+        crate::common::TTL_BUMP_THRESHOLD,
+        crate::common::TTL_BUMP_AMOUNT,
+    );
+}
+
+/// Sets the oracle deviation reference mode and (for `Twap`) the trailing
+/// sample window size (admin only, Issue #266). Defaults to `StartPrice`
+/// with no config stored, preserving pre-#266 behaviour exactly.
+pub fn set_deviation_ref_mode(
+    env: Env,
+    mode: DeviationReferenceMode,
+    window_samples: u32,
+) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("devref"), e);
+    })?;
+
+    if mode == DeviationReferenceMode::Twap
+        && !(MIN_TWAP_WINDOW_SAMPLES..=MAX_TWAP_WINDOW_SAMPLES).contains(&window_samples)
+    {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("devref"),
+            ContractError::InvalidOracleConfig,
+        );
+        return Err(ContractError::InvalidOracleConfig);
+    }
+
+    _save_deviation_config(
+        &env,
+        &DeviationConfig {
+            reference_mode: mode,
+            window_samples,
+        },
+    );
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("oracle"), symbol_short!("devref")),
+        (mode as u32, window_samples),
+    );
+
+    Ok(())
+}
+
+/// Returns the configured deviation reference mode (default `StartPrice`, Issue #266).
+pub fn get_deviation_ref_mode(env: Env) -> DeviationReferenceMode {
+    _load_deviation_config(&env).reference_mode
+}
+
+/// Returns the configured TWAP window size in samples (default `MIN_TWAP_WINDOW_SAMPLES`, Issue #266).
+pub fn get_deviation_window_samples(env: Env) -> u32 {
+    _load_deviation_config(&env).window_samples
+}
+
+/// Loads the attestation config, returning `key: None` (disabled) if unset (Issue #263).
+pub fn _load_attestation_config(env: &Env) -> AttestationConfig {
+    let key = AttestationConfigKey::AttestationConfig;
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            crate::common::TTL_BUMP_THRESHOLD,
+            crate::common::TTL_BUMP_AMOUNT,
+        );
+    }
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(AttestationConfig { key: None })
+}
+
+/// Sets (or clears) the ed25519 public key used to verify oracle attestation
+/// signatures (admin only, Issue #263). Passing `None` disables attestation
+/// verification entirely, restoring pre-#263 behaviour (account auth only).
+pub fn set_attestation_key(env: Env, key: Option<BytesN<32>>) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("attkey"), e);
+    })?;
+
+    let storage_key = AttestationConfigKey::AttestationConfig;
+    env.storage()
+        .persistent()
+        .set(&storage_key, &AttestationConfig { key: key.clone() });
+    env.storage().persistent().extend_ttl(
+        &storage_key,
+        crate::common::TTL_BUMP_THRESHOLD,
+        crate::common::TTL_BUMP_AMOUNT,
+    );
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("oracle"), symbol_short!("attkey")),
+        (key.is_some(),),
+    );
+
+    Ok(())
+}
+
+/// Returns the configured attestation signing key, if attestation is enabled (Issue #263).
+pub fn get_attestation_key(env: Env) -> Option<BytesN<32>> {
+    _load_attestation_config(&env).key
 }
 
 /// Sets the minimum oracle confidence threshold in basis points (admin only).
@@ -620,32 +767,90 @@ pub fn get_oracle_stale_threshold(env: Env) -> u64 {
         .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD)
 }
 
-pub fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
+/// Reads the current [`RuntimeMode`], defaulting to `Normal` if unset.
+fn _current_mode(env: &Env) -> RuntimeMode {
     let key = DataKey::Paused;
     _extend_persistent_ttl(env, &key);
-    let mode = env
-        .storage()
+    env.storage()
         .persistent()
         .get::<_, RuntimeMode>(&key)
-        .unwrap_or(RuntimeMode::Normal);
-    if mode == RuntimeMode::FullyPaused {
+        .unwrap_or(RuntimeMode::Normal)
+}
+
+/// Single policy gate for every mutating entrypoint (Issue #261).
+///
+/// Every state-changing method in the contract funnels its mode check
+/// through this one function instead of hand-rolling `if mode == X` logic
+/// per-entrypoint. New methods are onboarded by picking the right
+/// [`PolicyAction`] variant rather than re-deriving the mode rules, so the
+/// gate cannot drift out of sync with individual call sites.
+///
+/// ## Mode × action matrix
+///
+/// | action          | `Normal` | `ClaimsOnly` | `FullyPaused` |
+/// |------------------|:--------:|:------------:|:-------------:|
+/// | `RoundMutation`  | ✅       | ❌           | ❌            |
+/// | `Claim`          | ✅       | ✅           | ❌            |
+/// | `AdminConfig`    | ✅       | ✅           | ❌            |
+/// | `Settlement`     | ✅       | ✅           | ❌            |
+///
+/// `RoundMutation` is the only class blocked by `ClaimsOnly` — betting and
+/// new rounds must stop once the protocol has no active round to bet into,
+/// while admins can still reconfigure, the oracle can still settle/cancel a
+/// round already in flight, and users can still withdraw what they're owed.
+/// `FullyPaused` blocks every class uniformly (emergency stop).
+///
+/// ## Entrypoint inventory (action → dispatcher, `contract.rs`)
+///
+/// - `RoundMutation`: `place_bet`, `place_precision_prediction`,
+///   `predict_price`, `commit_prediction`, `reveal_prediction`,
+///   `mint_initial`.
+/// - `Claim`: `claim_winnings`.
+/// - `Settlement`: `resolve_round`, `cancel_round`.
+/// - `AdminConfig`: `pause_contract`, `unpause_contract`, `set_runtime_mode`,
+///   `migrate_schema_v1_to_v2`, `migrate_schema_v2_to_v3`,
+///   `set_oracle_max_deviation_bps`, `arm_oracle_deviation_override`,
+///   `set_oracle_min_confidence_bps`, `set_oracle_strict_mode`,
+///   `set_hb_strict_mode`, `arm_hb_override`, `set_hb_grace_seconds`,
+///   `propose_oracle_rotation`, `accept_oracle_rotation`,
+///   `cancel_oracle_rotation`, `set_windows`, `set_max_stake`,
+///   `set_max_user_exposure`, `set_max_pending_winnings`, `set_min_bet`,
+///   `schedule_*` variants, `apply_scheduled_changes`, `cancel_config_change`,
+///   `set_protocol_fee_bps`, `withdraw_protocol_fee`, `set_min_participants`,
+///   `set_max_precision_participants`, `set_mint_limit`,
+///   `set_archive_retention`, `set_close_buffer_ledgers`,
+///   `set_round_template`, `clear_round_template`,
+///   `reset_leaderboard_season`, `create_round`, `create_next_from_template`
+///   (admin-gated, not `RoundMutation` — must stay callable in `ClaimsOnly`
+///   since it is the entrypoint that transitions the protocol back to
+///   `Active`; it is blocked only by `FullyPaused`).
+///
+/// `update_oracle_heartbeat` and `is_*`/`get_*` read-only queries are
+/// intentionally not gated: heartbeat recording must keep flowing even while
+/// paused so `get_protocol_health` reflects live oracle status during an
+/// incident, and reads never mutate state.
+pub fn _policy_gate(env: &Env, action: PolicyAction) -> Result<(), ContractError> {
+    let mode = _current_mode(env);
+    let blocked = match action {
+        PolicyAction::RoundMutation => mode != RuntimeMode::Normal,
+        PolicyAction::Claim | PolicyAction::AdminConfig | PolicyAction::Settlement => {
+            mode == RuntimeMode::FullyPaused
+        }
+    };
+    if blocked {
         return Err(ContractError::ContractPaused);
     }
     Ok(())
 }
 
+/// Blocked only by `FullyPaused` — equivalent to `_policy_gate(env, PolicyAction::AdminConfig)`.
+pub fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
+    _policy_gate(env, PolicyAction::AdminConfig)
+}
+
+/// Blocked by any non-`Normal` mode — equivalent to `_policy_gate(env, PolicyAction::RoundMutation)`.
 pub fn _ensure_normal_mode(env: &Env) -> Result<(), ContractError> {
-    let key = DataKey::Paused;
-    _extend_persistent_ttl(env, &key);
-    let mode = env
-        .storage()
-        .persistent()
-        .get::<_, RuntimeMode>(&key)
-        .unwrap_or(RuntimeMode::Normal);
-    if mode != RuntimeMode::Normal {
-        return Err(ContractError::ContractPaused);
-    }
-    Ok(())
+    _policy_gate(env, PolicyAction::RoundMutation)
 }
 
 pub fn _set_mode(env: &Env, new_mode: RuntimeMode) -> Result<(), ContractError> {

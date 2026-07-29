@@ -103,7 +103,7 @@ fn resolve_at(
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 }
 
 /// `sha256(price.to_xdr() || salt.to_xdr())` — matches `reveal_prediction`.
