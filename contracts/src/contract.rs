@@ -616,6 +616,14 @@ impl VirtualTokenContract {
         config::get_max_precision_participants(env)
     }
 
+    pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), ContractError> {
+        config::set_precision_payout_policy(env, policy)
+    }
+
+    pub fn get_precision_payout_policy(env: Env) -> u32 {
+        config::get_precision_payout_policy(env)
+    }
+
     pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
         config::set_mint_limit(env, limit)
     }

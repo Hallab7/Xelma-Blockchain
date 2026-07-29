@@ -96,6 +96,8 @@ Emitted when a round is settled competitively by the oracle.
 | 0        | `round_id`    | `u64`  | Round that was resolved                          |
 | 1        | `final_price` | `u128` | Closing price reported by the oracle (4 dec.)    |
 | 2        | `mode`        | `u32`  | Round mode: `0` = UpDown, `1` = Precision        |
+| 3        | `protocol_fee_bps` | `Option<u32>` | Active protocol fee in basis points (if set)     |
+| 4        | `precision_payout_policy` | `u32` | Payout distribution policy used for Precision round: `0` = Equal, `1` = StakeWeighted |
 
 ---
 
