@@ -138,6 +138,32 @@ pub enum DataKey {
     /// retained on-chain before the oldest are pruned (FIFO). If unset, the protocol
     /// default is used.
     ArchiveRetention,
+    /// Admin-configured blueprint used by `create_next_from_template` to spin
+    /// up the next round without re-specifying `start_price` / `mode` each
+    /// time. Absent means no template is configured.
+    RoundTemplate,
+    /// Bounded index of user addresses sorted by lifetime total wins
+    /// descending (all-time leaderboard, independent of seasons).
+    LeaderboardWins,
+    /// Bounded index of user addresses sorted by lifetime best streak
+    /// descending (all-time leaderboard, independent of seasons).
+    LeaderboardStreak,
+    /// Monotonically increasing id of the currently-active leaderboard
+    /// season. Absent is treated as season 1.
+    SeasonId,
+    /// Per-season, per-user win/loss/streak stats: (season_id, address) →
+    /// UserStats, scoped independently of the lifetime `UserStats` totals so
+    /// a season reset never touches lifetime history.
+    SeasonUserStats(u32, Address),
+    /// Bounded index of user addresses in the *active* season sorted by
+    /// season-scoped total wins descending.
+    SeasonLeaderboardWins,
+    /// Bounded index of user addresses in the *active* season sorted by
+    /// season-scoped best streak descending.
+    SeasonLeaderboardStreak,
+    /// Frozen snapshot of a season's final rankings, written when the season
+    /// is reset. Seasons are never deleted — this is a permanent archive.
+    SeasonArchive(u32),
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
@@ -518,37 +544,20 @@ pub struct SimulationResult {
     pub outcomes: Vec<UserRoundOutcome>,
 }
 
-/// Cursor-based page of precision predictions for the active round.
+/// Admin-configured blueprint for `create_next_from_template`.
 ///
-/// `next_cursor` is the last user address in this page, or `None` if the page
-/// is empty or exhausted. Clients should pass this value as the `cursor`
-/// argument to the next call to fetch the subsequent page deterministically.
+/// Mirrors the arguments accepted by `create_round` (`start_price`, `mode`)
+/// so a keeper can spin up the next round after a settle/cancel without an
+/// operator re-specifying parameters each time. Validated with the exact
+/// same rules `create_round` applies at creation time.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct PrecisionPredictionsPage {
-    pub items: Vec<PrecisionPrediction>,
-    pub next_cursor: Option<Address>,
+pub struct RoundTemplate {
+    pub start_price: u128,
+    pub mode: Option<u32>,
 }
 
-/// Single entry in a cursor-based Up/Down positions page.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct UpdownPositionEntry {
-    pub user: Address,
-    pub position: UserPosition,
-}
-
-/// Cursor-based page of Up/Down positions for the active round.
-///
-/// Items are `UpdownPositionEntry` records sorted by address ascending.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct UpdownPositionsPage {
-    pub items: Vec<UpdownPositionEntry>,
-    pub next_cursor: Option<Address>,
-}
-
-/// Entry in a global leaderboard sorted by wins or streaks.
+/// A single entry in the lifetime (all-time) leaderboard.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeaderboardEntry {
@@ -556,13 +565,26 @@ pub struct LeaderboardEntry {
     pub stats: UserStats,
 }
 
-/// Cursor-based page of leaderboard entries.
-///
-/// `next_cursor` is the last user address in this page, or `None` if the page
-/// is exhausted. Pass it as the `cursor` argument to the next call.
+/// A single entry in a season-scoped leaderboard, live or archived.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct LeaderboardPage {
-    pub items: Vec<LeaderboardEntry>,
-    pub next_cursor: Option<Address>,
+pub struct SeasonLeaderboardEntry {
+    pub user: Address,
+    pub wins: u32,
+    pub best_streak: u32,
+}
+
+/// Frozen snapshot of a season's final bounded rankings, written by
+/// `reset_leaderboard_season`. `participant_count` is the number of distinct
+/// addresses that appeared in either bounded index at reset time (a lower
+/// bound on total season participants beyond the tracked top
+/// `LEADERBOARD_LIMIT`, mirroring the same bound the live indexes enforce).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeasonArchive {
+    pub season_id: u32,
+    pub ended_at_ledger: u32,
+    pub wins: Vec<SeasonLeaderboardEntry>,
+    pub streak: Vec<SeasonLeaderboardEntry>,
+    pub participant_count: u32,
 }

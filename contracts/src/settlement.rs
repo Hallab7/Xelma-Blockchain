@@ -846,12 +846,14 @@ pub fn _resolve_precision_mode(
             }
         }
     } else if total_pot > 0 {
-        // No revealed winners: all participants committed but none
-        // revealed their prediction. Refund every participant's stake
-        // in full (no protocol fee is charged on refunds).
+        // Nobody revealed a prediction (all-commitment round). There is no
+        // closest-guess winner to forfeit the pot to, so — unlike the
+        // mixed-reveal case — every participant's stake must be refunded in
+        // full rather than silently vanishing from circulation (conservation:
+        // sum_refunds == total_pot, fee == 0, no stats mutation).
         for i in 0..participants.len() {
             if let Some(user) = participants.get(i) {
-                let stake = participant_amounts.get(i).unwrap();
+                let stake = participant_amounts.get(i).unwrap_or(0);
                 if stake > 0 {
                     _accumulate_pending(env, user.clone(), stake)?;
                     _persist_user_outcome(
@@ -1380,7 +1382,7 @@ pub fn _refund_under_threshold(
 }
 
 pub fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> {
-    let key = DataKey::UserStats(user);
+    let key = DataKey::UserStats(user.clone());
     let mut stats: UserStats = env.storage().persistent().get(&key).unwrap_or(UserStats {
         total_wins: 0,
         total_losses: 0,
@@ -1403,11 +1405,13 @@ pub fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> 
 
     env.storage().persistent().set(&key, &stats);
     _extend_persistent_ttl(env, &key);
+    crate::leaderboard::_update_leaderboards(env, user.clone());
+    crate::leaderboard::_update_season_stats_win(env, user)?;
     Ok(())
 }
 
 pub fn _update_stats_loss(env: &Env, user: Address) -> Result<(), ContractError> {
-    let key = DataKey::UserStats(user);
+    let key = DataKey::UserStats(user.clone());
     let mut stats: UserStats = env.storage().persistent().get(&key).unwrap_or(UserStats {
         total_wins: 0,
         total_losses: 0,
@@ -1423,5 +1427,7 @@ pub fn _update_stats_loss(env: &Env, user: Address) -> Result<(), ContractError>
 
     env.storage().persistent().set(&key, &stats);
     _extend_persistent_ttl(env, &key);
+    crate::leaderboard::_update_leaderboards(env, user.clone());
+    crate::leaderboard::_update_season_stats_loss(env, user)?;
     Ok(())
 }

@@ -7,11 +7,12 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey, LeaderboardPage,
-    OracleHeartbeatRecord, OraclePayload, OracleRotationProposal, PendingConfigChange,
-    PrecisionPrediction, PrecisionPredictionsPage, ProtocolHealthStatus, ProtocolStatus, Round,
-    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RuntimeMode, SimulationResult,
-    UpdownPositionsPage, UserPosition, UserRoundOutcome, UserStats,
+    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
+    LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
+    PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
+    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
+    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
+    UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -85,6 +86,7 @@ use crate::admin;
 use crate::betting;
 use crate::common;
 use crate::config;
+use crate::leaderboard;
 use crate::queries;
 use crate::settlement;
 
@@ -617,6 +619,32 @@ impl VirtualTokenContract {
         betting::create_round(env, start_price, mode)
     }
 
+    /// Stores the admin's blueprint for `create_next_from_template` (admin only).
+    pub fn set_round_template(
+        env: Env,
+        start_price: u128,
+        mode: Option<u32>,
+    ) -> Result<(), ContractError> {
+        config::set_round_template(env, start_price, mode)
+    }
+
+    /// Removes the configured round template (admin only).
+    pub fn clear_round_template(env: Env) -> Result<(), ContractError> {
+        config::clear_round_template(env)
+    }
+
+    /// Returns the configured round template, if any.
+    pub fn get_round_template(env: Env) -> Option<RoundTemplate> {
+        config::get_round_template(env)
+    }
+
+    /// Creates the next round from the configured template (admin only).
+    /// Fails with `RoundAlreadyActive` if a round is already active and
+    /// with `NoRoundTemplate` if no template has been configured.
+    pub fn create_next_from_template(env: Env) -> Result<u64, ContractError> {
+        betting::create_next_from_template(env)
+    }
+
     pub fn place_bet(
         env: Env,
         user: Address,
@@ -766,58 +794,59 @@ impl VirtualTokenContract {
         queries::simulate_payout(env, final_price)
     }
 
-    // ─── Cursor-based paginated queries ─────────────────────────────────────
+    // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────
 
-    /// Returns a cursor-based page of Precision-mode predictions for the active round.
-    ///
-    /// Pass `cursor` from the previous page's `next_cursor` field, or `None` to
-    /// fetch the first page. Each page returns up to `limit` entries (capped at
-    /// `MAX_PAGE_SIZE` = 100) and a `next_cursor` for the subsequent page.
-    /// Items are sorted by user address ascending (deterministic order).
-    ///
-    /// Returns an empty page when no active round exists or the cursor is past
-    /// all entries.
-    pub fn get_precision_predictions_cursor(
-        env: Env,
-        cursor: Option<Address>,
-        limit: u32,
-    ) -> PrecisionPredictionsPage {
-        queries::get_precision_predictions_cursor(env, cursor, limit)
+    /// Paginated lifetime wins leaderboard (all-time, independent of seasons).
+    pub fn get_leaderboard_by_wins(env: Env, offset: u32, limit: u32) -> Vec<LeaderboardEntry> {
+        leaderboard::get_leaderboard_by_wins(env, offset, limit)
     }
 
-    /// Returns a cursor-based page of Up/Down positions for the active round.
-    ///
-    /// Each item is an `(Address, UserPosition)` pair sorted by address
-    /// ascending. Same cursor semantics as `get_precision_predictions_cursor`.
-    pub fn get_updown_positions_cursor(
-        env: Env,
-        cursor: Option<Address>,
-        limit: u32,
-    ) -> UpdownPositionsPage {
-        queries::get_updown_positions_cursor(env, cursor, limit)
+    /// Paginated lifetime best-streak leaderboard (all-time, independent of seasons).
+    pub fn get_leaderboard_by_streak(env: Env, offset: u32, limit: u32) -> Vec<LeaderboardEntry> {
+        leaderboard::get_leaderboard_by_streak(env, offset, limit)
     }
 
-    /// Returns a cursor-based page of the global leaderboard ordered by total
-    /// wins descending (address ascending as tiebreaker).
-    ///
-    /// Pass `cursor` from the previous page's `next_cursor`, or `None` for the
-    /// first page. Up to `limit` entries per page (capped at 100).
-    pub fn get_leaderboard_by_wins(
-        env: Env,
-        cursor: Option<Address>,
-        limit: u32,
-    ) -> LeaderboardPage {
-        queries::get_leaderboard_by_wins(env, cursor, limit)
+    /// Returns the id of the currently-active leaderboard season (default 1).
+    pub fn get_current_season_id(env: Env) -> u32 {
+        leaderboard::get_current_season_id(env)
     }
 
-    /// Returns a cursor-based page of the global leaderboard ordered by best
-    /// streak descending (address ascending as tiebreaker).
-    pub fn get_leaderboard_by_streak(
+    /// Returns a user's season-scoped stats for `season_id` (active or archived).
+    pub fn get_season_user_stats(env: Env, season_id: u32, user: Address) -> UserStats {
+        leaderboard::get_season_user_stats(env, season_id, user)
+    }
+
+    /// Freezes the active season's rankings into a permanent archive and
+    /// advances to the next season (admin only). Returns the new season id.
+    pub fn reset_leaderboard_season(env: Env) -> Result<u32, ContractError> {
+        leaderboard::reset_leaderboard_season(env)
+    }
+
+    /// Returns the frozen archive for a past season, if it has been reset.
+    pub fn get_season_archive(env: Env, season_id: u32) -> Option<SeasonArchive> {
+        leaderboard::get_season_archive(env, season_id)
+    }
+
+    /// Paginated wins leaderboard for `season_id` — live for the active
+    /// season, frozen archive for any past season.
+    pub fn get_season_leaderboard_by_wins(
         env: Env,
-        cursor: Option<Address>,
+        season_id: u32,
+        offset: u32,
         limit: u32,
-    ) -> LeaderboardPage {
-        queries::get_leaderboard_by_streak(env, cursor, limit)
+    ) -> Vec<SeasonLeaderboardEntry> {
+        leaderboard::get_season_leaderboard_by_wins(env, season_id, offset, limit)
+    }
+
+    /// Paginated best-streak leaderboard for `season_id` — live for the
+    /// active season, frozen archive for any past season.
+    pub fn get_season_leaderboard_by_streak(
+        env: Env,
+        season_id: u32,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<SeasonLeaderboardEntry> {
+        leaderboard::get_season_leaderboard_by_streak(env, season_id, offset, limit)
     }
 }
 
