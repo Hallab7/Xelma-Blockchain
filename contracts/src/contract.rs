@@ -832,9 +832,7 @@ impl VirtualTokenContract {
     ) -> LeaderboardPage {
         queries::get_leaderboard_by_streak(env, cursor, limit)
     }
-
     // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────
-
 
     /// Returns the id of the currently-active leaderboard season (default 1).
     pub fn get_current_season_id(env: Env) -> u32 {
