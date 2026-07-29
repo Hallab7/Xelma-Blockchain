@@ -8,10 +8,9 @@ use crate::config::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, LeaderboardEntry, LeaderboardPage, PrecisionCommitment,
-    PrecisionPrediction, PrecisionPredictionsPage, Round, RoundMode, RoundPhase, RoundPoolStats,
-    SimulationResult, UpdownPositionsPage, UserOutcomeType, UserPosition, UserRoundOutcome,
-    UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, LeaderboardEntry, PrecisionCommitment,
+    PrecisionPrediction, Round, RoundMode, RoundPhase, RoundPoolStats, SimulationResult,
+    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -720,13 +719,10 @@ pub fn get_precision_predictions_cursor(
     env: Env,
     cursor: Option<Address>,
     limit: u32,
-) -> PrecisionPredictionsPage {
+) -> (Vec<PrecisionPrediction>, Option<Address>) {
     let limit = limit.min(MAX_PAGE_SIZE);
     if limit == 0 {
-        return PrecisionPredictionsPage {
-            items: Vec::new(&env),
-            next_cursor: None,
-        };
+        return (Vec::new(&env), None);
     }
 
     let round = match env
@@ -735,12 +731,7 @@ pub fn get_precision_predictions_cursor(
         .get::<_, Round>(&DataKey::ActiveRound)
     {
         Some(r) => r,
-        None => {
-            return PrecisionPredictionsPage {
-                items: Vec::new(&env),
-                next_cursor: None,
-            }
-        }
+        None => return (Vec::new(&env), None),
     };
 
     let participants: Vec<Address> = env
@@ -753,10 +744,7 @@ pub fn get_precision_predictions_cursor(
     let total = participants.len();
     let start = _find_cursor_position(&participants, &cursor);
     if start >= total {
-        return PrecisionPredictionsPage {
-            items: Vec::new(&env),
-            next_cursor: None,
-        };
+        return (Vec::new(&env), None);
     }
 
     let end = start.saturating_add(limit).min(total);
@@ -773,10 +761,7 @@ pub fn get_precision_predictions_cursor(
         }
     }
 
-    PrecisionPredictionsPage {
-        items,
-        next_cursor: last_addr,
-    }
+    (items, last_addr)
 }
 
 /// Returns a cursor-based page of Up/Down positions for the active round.
@@ -787,13 +772,10 @@ pub fn get_updown_positions_cursor(
     env: Env,
     cursor: Option<Address>,
     limit: u32,
-) -> UpdownPositionsPage {
+) -> (Vec<(Address, UserPosition)>, Option<Address>) {
     let limit = limit.min(MAX_PAGE_SIZE);
     if limit == 0 {
-        return UpdownPositionsPage {
-            items: Vec::new(&env),
-            next_cursor: None,
-        };
+        return (Vec::new(&env), None);
     }
 
     let round = match env
@@ -802,12 +784,7 @@ pub fn get_updown_positions_cursor(
         .get::<_, Round>(&DataKey::ActiveRound)
     {
         Some(r) => r,
-        None => {
-            return UpdownPositionsPage {
-                items: Vec::new(&env),
-                next_cursor: None,
-            }
-        }
+        None => return (Vec::new(&env), None),
     };
 
     let participants: Vec<Address> = env
@@ -820,10 +797,7 @@ pub fn get_updown_positions_cursor(
     let total = participants.len();
     let start = _find_cursor_position(&participants, &cursor);
     if start >= total {
-        return UpdownPositionsPage {
-            items: Vec::new(&env),
-            next_cursor: None,
-        };
+        return (Vec::new(&env), None);
     }
 
     let end = start.saturating_add(limit).min(total);
@@ -840,10 +814,7 @@ pub fn get_updown_positions_cursor(
         }
     }
 
-    UpdownPositionsPage {
-        items,
-        next_cursor: last_addr,
-    }
+    (items, last_addr)
 }
 
 // ─── Leaderboard queries ─────────────────────────────────────────────────────
@@ -910,13 +881,14 @@ fn _collect_leaderboard_entries(env: &Env) -> Vec<LeaderboardEntry> {
 ///
 /// The result is a snapshot built from on-chain `UserStats` collected from
 /// active and recent round participants.
-pub fn get_leaderboard_by_wins(env: Env, cursor: Option<Address>, limit: u32) -> LeaderboardPage {
+pub fn get_leaderboard_by_wins(
+    env: Env,
+    cursor: Option<Address>,
+    limit: u32,
+) -> (Vec<LeaderboardEntry>, Option<Address>) {
     let limit = limit.min(MAX_PAGE_SIZE);
     if limit == 0 {
-        return LeaderboardPage {
-            items: Vec::new(&env),
-            next_cursor: None,
-        };
+        return (Vec::new(&env), None);
     }
 
     let entries = _collect_leaderboard_entries(&env);
@@ -948,10 +920,7 @@ pub fn get_leaderboard_by_wins(env: Env, cursor: Option<Address>, limit: u32) ->
     let total = sorted.len();
     let start = _find_cursor_in_leaderboard(&sorted, &cursor);
     if start >= total {
-        return LeaderboardPage {
-            items: Vec::new(&env),
-            next_cursor: None,
-        };
+        return (Vec::new(&env), None);
     }
 
     let end = start.saturating_add(limit).min(total);
@@ -964,21 +933,19 @@ pub fn get_leaderboard_by_wins(env: Env, cursor: Option<Address>, limit: u32) ->
         }
     }
 
-    LeaderboardPage {
-        items,
-        next_cursor: last_addr,
-    }
+    (items, last_addr)
 }
 
 /// Returns a cursor-based page of the global leaderboard ordered by best streak
 /// descending, with address ascending as tiebreaker.
-pub fn get_leaderboard_by_streak(env: Env, cursor: Option<Address>, limit: u32) -> LeaderboardPage {
+pub fn get_leaderboard_by_streak(
+    env: Env,
+    cursor: Option<Address>,
+    limit: u32,
+) -> (Vec<LeaderboardEntry>, Option<Address>) {
     let limit = limit.min(MAX_PAGE_SIZE);
     if limit == 0 {
-        return LeaderboardPage {
-            items: Vec::new(&env),
-            next_cursor: None,
-        };
+        return (Vec::new(&env), None);
     }
 
     let entries = _collect_leaderboard_entries(&env);
@@ -1010,10 +977,7 @@ pub fn get_leaderboard_by_streak(env: Env, cursor: Option<Address>, limit: u32) 
     let total = sorted.len();
     let start = _find_cursor_in_leaderboard(&sorted, &cursor);
     if start >= total {
-        return LeaderboardPage {
-            items: Vec::new(&env),
-            next_cursor: None,
-        };
+        return (Vec::new(&env), None);
     }
 
     let end = start.saturating_add(limit).min(total);
@@ -1026,8 +990,5 @@ pub fn get_leaderboard_by_streak(env: Env, cursor: Option<Address>, limit: u32) 
         }
     }
 
-    LeaderboardPage {
-        items,
-        next_cursor: last_addr,
-    }
+    (items, last_addr)
 }

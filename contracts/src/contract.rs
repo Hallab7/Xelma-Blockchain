@@ -8,11 +8,11 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    LeaderboardEntry, LeaderboardPage, OracleHeartbeatRecord, OraclePayload,
-    OracleRotationProposal, PendingConfigChange, PrecisionPrediction, PrecisionPredictionsPage,
-    ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundPhase, RoundPoolStats,
-    RoundStatus, RoundTemplate, RuntimeMode, SeasonArchive, SeasonLeaderboardEntry,
-    SimulationResult, UpdownPositionsPage, UserPosition, UserRoundOutcome, UserStats,
+    LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
+    PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
+    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
+    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
+    UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -801,7 +801,7 @@ impl VirtualTokenContract {
         env: Env,
         cursor: Option<Address>,
         limit: u32,
-    ) -> PrecisionPredictionsPage {
+    ) -> (Vec<PrecisionPrediction>, Option<Address>) {
         queries::get_precision_predictions_cursor(env, cursor, limit)
     }
 
@@ -810,7 +810,7 @@ impl VirtualTokenContract {
         env: Env,
         cursor: Option<Address>,
         limit: u32,
-    ) -> UpdownPositionsPage {
+    ) -> (Vec<(Address, UserPosition)>, Option<Address>) {
         queries::get_updown_positions_cursor(env, cursor, limit)
     }
 
@@ -819,7 +819,7 @@ impl VirtualTokenContract {
         env: Env,
         cursor: Option<Address>,
         limit: u32,
-    ) -> LeaderboardPage {
+    ) -> (Vec<LeaderboardEntry>, Option<Address>) {
         queries::get_leaderboard_by_wins(env, cursor, limit)
     }
 
@@ -828,7 +828,7 @@ impl VirtualTokenContract {
         env: Env,
         cursor: Option<Address>,
         limit: u32,
-    ) -> LeaderboardPage {
+    ) -> (Vec<LeaderboardEntry>, Option<Address>) {
         queries::get_leaderboard_by_streak(env, cursor, limit)
     }
     // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────

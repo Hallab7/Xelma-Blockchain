@@ -33,8 +33,8 @@ pub use contract::VirtualTokenContract;
 pub use errors::ContractError;
 pub use types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    LeaderboardEntry, LeaderboardPage, OracleRotationProposal, PendingConfigChange,
-    PrecisionCommitment, PrecisionPrediction, PrecisionPredictionsPage, ProtocolHealthStatus,
+    LeaderboardEntry, OracleRotationProposal, PendingConfigChange,
+    PrecisionCommitment, PrecisionPrediction, ProtocolHealthStatus,
     Round, RoundArchiveStatus, RoundTemplate, SeasonArchive, SeasonLeaderboardEntry,
-    UpdownPositionsPage, UserPosition, UserStats,
+    UserPosition, UserStats,
 };
