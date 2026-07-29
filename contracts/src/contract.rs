@@ -8,10 +8,11 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    OracleHeartbeatRecord, OraclePayload, OracleRotationProposal, PendingConfigChange,
-    PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus,
-    RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode, SimulationResult,
-    UserPosition, UserRoundOutcome, UserStats,
+    LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
+    PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
+    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
+    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
+    UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -85,6 +86,7 @@ use crate::admin;
 use crate::betting;
 use crate::common;
 use crate::config;
+use crate::leaderboard;
 use crate::queries;
 use crate::settlement;
 
@@ -790,6 +792,61 @@ impl VirtualTokenContract {
     /// Does not mutate storage. Returns SimulationResult.
     pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, ContractError> {
         queries::simulate_payout(env, final_price)
+    }
+
+    // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────
+
+    /// Paginated lifetime wins leaderboard (all-time, independent of seasons).
+    pub fn get_leaderboard_by_wins(env: Env, offset: u32, limit: u32) -> Vec<LeaderboardEntry> {
+        leaderboard::get_leaderboard_by_wins(env, offset, limit)
+    }
+
+    /// Paginated lifetime best-streak leaderboard (all-time, independent of seasons).
+    pub fn get_leaderboard_by_streak(env: Env, offset: u32, limit: u32) -> Vec<LeaderboardEntry> {
+        leaderboard::get_leaderboard_by_streak(env, offset, limit)
+    }
+
+    /// Returns the id of the currently-active leaderboard season (default 1).
+    pub fn get_current_season_id(env: Env) -> u32 {
+        leaderboard::get_current_season_id(env)
+    }
+
+    /// Returns a user's season-scoped stats for `season_id` (active or archived).
+    pub fn get_season_user_stats(env: Env, season_id: u32, user: Address) -> UserStats {
+        leaderboard::get_season_user_stats(env, season_id, user)
+    }
+
+    /// Freezes the active season's rankings into a permanent archive and
+    /// advances to the next season (admin only). Returns the new season id.
+    pub fn reset_leaderboard_season(env: Env) -> Result<u32, ContractError> {
+        leaderboard::reset_leaderboard_season(env)
+    }
+
+    /// Returns the frozen archive for a past season, if it has been reset.
+    pub fn get_season_archive(env: Env, season_id: u32) -> Option<SeasonArchive> {
+        leaderboard::get_season_archive(env, season_id)
+    }
+
+    /// Paginated wins leaderboard for `season_id` — live for the active
+    /// season, frozen archive for any past season.
+    pub fn get_season_leaderboard_by_wins(
+        env: Env,
+        season_id: u32,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<SeasonLeaderboardEntry> {
+        leaderboard::get_season_leaderboard_by_wins(env, season_id, offset, limit)
+    }
+
+    /// Paginated best-streak leaderboard for `season_id` — live for the
+    /// active season, frozen archive for any past season.
+    pub fn get_season_leaderboard_by_streak(
+        env: Env,
+        season_id: u32,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<SeasonLeaderboardEntry> {
+        leaderboard::get_season_leaderboard_by_streak(env, season_id, offset, limit)
     }
 }
 

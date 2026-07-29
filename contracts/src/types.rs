@@ -142,6 +142,28 @@ pub enum DataKey {
     /// up the next round without re-specifying `start_price` / `mode` each
     /// time. Absent means no template is configured.
     RoundTemplate,
+    /// Bounded index of user addresses sorted by lifetime total wins
+    /// descending (all-time leaderboard, independent of seasons).
+    LeaderboardWins,
+    /// Bounded index of user addresses sorted by lifetime best streak
+    /// descending (all-time leaderboard, independent of seasons).
+    LeaderboardStreak,
+    /// Monotonically increasing id of the currently-active leaderboard
+    /// season. Absent is treated as season 1.
+    SeasonId,
+    /// Per-season, per-user win/loss/streak stats: (season_id, address) →
+    /// UserStats, scoped independently of the lifetime `UserStats` totals so
+    /// a season reset never touches lifetime history.
+    SeasonUserStats(u32, Address),
+    /// Bounded index of user addresses in the *active* season sorted by
+    /// season-scoped total wins descending.
+    SeasonLeaderboardWins,
+    /// Bounded index of user addresses in the *active* season sorted by
+    /// season-scoped best streak descending.
+    SeasonLeaderboardStreak,
+    /// Frozen snapshot of a season's final rankings, written when the season
+    /// is reset. Seasons are never deleted — this is a permanent archive.
+    SeasonArchive(u32),
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
@@ -533,4 +555,36 @@ pub struct SimulationResult {
 pub struct RoundTemplate {
     pub start_price: u128,
     pub mode: Option<u32>,
+}
+
+/// A single entry in the lifetime (all-time) leaderboard.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeaderboardEntry {
+    pub user: Address,
+    pub stats: UserStats,
+}
+
+/// A single entry in a season-scoped leaderboard, live or archived.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeasonLeaderboardEntry {
+    pub user: Address,
+    pub wins: u32,
+    pub best_streak: u32,
+}
+
+/// Frozen snapshot of a season's final bounded rankings, written by
+/// `reset_leaderboard_season`. `participant_count` is the number of distinct
+/// addresses that appeared in either bounded index at reset time (a lower
+/// bound on total season participants beyond the tracked top
+/// `LEADERBOARD_LIMIT`, mirroring the same bound the live indexes enforce).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeasonArchive {
+    pub season_id: u32,
+    pub ended_at_ledger: u32,
+    pub wins: Vec<SeasonLeaderboardEntry>,
+    pub streak: Vec<SeasonLeaderboardEntry>,
+    pub participant_count: u32,
 }

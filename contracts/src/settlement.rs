@@ -1382,7 +1382,7 @@ pub fn _refund_under_threshold(
 }
 
 pub fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> {
-    let key = DataKey::UserStats(user);
+    let key = DataKey::UserStats(user.clone());
     let mut stats: UserStats = env.storage().persistent().get(&key).unwrap_or(UserStats {
         total_wins: 0,
         total_losses: 0,
@@ -1405,11 +1405,13 @@ pub fn _update_stats_win(env: &Env, user: Address) -> Result<(), ContractError> 
 
     env.storage().persistent().set(&key, &stats);
     _extend_persistent_ttl(env, &key);
+    crate::leaderboard::_update_leaderboards(env, user.clone());
+    crate::leaderboard::_update_season_stats_win(env, user)?;
     Ok(())
 }
 
 pub fn _update_stats_loss(env: &Env, user: Address) -> Result<(), ContractError> {
-    let key = DataKey::UserStats(user);
+    let key = DataKey::UserStats(user.clone());
     let mut stats: UserStats = env.storage().persistent().get(&key).unwrap_or(UserStats {
         total_wins: 0,
         total_losses: 0,
@@ -1425,5 +1427,7 @@ pub fn _update_stats_loss(env: &Env, user: Address) -> Result<(), ContractError>
 
     env.storage().persistent().set(&key, &stats);
     _extend_persistent_ttl(env, &key);
+    crate::leaderboard::_update_leaderboards(env, user.clone());
+    crate::leaderboard::_update_season_stats_loss(env, user)?;
     Ok(())
 }

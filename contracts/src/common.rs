@@ -9,6 +9,10 @@ pub const MAX_MIN_PARTICIPANTS: u32 = 10_000;
 pub const DEFAULT_MAX_PRECISION_PARTICIPANTS: u32 = 1_000;
 pub const MAX_PRECISION_PARTICIPANTS_LIMIT: u32 = 10_000;
 pub const MAX_PAGE_SIZE: u32 = 100;
+/// Maximum entries retained in each bounded leaderboard index (lifetime and
+/// per-season). Keeps insertion-sort maintenance cost bounded on every
+/// win/loss update, at the cost of not tracking ranks below the top N.
+pub const LEADERBOARD_LIMIT: u32 = 100;
 
 // ─── Oracle heartbeat limits ──────────────────────────────────────────────────
 pub const DEFAULT_ORACLE_STALE_THRESHOLD: u64 = 3_600; // 1 hour
