@@ -2,7 +2,11 @@
 use crate::admin::{_ensure_not_paused, _require_supported_schema};
 use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
-    payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
+    payout_add, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
+};
+use crate::settlement_math::{
+    classify_price_direction, compute_deviation_bps, compute_updown_winner_payout,
+    is_one_sided_pool, total_pot_updown, PriceDirection,
 };
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
@@ -267,28 +271,7 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         .get::<_, u32>(&DataKey::OracleMaxDeviationBps)
     {
         let start_price = round.price_start;
-        if start_price == 0 {
-            return Err(ContractError::InvalidPrice);
-        }
-
-        let diff = if payload.price >= start_price {
-            payload
-                .price
-                .checked_sub(start_price)
-                .ok_or(ContractError::Overflow)?
-        } else {
-            start_price
-                .checked_sub(payload.price)
-                .ok_or(ContractError::Overflow)?
-        };
-
-        let diff_bps_u128 = diff
-            .checked_mul(10_000u128)
-            .ok_or(ContractError::Overflow)?
-            / start_price;
-        let diff_bps: u32 = diff_bps_u128
-            .try_into()
-            .map_err(|_| ContractError::Overflow)?;
+        let diff_bps = compute_deviation_bps(payload.price, start_price)?;
 
         let override_armed: bool = env
             .storage()
@@ -500,15 +483,18 @@ pub fn _resolve_updown_mode(
         .unwrap_or(Vec::new(env));
     let participants = sort_addresses(participants);
 
-    let price_went_up = final_price > round.price_start;
-    let price_went_down = final_price < round.price_start;
-    let price_unchanged = final_price == round.price_start;
+    // Pure price-direction classification and one-sided check delegated to
+    // settlement_math for auditability and golden-vector coverage.
+    let direction = classify_price_direction(round.price_start, final_price);
+    let price_unchanged = direction == PriceDirection::Unchanged;
+    let price_went_up = direction == PriceDirection::Up;
+    let price_went_down = direction == PriceDirection::Down;
 
     // One-sided: exactly one pool is empty (XOR).  Regardless of which way
     // price moved, if the winning-side pool is 0 there are no winners to pay,
     // and if the losing-side pool is 0 there is nothing to distribute — in
     // both cases every participant gets a full refund.
-    let is_one_sided = (round.pool_up == 0) != (round.pool_down == 0);
+    let is_one_sided = is_one_sided_pool(round.pool_up, round.pool_down);
 
     let mut fee_amount = 0;
 
@@ -622,8 +608,11 @@ pub fn _record_winnings_legacy(
         if let Some(user) = keys.get(i) {
             if let Some(position) = positions.get(user.clone()) {
                 if position.side == winning_side {
-                    let payout =
-                        payout_mul(position.amount, total_distributable)? / original_winning_pool;
+                    let payout = compute_updown_winner_payout(
+                        position.amount,
+                        original_winning_pool,
+                        total_distributable,
+                    )?;
 
                     _accumulate_pending(env, user.clone(), payout)?;
                     _update_stats_win(env, user.clone())?;
@@ -681,7 +670,7 @@ pub fn _record_winnings_legacy(
     Ok(fee_amount)
 }
 
-pub fn _resolve_precision_mode(
+pub fn _resolve_precision_mode (
     env: &Env,
     round_id: u64,
     final_price: u128,
@@ -1050,8 +1039,11 @@ pub fn _record_winnings_indexed(
             let pos_key = DataKey::Position(round_id, user.clone());
             if let Some(position) = env.storage().persistent().get::<_, UserPosition>(&pos_key) {
                 if position.side == winning_side {
-                    let payout =
-                        payout_mul(position.amount, total_distributable)? / original_winning_pool;
+                    let payout = compute_updown_winner_payout(
+                        position.amount,
+                        original_winning_pool,
+                        total_distributable,
+                    )?;
 
                     _accumulate_pending(env, user.clone(), payout)?;
                     _update_stats_win(env, user.clone())?;
@@ -1137,7 +1129,7 @@ pub fn _archive_round(
     let mut total_pot: i128 = 0;
     match round.mode {
         RoundMode::UpDown => {
-            total_pot = round.pool_up.checked_add(round.pool_down).unwrap_or(0);
+            total_pot = total_pot_updown(round.pool_up, round.pool_down);
         }
         RoundMode::Precision => {
             let participants: Vec<Address> = env
