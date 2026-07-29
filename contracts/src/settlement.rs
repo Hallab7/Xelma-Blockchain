@@ -11,6 +11,7 @@ use crate::types::{
     PrecisionPrediction, Round, RoundArchiveStatus, RoundMode, UserOutcomeType, UserPosition,
     UserRoundOutcome, UserStats,
 };
+use crate::storage::clear_round_storage;
 use soroban_sdk::{symbol_short, Address, Env, Map, Vec};
 
 /// Cancels the active round and deterministically refunds all participant stakes.
@@ -68,7 +69,6 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
                             pos.amount,
                             UserOutcomeType::Cancel,
                         );
-                        env.storage().persistent().remove(&pos_key);
                     }
                 }
             }
@@ -108,12 +108,13 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
                         refund_amount,
                         UserOutcomeType::Cancel,
                     );
-                    env.storage().persistent().remove(&pred_key);
-                    env.storage().persistent().remove(&commit_key);
                 }
             }
         }
     }
+
+    // Canonical cleanup: removes ALL position keys + shared keys + legacy keys
+    clear_round_storage(&env, round_id, &participants);
 
     // Clean up participant list and mark round as cancelled
     let participant_count = participants.len();
@@ -128,11 +129,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
 
     env.storage()
         .persistent()
-        .remove(&DataKey::RoundParticipants(round_id));
-    env.storage()
-        .persistent()
         .set(&DataKey::CancelledRound(round_id), &true);
-    env.storage().persistent().remove(&DataKey::ActiveRound);
 
     // Emit cancellation event
     #[allow(deprecated)]
@@ -449,29 +446,8 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         fee_amount,
     );
 
-    for i in 0..participants.len() {
-        if let Some(user) = participants.get(i) {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::Position(round_id, user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKey::PrecisionPosition(round_id, user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKey::PrecisionCommitment(round_id, user));
-        }
-    }
-    env.storage()
-        .persistent()
-        .remove(&DataKey::RoundParticipants(round_id));
-
-    env.storage().persistent().remove(&DataKey::ActiveRound);
-    env.storage().persistent().remove(&DataKey::Positions);
-    env.storage().persistent().remove(&DataKey::UpDownPositions);
-    env.storage()
-        .persistent()
-        .remove(&DataKey::PrecisionPositions);
+    // Canonical cleanup: removes ALL position keys + shared keys
+    clear_round_storage(&env, round_id, &participants);
 
     let mode_value: u32 = match round.mode {
         RoundMode::UpDown => 0,
@@ -1356,28 +1332,8 @@ pub fn _refund_under_threshold(
             }
         }
     }
-    for i in 0..participants.len() {
-        if let Some(user) = participants.get(i) {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::Position(round_id, user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKey::PrecisionPosition(round_id, user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKey::PrecisionCommitment(round_id, user));
-        }
-    }
-    env.storage()
-        .persistent()
-        .remove(&DataKey::RoundParticipants(round_id));
-    env.storage().persistent().remove(&DataKey::ActiveRound);
-    env.storage().persistent().remove(&DataKey::Positions);
-    env.storage().persistent().remove(&DataKey::UpDownPositions);
-    env.storage()
-        .persistent()
-        .remove(&DataKey::PrecisionPositions);
+    // Canonical cleanup: removes ALL position keys + shared keys
+    clear_round_storage(env, round_id, participants);
     Ok(())
 }
 

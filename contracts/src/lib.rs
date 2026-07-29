@@ -24,6 +24,7 @@ mod errors;
 mod leaderboard;
 mod queries;
 mod settlement;
+mod storage;
 mod types;
 
 #[cfg(test)]
