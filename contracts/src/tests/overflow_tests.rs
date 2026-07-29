@@ -247,6 +247,118 @@ fn test_claim_winnings_near_max_succeeds() {
     assert_eq!(client.get_pending_winnings(&user), 0);
 }
 
+// ─── claim_winnings boundary: balance + pending = i128::MAX exactly (non-zero balance) ──
+
+/// balance = i128::MAX - 100, pending = 100 → new_balance = i128::MAX (boundary, no overflow).
+/// Verifies that the maximum valid i128 value can be reached via claim without overflow.
+#[test]
+fn test_claim_winnings_boundary_max_exact() {
+    let (env, contract_id, client) = setup();
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &oracle);
+
+    env.as_contract(&contract_id, || {
+        let bal_key = DataKey::Balance(user.clone());
+        env.storage()
+            .persistent()
+            .set(&bal_key, &(i128::MAX - 100));
+        let win_key = DataKey::PendingWinnings(user.clone());
+        env.storage().persistent().set(&win_key, &100i128);
+    });
+
+    let claimed = client.claim_winnings(&user);
+    assert_eq!(claimed, 100);
+    assert_eq!(client.balance(&user), i128::MAX);
+    assert_eq!(client.get_pending_winnings(&user), 0);
+}
+
+// ─── claim_winnings boundary: balance + pending = i128::MAX (zero balance) ──
+
+/// balance = 0, pending = i128::MAX - 1 → new_balance = i128::MAX - 1 (boundary).
+#[test]
+fn test_claim_winnings_boundary_max_minus_one() {
+    let (env, contract_id, client) = setup();
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &oracle);
+
+    env.as_contract(&contract_id, || {
+        let win_key = DataKey::PendingWinnings(user.clone());
+        env.storage()
+            .persistent()
+            .set(&win_key, &(i128::MAX - 1));
+    });
+
+    let claimed = client.claim_winnings(&user);
+    assert_eq!(claimed, i128::MAX - 1);
+    assert_eq!(client.balance(&user), i128::MAX - 1);
+    assert_eq!(client.get_pending_winnings(&user), 0);
+}
+
+// ─── claim_winnings idempotency: repeat claim after successful claim returns 0 ──
+
+/// After a successful claim, any subsequent claim must return 0 and leave state unchanged.
+#[test]
+fn test_claim_winnings_repeat_idempotent() {
+    let (env, contract_id, client) = setup();
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user);
+
+    client.create_round(&1_0000000u128, &None);
+    client.place_bet(&user, &100_0000000, &BetSide::Up);
+
+    resolve_updown(&env, &client, &contract_id, 2_0000000, 12);
+
+    // First claim succeeds
+    let first = client.claim_winnings(&user);
+    assert!(first > 0, "first claim should return non-zero");
+    let bal_after_first = client.balance(&user);
+
+    // Second claim returns 0, balance unchanged
+    let second = client.claim_winnings(&user);
+    assert_eq!(second, 0, "repeat claim must return 0");
+    assert_eq!(
+        client.balance(&user),
+        bal_after_first,
+        "balance unchanged on repeat claim"
+    );
+    assert_eq!(
+        client.get_pending_winnings(&user),
+        0,
+        "pending remains 0 after repeat claim"
+    );
+}
+
+// ─── claim_winnings zero-pending: early return before any state mutation ──
+
+/// Calling claim_winnings with no pending winnings returns 0 without modifying storage.
+#[test]
+fn test_claim_winnings_zero_pending_no_mutation() {
+    let (env, _contract_id, client) = setup();
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&user);
+
+    let bal_before = client.balance(&user);
+    let claimed = client.claim_winnings(&user);
+
+    assert_eq!(claimed, 0, "zero pending must return 0");
+    assert_eq!(client.balance(&user), bal_before, "balance unchanged");
+    assert_eq!(client.get_pending_winnings(&user), 0, "pending stays 0");
+}
+
 // ─── Pending winnings cap tests (Issue #120) ─────────────────────────────────
 
 #[test]

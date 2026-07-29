@@ -152,11 +152,48 @@ pub fn is_round_cancelled(env: Env, round_id: u64) -> bool {
         .unwrap_or(false)
 }
 
-/// Claims pending winnings and adds to balance
+/// Claims pending winnings and adds to user balance.
+///
+/// # CEI Ordering (Checks-Effects-Interactions)
+///
+/// **Checks**:
+/// 1. Schema version is supported.
+/// 2. Caller (`user`) authenticates.
+/// 3. Contract is not in `FullyPaused` mode (Normal & ClaimsOnly are permitted).
+/// 4. Pending winnings must be non-zero — early return for zero-pending (idempotent).
+/// 5. `balance + pending` must not overflow i128 (guarded by `payout_add`).
+///
+/// Note: `balance()` internally extends the TTL of the Balance storage key
+/// (a read-side persistence operation). This is benign — TTL bumping does not
+/// affect state semantics and is safe to perform before the Effects phase.
+///
+/// **Effects** (applied in strict order):
+/// 1. Remove the `PendingWinnings` slot FIRST — prevents double-claim races.
+/// 2. Write the new balance to the user's `Balance` slot — committed only after
+///    the pending slot is cleared.
+///
+/// **Interactions**:
+/// 1. Emit `(claim, winnings)` event with the full claim context *after* all
+///    state is finalised, so observers always see a consistent ledger state.
+///
+/// # Overflow Safety
+///
+/// Safe `i128` arithmetic via `payout_add` for the `pending → balance` transfer.
+/// If `current_balance + pending` overflows i128, the function returns
+/// `PayoutOverflow` and NO storage writes occur (all-or-nothing guarantee).
+///
+/// # Mode Compatibility
+///
+/// | `RuntimeMode`    | Behaviour                                                   |
+/// |------------------|-------------------------------------------------------------|
+/// | `Normal`    (0)  | Claim allowed (standard flow).                              |
+/// | `ClaimsOnly` (1) | Claim allowed (round settled/cancelled, only claims useful).|
+/// | `FullyPaused`(2) | Claim rejected with `ContractPaused`.                       |
 pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
+    // ── Checks ────────────────────────────────────────────────────────────
     _require_supported_schema(&env)?;
     user.require_auth();
-    _ensure_not_paused(&env)?;
+    _ensure_not_paused(&env)?; // rejects FullyPaused; allows Normal & ClaimsOnly
 
     let key = DataKey::PendingWinnings(user.clone());
     let pending: i128 = env.storage().persistent().get(&key).unwrap_or(0);
@@ -168,13 +205,20 @@ pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
     let current_balance = balance(env.clone(), user.clone());
     let new_balance = payout_add(current_balance, pending)?;
 
+    // ── Effects ───────────────────────────────────────────────────────────
+    // 1. Remove the pending-winnings claim slot first (prevent double-claim).
     env.storage().persistent().remove(&key);
+
+    // 2. Credit the user balance only after the claim slot is cleared.
     _set_balance(&env, user.clone(), new_balance);
 
+    // ── Interactions ──────────────────────────────────────────────────────
+    // Emit a structured event reflecting the *committed* state so indexers
+    // always observe a consistent view (old balance, claimed amount, new balance).
     #[allow(deprecated)]
     env.events().publish(
         (symbol_short!("claim"), symbol_short!("winnings")),
-        (user, pending),
+        (user.clone(), pending, current_balance, new_balance),
     );
 
     Ok(pending)
