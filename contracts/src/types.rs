@@ -187,6 +187,8 @@ pub enum ConfigChangeKind {
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
     EpochMintBudget = 12,
+    PrecisionPayoutPolicy = 13,
+    EarlyCashoutBps = 14,
 }
 
 /// Payload for a scheduled critical config change.
@@ -206,6 +208,8 @@ pub enum ConfigChangePayload {
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
     EpochMintBudget(i128),
+    PrecisionPayoutPolicy(u32),
+    EarlyCashoutBps(Option<u32>),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.
@@ -783,7 +787,9 @@ pub enum ConfigChangeKind {
     MintLimit = 9,
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
-    PrecisionPayoutPolicy = 12,
+    EpochMintBudget = 12,
+    PrecisionPayoutPolicy = 13,
+    EarlyCashoutBps = 14,
 }
 
 /// Payload for a scheduled critical config change.
@@ -802,7 +808,9 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
+    EpochMintBudget(i128),
     PrecisionPayoutPolicy(u32),
+    EarlyCashoutBps(Option<u32>),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.

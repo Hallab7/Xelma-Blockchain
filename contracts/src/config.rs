@@ -693,6 +693,7 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
     }
 
     let key = DataKey::EarlyCashoutBps;
+    let old_bps: Option<u32> = env.storage().persistent().get(&key);
     if let Some(v) = bps {
         env.storage().persistent().set(&key, &v);
         _extend_persistent_ttl(&env, &key);
@@ -704,6 +705,12 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
     env.events().publish(
         (symbol_short!("config"), symbol_short!("ec_bps")),
         (bps,),
+    );
+    _emit_config_updated(
+        &env,
+        ConfigChangeKind::EarlyCashoutBps,
+        ConfigChangePayload::EarlyCashoutBps(old_bps),
+        ConfigChangePayload::EarlyCashoutBps(bps),
     );
     Ok(())
 }
@@ -972,11 +979,16 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
             env.storage()
                 .instance()
                 .get(&EPOCH_MINT_BUDGET_KEY)
+                .unwrap_or(0),
+        ),
         ConfigChangeKind::PrecisionPayoutPolicy => ConfigChangePayload::PrecisionPayoutPolicy(
             env.storage()
                 .persistent()
                 .get(&DataKey::PrecisionPayoutPolicy)
                 .unwrap_or(0),
+        ),
+        ConfigChangeKind::EarlyCashoutBps => ConfigChangePayload::EarlyCashoutBps(
+            env.storage().persistent().get(&DataKey::EarlyCashoutBps),
         ),
     }
 }
@@ -1138,6 +1150,23 @@ pub fn _apply_config_payload(
             let key = DataKey::PrecisionPayoutPolicy;
             env.storage().persistent().set(&key, policy);
             _extend_persistent_ttl(env, &key);
+        }
+        (
+            ConfigChangeKind::EarlyCashoutBps,
+            ConfigChangePayload::EarlyCashoutBps(bps),
+        ) => {
+            if let Some(v) = bps {
+                if *v == 0 || *v > MAX_PROTOCOL_FEE_BPS {
+                    return Err(ContractError::InvalidProtocolFeeBps);
+                }
+            }
+            let key = DataKey::EarlyCashoutBps;
+            if let Some(v) = bps {
+                env.storage().persistent().set(&key, v);
+                _extend_persistent_ttl(env, &key);
+            } else {
+                env.storage().persistent().remove(&key);
+            }
         }
         _ => return Err(ContractError::InvalidMode),
     }

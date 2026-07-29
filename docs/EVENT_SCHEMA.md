@@ -242,7 +242,46 @@ Emitted for every admin configuration mutation when a value is actually written,
 
 Example payload for a windows update: `(Windows, Windows(6, 12), Windows(10, 20))`.
 
-`ConfigChangeKind` values currently include `Windows`, `MaxStake`, `MaxUserRoundExposure`, `MaxPendingWinnings`, `OracleStaleThreshold`, `OracleMaxDeviationBps`, `ProtocolFeeBps`, `MinParticipants`, `MaxPrecisionParticipants`, `MintLimit`, and `ArchiveRetention`.
+`ConfigChangeKind` values currently include `Windows`, `MaxStake`, `MaxUserRoundExposure`, `MaxPendingWinnings`, `OracleStaleThreshold`, `OracleMaxDeviationBps`, `ProtocolFeeBps`, `MinParticipants`, `MaxPrecisionParticipants`, `MintLimit`, `ArchiveRetention`, `CloseBufferLedgers`, `EpochMintBudget`, `PrecisionPayoutPolicy`, and `EarlyCashoutBps`.
+
+---
+
+### `("config", "sched")`
+
+Emitted when a critical risk configuration change is scheduled for timelocked activation.
+
+| Position | Field               | Type               | Description                                           |
+|----------|---------------------|--------------------|-------------------------------------------------------|
+| 0        | `kind`              | `ConfigChangeKind` | Configuration key being scheduled.                    |
+| 1        | `activation_ledger` | `u32`              | Ledger sequence at which change becomes eligible.     |
+
+Example: `(Windows, 1440)`.
+
+---
+
+### `("config", "applied")`
+
+Emitted when a previously scheduled configuration change passes its timelock delay and is applied.
+
+| Position | Field               | Type               | Description                                           |
+|----------|---------------------|--------------------|-------------------------------------------------------|
+| 0        | `kind`              | `ConfigChangeKind` | Configuration key that was applied.                   |
+| 1        | `activation_ledger` | `u32`              | Target activation ledger sequence.                    |
+
+Example: `(Windows, 1440)`.
+
+---
+
+### `("config", "cancel")`
+
+Emitted when an authorized admin cancels a scheduled configuration change before its activation ledger.
+
+| Position | Field          | Type               | Description                                           |
+|----------|----------------|--------------------|-------------------------------------------------------|
+| 0        | `kind`         | `ConfigChangeKind` | Configuration key whose schedule was cancelled.       |
+| 1        | `cancelled_at` | `u32`              | Ledger sequence at which cancellation occurred.       |
+
+Example: `(MaxStake, 1500)`.
 
 ---
 
