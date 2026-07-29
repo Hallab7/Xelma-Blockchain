@@ -164,6 +164,12 @@ pub enum DataKey {
     /// Frozen snapshot of a season's final rankings, written when the season
     /// is reset. Seasons are never deleted — this is a permanent archive.
     SeasonArchive(u32),
+    /// Optional early cash-out penalty rate in basis points.
+    /// `None` (key absent) means early cash-out is disabled.
+    /// `Some(bps)` enables early cash-out during the Running phase for UpDown
+    /// rounds; the penalty rate determines how much of the stake is forfeited
+    /// to the protocol treasury (e.g. 1000 = 10% penalty, user gets 90% back).
+    EarlyCashoutBps,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.

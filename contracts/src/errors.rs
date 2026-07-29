@@ -102,4 +102,12 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Early cash-out is disabled (EarlyCashoutBps not configured)
+    EarlyCashoutDisabled = 66,
+    /// Early cash-out is only allowed during the Running phase
+    EarlyCashoutPhaseInvalid = 67,
+    /// Early cash-out is only supported for UpDown rounds
+    EarlyCashoutNotUpDown = 68,
+    /// User has no active position in the current round
+    PositionNotFound = 69,
 }

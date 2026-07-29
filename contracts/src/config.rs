@@ -563,6 +563,58 @@ pub fn get_round_template(env: Env) -> Option<RoundTemplate> {
     env.storage().persistent().get(&key)
 }
 
+// ─── Early cash-out ──────────────────────────────────────────────────────────
+
+/// Sets the early cash-out penalty rate in basis points (admin only).
+/// `None` disables early cash-out entirely (default).
+/// `Some(bps)` enables it with the given penalty rate (1–1000 bps, i.e. 0.01%–10%).
+pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("ec_bps"), e);
+    })?;
+
+    if let Some(v) = bps {
+        if v == 0 || v > MAX_PROTOCOL_FEE_BPS {
+            _emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("ec_bps"),
+                ContractError::InvalidProtocolFeeBps,
+            );
+            return Err(ContractError::InvalidProtocolFeeBps);
+        }
+    }
+
+    let key = DataKey::EarlyCashoutBps;
+    if let Some(v) = bps {
+        env.storage().persistent().set(&key, &v);
+        _extend_persistent_ttl(&env, &key);
+    } else {
+        env.storage().persistent().remove(&key);
+    }
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("config"), symbol_short!("ec_bps")),
+        (bps,),
+    );
+    Ok(())
+}
+
+/// Returns the configured early cash-out penalty bps, if enabled.
+pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
+    let key = DataKey::EarlyCashoutBps;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
 /// Same validation `create_round` performs on `(start_price, mode)`, applied
 /// up front at template-set time so a stored template can never later fail
 /// `create_round`'s own checks for a reason unrelated to round overlap.
