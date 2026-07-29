@@ -188,6 +188,11 @@ prove liveness.
 `is_oracle_live()` returns `false` if no heartbeat exists, status is `2`, or the
 heartbeat is older than the threshold.
 
+**Heartbeat health gate (strict mode, Issue #264):** When `HbGateConfig.strict_mode`
+is enabled by the admin, `resolve_round` blocks settlement if the oracle heartbeat
+is not live. An admin-armed one-shot override (`arm_hb_override`) or a configured
+grace period (`HbGateConfig.grace_seconds`) can allow settlement through the gate.
+
 **Recommended interval:** every 15–30 minutes for a 1-hour threshold.
 
 ---
