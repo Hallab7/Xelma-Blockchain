@@ -12,6 +12,33 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Protocol fee incidence model — determines what fee-on-pot vs fee-on-winnings means.
+///
+/// - `FeeOnPot` (default): fee is a proportion of the **total pot** (all stakes).
+/// - `FeeOnWinnings`: fee is a proportion of the **net winnings** (profit) only;
+///   winners always retain their full principal.
+///
+/// When `ProtocolFeeBps` is `None` (fee disabled), both models produce identical
+/// results (fee = 0).
+///
+/// ## Economic difference (UpDown, 10% fee)
+///
+/// | Model          | Pot   | Fee   | Winner gets          |
+/// |----------------|-------|-------|----------------------|
+/// | FeeOnPot       | 100   | 10    | 90 (principal eroded)|
+/// | FeeOnWinnings   | 100   | 5*    | 95 (principal intact)|
+///
+/// *Assuming 50/50 split; fee = losing_pool × 10%.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum FeeModel {
+    /// Fee is calculated on the total round pot (all stakes pooled).
+    FeeOnPot = 0,
+    /// Fee is calculated only on the net winnings (profit transferred from losers).
+    FeeOnWinnings = 1,
+}
+
 /// Runtime mode for the contract lifecycle
 #[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -80,6 +107,7 @@ pub enum DataKey {
     PendingConfigChange(ConfigChangeKind),
     ProtocolFeeBps,
     ProtocolFeeTreasury,
+    FeeModel,
     LedgerMintCounter(u32),
     MintLimitConfig,
     OracleRotationProposal,
@@ -114,6 +142,8 @@ pub enum ConfigChangeKind {
     /// Optional protocol settlement fee in bps (Issue #162).
     /// `None` disables the fee entirely, restoring pre-fee behaviour.
     ProtocolFeeBps = 6,
+    /// Fee incidence model: 0 = FeeOnPot (default), 1 = FeeOnWinnings (Issue #268).
+    FeeModel = 12,
     MinParticipants = 7,
     MaxPrecisionParticipants = 8,
     MintLimit = 9,
@@ -137,6 +167,7 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
+    FeeModel(FeeModel),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.
@@ -491,6 +522,8 @@ pub struct SimulationResult {
     pub pool_down: i128,
     pub precision_total_stake: i128,
     pub fee_amount: i128,
+    /// Fee incidence model used for this simulation: 0 = FeeOnPot, 1 = FeeOnWinnings (Issue #268).
+    pub fee_model: u32,
     pub outcomes: Vec<UserRoundOutcome>,
 }
 

@@ -12,6 +12,7 @@ mod conservation;
 mod cost_benchmarks;
 mod edge_cases;
 mod event_coverage;
+mod fee_model;
 mod guard_tests;
 // mod initialization; // upstream bug
 // mod invariant_harness; // upstream bug: uses std HashMap in no_std context

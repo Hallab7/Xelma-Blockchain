@@ -8,10 +8,11 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
-    PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
-    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
-    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
+    FeeModel, LeaderboardEntry, OracleHeartbeatRecord, OraclePayload,
+    OracleRotationProposal, PendingConfigChange, PrecisionPrediction,
+    ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundPhase,
+    RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode, SeasonArchive,
+    SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
     UserStats,
 };
 
@@ -824,6 +825,21 @@ impl VirtualTokenContract {
         queries::simulate_payout(env, final_price)
     }
 
+    // ─── Fee incidence model (Issue #268) ──────────────────────────────────
+
+    /// Sets the fee incidence model (admin only).
+    ///
+    /// `FeeOnPot` (0): fee is calculated on the total round pot (default).
+    /// `FeeOnWinnings` (1): fee is calculated only on net winnings / profit.
+    pub fn set_fee_model(env: Env, model: FeeModel) -> Result<(), ContractError> {
+        config::set_fee_model(env, model)
+    }
+
+    /// Returns the configured fee incidence model, defaulting to `FeeOnPot`.
+    pub fn get_fee_model(env: Env) -> FeeModel {
+        config::get_fee_model(env)
+    }
+
     // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────
 
     /// Paginated lifetime wins leaderboard (all-time, independent of seasons).
@@ -1080,120 +1096,6 @@ impl VirtualTokenContract {
             }
         }
         Ok(())
-    }
-
-    /// Reads the currently-configured protocol fee in bps (Issue #162).
-    /// Bumps TTL only when the key is present (avoids extra storage writes
-    /// on the hot "fee disabled" path through every competitive settlement).
-    fn _read_protocol_fee_bps(env: &Env) -> Option<u32> {
-        let key = DataKey::ProtocolFeeBps;
-        let v: Option<u32> = env.storage().persistent().get(&key);
-        if v.is_some() {
-            Self::_extend_persistent_ttl(env, &key);
-        }
-        v
-    }
-
-    /// Credits `fee_amount` stroops to the protocol fee treasury and emits
-    /// `("protocol", "fee_collected")` (Issue #162). TTL on the treasury
-    /// key is extended on every write so the cumulative balance never
-    /// falls into archival. Payload mirrors the active bps so indexers
-    /// do not need an extra storage read.
-    fn _collect_protocol_fee(
-        env: &Env,
-        round_id: u64,
-        fee_amount: i128,
-        bps_active: Option<u32>,
-    ) -> Result<(), ContractError> {
-        if fee_amount <= 0 {
-            return Ok(());
-        }
-        let treasury_key = DataKey::ProtocolFeeTreasury;
-        let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
-        let new_treasury = current
-            .checked_add(fee_amount)
-            .ok_or(ContractError::Overflow)?;
-        env.storage().persistent().set(&treasury_key, &new_treasury);
-        Self::_extend_persistent_ttl(env, &treasury_key);
-
-        let bps_value: u32 = bps_active.unwrap_or(0);
-
-        #[allow(deprecated)]
-        env.events().publish(
-            (symbol_short!("protocol"), symbol_short!("collected")),
-            (round_id, fee_amount, new_treasury, bps_value),
-        );
-
-        Ok(())
-    }
-
-    /// Splits a `(winning_pool, losing_pool)` pair into the post-fee pools
-    /// and the treasury's cut, used by both UpDown settlement paths
-    /// (Issue #162). Conservation invariant
-    ///   dist_winning + dist_losing + fee == winning + losing
-    /// holds ALWAYS, even in the pathological case `fee > losing_pool`
-    /// (very thin losing-side liquidity near the bps cap): the spillover
-    /// is then deducted from `winning_pool`, so winners lose a portion
-    /// of their principal rather than the fee being silently dropped.
-    /// Behaviour is documented in `docs/EVENT_SCHEMA.md` and exercised
-    /// by `test_protocol_fee_thin_losing_pool`.
-    fn _apply_protocol_fee_updown(
-        env: &Env,
-        round_id: u64,
-        winning_pool: i128,
-        losing_pool: i128,
-    ) -> Result<(i128, i128, i128), ContractError> {
-        let bps = Self::_read_protocol_fee_bps(env);
-        if bps.is_none() {
-            return Ok((winning_pool, losing_pool, 0));
-        }
-        let bps_value = bps.unwrap();
-        let total_pot = Self::payout_add(winning_pool, losing_pool)?;
-        let fee_amount = total_pot
-            .checked_mul(bps_value as i128)
-            .ok_or(ContractError::Overflow)?
-            / BPS_DENOMINATOR;
-        if fee_amount == 0 {
-            return Ok((winning_pool, losing_pool, 0));
-        }
-        let fee_from_losing = fee_amount.min(losing_pool);
-        let fee_from_winning = fee_amount
-            .checked_sub(fee_from_losing)
-            .ok_or(ContractError::Overflow)?;
-        let dist_winning = winning_pool
-            .checked_sub(fee_from_winning)
-            .ok_or(ContractError::Overflow)?;
-        let dist_losing = losing_pool
-            .checked_sub(fee_from_losing)
-            .ok_or(ContractError::Overflow)?;
-        Self::_collect_protocol_fee(env, round_id, fee_amount, Some(bps_value))?;
-        Ok((dist_winning, dist_losing, fee_amount))
-    }
-
-    /// Splits a precision-mode `total_pot` into the distributable amount
-    /// (split among winners per the existing remainder policy) and the
-    /// treasury's cut (Issue #162). Returns `(distributable, fee_amount)`.
-    fn _apply_protocol_fee_precision(
-        env: &Env,
-        round_id: u64,
-        total_pot: i128,
-    ) -> Result<(i128, i128), ContractError> {
-        let bps = Self::_read_protocol_fee_bps(env);
-        if bps.is_none() || total_pot <= 0 {
-            return Ok((total_pot, 0));
-        }
-        let bps_value = bps.unwrap();
-        let fee_amount = total_pot
-            .checked_mul(bps_value as i128)
-            .ok_or(ContractError::Overflow)?
-            / BPS_DENOMINATOR;
-        let distributable = total_pot
-            .checked_sub(fee_amount)
-            .ok_or(ContractError::Overflow)?;
-        if fee_amount > 0 {
-            Self::_collect_protocol_fee(env, round_id, fee_amount, Some(bps_value))?;
-        }
-        Ok((distributable, fee_amount))
     }
 
     fn _emit_action_rejected(env: &Env, actor: &Address, action: Symbol, reason: ContractError) {

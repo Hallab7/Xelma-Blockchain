@@ -201,6 +201,7 @@ Emitted when a round is resolved, cancelled, or refunded. Contains compact settl
 | 5        | `total_pot`         | `i128` | Total accumulated round pot (in stroops)                              |
 | 6        | `fee_amount`        | `i128` | Total protocol fees collected from the round pot (in stroops)         |
 | 7        | `status`            | `u32`  | Round status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund   |
+| 8        | `fee_model`         | `u32`  | Fee incidence model: `0` = FeeOnPot, `1` = FeeOnWinnings (Issue #268) |
 
 ---
 
@@ -351,21 +352,22 @@ let resolved = events.iter().find(|(_, topics, _)| {
 
 ---
 
-## `("protocol", "fee_collected")` — Competitive-settlement fee accrual
+## `("protocol", "fee_coll")` — Competitive-settlement fee accrual
 
 Emitted by every competitive-settlement path (UpDown indexed/legacy, Precision
 indexed/legacy) when the protocol fee is enabled (Issue #162). NOT emitted on
 refund / cancel / fallback paths — those return users' full stake and the
 treasury stays flat.
 
-| Field         | Type      | Description                                                |
-|---------------|-----------|------------------------------------------------------------|
-| `round_id`    | `u64`     | The id of the settled round.                                |
-| `fee_amount`  | `i128`    | Stroops routed to the on-chain treasury this round.         |
-| `treasury_balance` | `i128` | Cumulative treasury balance AFTER this round's credit.     |
-| `bps_active`  | `u32`     | The fee's bps that produced `fee_amount` (echoes storage).  |
+| Field              | Type          | Description                                                          |
+|--------------------|---------------|----------------------------------------------------------------------|
+| `round_id`         | `u64`         | The id of the settled round.                                          |
+| `fee_amount`       | `i128`        | Stroops routed to the on-chain treasury this round.                   |
+| `treasury_balance` | `i128`        | Cumulative treasury balance AFTER this round's credit.                |
+| `bps_active`       | `u32`         | The fee's bps that produced `fee_amount` (echoes storage).            |
+| `fee_model`        | `u32`         | Fee incidence model: `0` = FeeOnPot, `1` = FeeOnWinnings (Issue #268).|
 
-**Topics**: `("protocol", "fee_collected")`
+**Topics**: `("protocol", "fee_coll")`
 **Source contracts**: `VirtualTokenContract`
 **Emitted by**: `_record_winnings_indexed`, `_record_winnings_legacy`,
 `_resolve_precision_mode`, `_resolve_precision_legacy`.
@@ -373,9 +375,14 @@ treasury stays flat.
 The conservation invariant
 `Σ payout_i + fee_amount == total_pot` holds for every emission. In the
 UpDown pathological case `fee > losing_pool` (very thin losing-side
-liquidity near the bps cap) the spillover is deducted from `winning_pool`
-so the invariant still holds and winners receive only their residual
-principal — documented inline in `_apply_protocol_fee_updown`.
+liquidity near the bps cap, FeeOnPot model only) the spillover is deducted
+from `winning_pool` so the invariant still holds and winners receive only
+their residual principal — documented inline in `_apply_protocol_fee_updown`.
+
+Under `FeeOnWinnings` (Issue #268) the fee is calculated only on the net
+profit (losing_pool in UpDown; pot - winner_stakes in Precision), so
+winners always retain their full principal and the spillover guard is never
+triggered.
 
 ---
 
