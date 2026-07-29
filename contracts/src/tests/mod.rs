@@ -14,7 +14,7 @@ mod edge_cases;
 mod event_coverage;
 mod guard_tests;
 // mod initialization; // upstream bug
-// mod invariant_harness; // upstream bug: uses std HashMap in no_std context
+mod invariant_harness;
 mod leaderboard;
 mod leaderboard_seasons;
 mod lifecycle;

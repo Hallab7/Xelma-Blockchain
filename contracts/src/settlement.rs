@@ -10,7 +10,7 @@ use crate::common::{
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, HbGateConfig, OracleHeartbeatRecord, OraclePayload,
+    ArchivedRoundSummary, BetSide, DataKey, DataKeyCore, DataKeyScoped, HbGateConfig, OracleHeartbeatRecord, OraclePayload,
     PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction, Round, RoundArchiveStatus,
     RoundMode, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };

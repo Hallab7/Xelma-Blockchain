@@ -557,44 +557,6 @@ pub struct SimulationResult {
 /// so a keeper can spin up the next round after a settle/cancel without an
 /// operator re-specifying parameters each time. Validated with the exact
 /// same rules `create_round` applies at creation time.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct RoundTemplate {
-    pub start_price: u128,
-    pub mode: Option<u32>,
-}
-
-/// A single entry in the lifetime (all-time) leaderboard.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct LeaderboardEntry {
-    pub user: Address,
-    pub stats: UserStats,
-}
-
-/// A single entry in a season-scoped leaderboard, live or archived.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct SeasonLeaderboardEntry {
-    pub user: Address,
-    pub wins: u32,
-    pub best_streak: u32,
-}
-
-/// Frozen snapshot of a season's final bounded rankings, written by
-/// `reset_leaderboard_season`. `participant_count` is the number of distinct
-/// addresses that appeared in either bounded index at reset time (a lower
-/// bound on total season participants beyond the tracked top
-/// `LEADERBOARD_LIMIT`, mirroring the same bound the live indexes enforce).
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct SeasonArchive {
-    pub season_id: u32,
-    pub ended_at_ledger: u32,
-    pub wins: Vec<SeasonLeaderboardEhttps://github.com/TevaLabs/Xelma-Blockchain/pull/333/conflict?name=contracts%252Fsrc%252Ftypes.rs&ancestor_oid=735f63923173255593195f7c70d57cb774f345ed&base_oid=f0df6a8fb8daaf719df411d26dec8789f47d8c30&head_oid=e732bc0716e9c173509d608e6e526f796481a2e8ntry>,
-    pub streak: Vec<SeasonLeaderboardEntry>,
-    pub participant_count: u32,
-}
 // SPDX-License-Identifier: MIT
 //! Type definitions for the XLM Price Prediction Market.
 
