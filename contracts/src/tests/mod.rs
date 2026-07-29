@@ -12,6 +12,7 @@ mod conservation;
 mod cost_benchmarks;
 mod edge_cases;
 mod event_coverage;
+mod fuzz_lifecycle;
 mod guard_tests;
 // mod initialization; // upstream bug
 mod invariant_harness;
