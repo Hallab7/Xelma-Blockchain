@@ -126,6 +126,8 @@ pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<()
         .checked_add(run_ledgers)
         .ok_or(ContractError::Overflow)?;
 
+    let start_timestamp = env.ledger().timestamp();
+
     let round = Round {
         round_id,
         price_start: start_price,
@@ -135,6 +137,7 @@ pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<()
         pool_up: 0,
         pool_down: 0,
         mode: round_mode.clone(),
+        start_timestamp,
     };
 
     env.storage()

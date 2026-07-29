@@ -185,6 +185,7 @@ pub enum ConfigChangeKind {
     MintLimit = 9,
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
+    OracleTimestampSkew = 12,
 }
 
 /// Payload for a scheduled critical config change.
@@ -203,6 +204,7 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
+    OracleTimestampSkew(u64),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.
@@ -302,6 +304,7 @@ pub struct Round {
     pub pool_up: i128,       // Total vXLM bet on UP
     pub pool_down: i128,     // Total vXLM bet on DOWN
     pub mode: RoundMode,     // Round mode: UpDown (0) or Precision (1)
+    pub start_timestamp: u64, // Ledger timestamp when round was created
 }
 
 /// Aggregated active-round pool composition for frontend transparency.

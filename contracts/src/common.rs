@@ -29,6 +29,16 @@ pub const MAX_CLOSE_BUFFER_LEDGERS: u32 = 1_440;
 // ─── Oracle deviation guardrails ─────────────────────────────────────────────
 pub const MAX_ORACLE_DEVIATION_BPS: u32 = 100_000;
 
+// ─── Oracle round-relative timestamp window ──────────────────────────────────
+/// Approximate seconds per ledger for estimating round-end timestamp.
+pub const SECONDS_PER_LEDGER: u64 = 5;
+/// Default skew (seconds) for the round-relative timestamp window.
+pub const DEFAULT_ORACLE_TIMESTAMP_SKEW: u64 = 300;
+/// Minimum allowed skew.
+pub const MIN_ORACLE_TIMESTAMP_SKEW: u64 = 0;
+/// Maximum allowed skew (24 hours).
+pub const MAX_ORACLE_TIMESTAMP_SKEW: u64 = 86_400;
+
 // ─── Protocol fee ────────────────────────────────────────────────
 pub const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
 pub const BPS_DENOMINATOR: i128 = 10_000;

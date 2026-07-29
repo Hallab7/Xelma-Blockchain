@@ -102,4 +102,6 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Oracle payload timestamp is outside the round-relative economic window
+    OracleTimestampOutsideWindow = 66,
 }

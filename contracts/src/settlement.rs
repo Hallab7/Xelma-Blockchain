@@ -3,6 +3,7 @@ use crate::admin::{_ensure_not_paused, _require_supported_schema};
 use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
     payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
+    DEFAULT_ORACLE_TIMESTAMP_SKEW, SECONDS_PER_LEDGER,
 };
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
@@ -235,7 +236,9 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         return Err(ContractError::OracleNetworkMismatch);
     }
 
-    // Verify data freshness (max 300 seconds / 5 minutes old)
+    // Verify timestamp is inside the round-relative economic window.
+    // This replaces the old absolute-freshness (300 s) check which could
+    // accept wrong-phase prices from outside the round's active period.
     let current_time = env.ledger().timestamp();
 
     // Reject future timestamps to prevent time-skew manipulation
@@ -249,14 +252,31 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         return Err(ContractError::FutureOracleData);
     }
 
-    if current_time > payload.timestamp + 300 {
+    let skew: u64 = env
+        .storage()
+        .instance()
+        .get(&symbol_short!("otskew"))
+        .unwrap_or(DEFAULT_ORACLE_TIMESTAMP_SKEW);
+
+    let round_start = round.start_timestamp;
+    let round_duration_ledgers = (round.end_ledger)
+        .checked_sub(round.start_ledger)
+        .ok_or(ContractError::Overflow)?;
+    let round_end_estimate = round_start
+        .checked_add((round_duration_ledgers as u64).checked_mul(SECONDS_PER_LEDGER).ok_or(ContractError::Overflow)?)
+        .ok_or(ContractError::Overflow)?;
+
+    let lower_bound = round_start.saturating_sub(skew);
+    let upper_bound = round_end_estimate.saturating_add(skew);
+
+    if payload.timestamp < lower_bound || payload.timestamp > upper_bound {
         _emit_action_rejected(
             &env,
             &oracle,
             symbol_short!("resolve"),
-            ContractError::StaleOracleData,
+            ContractError::OracleTimestampOutsideWindow,
         );
-        return Err(ContractError::StaleOracleData);
+        return Err(ContractError::OracleTimestampOutsideWindow);
     }
 
     // Oracle deviation guardrails
