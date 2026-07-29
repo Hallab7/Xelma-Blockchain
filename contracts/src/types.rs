@@ -164,6 +164,10 @@ pub enum DataKey {
     /// Frozen snapshot of a season's final rankings, written when the season
     /// is reset. Seasons are never deleted — this is a permanent archive.
     SeasonArchive(u32),
+    /// Announced next schema version for migration preview (v-next template).
+    /// When set, operators can inspect this value before executing a real migration.
+    /// Absent means no next migration has been announced.
+    NextSchemaVersion,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
