@@ -3,7 +3,7 @@
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{BetSide, DataKey, OraclePayload, Round, RoundArchiveStatus, RoundMode};
+use crate::types::{BetSide, DataKeyCore, DataKeyScoped, OraclePayload, Round, RoundArchiveStatus, RoundMode};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -251,18 +251,18 @@ fn test_multiple_rounds_lifecycle() {
     client.place_bet(&alice, &100_0000000, &BetSide::Up);
 
     env.as_contract(&contract_id, || {
-        // alice's position is already stored under DataKey::Position by place_bet;
+        // alice's position is already stored under DataKeyScoped::Position by place_bet;
         // we only override the round pool totals to inject a simulated losing pool.
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     // Advance ledger to allow resolution
@@ -293,13 +293,13 @@ fn test_multiple_rounds_lifecycle() {
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 80_0000000;
         round.pool_down = 100_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     // Advance ledger to allow resolution
@@ -817,7 +817,7 @@ fn test_cross_round_mode_alternation() {
 
     // No Precision keys should exist for this round
     env.as_contract(&contract_id, || {
-        let key = DataKey::PrecisionPosition(round1.round_id, alice.clone());
+        let key = DataKeyScoped::PrecisionPosition(round1.round_id, alice.clone());
         assert!(!env.storage().persistent().has(&key));
     });
 
@@ -842,11 +842,11 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round1.round_id, alice.clone())));
+            .has(&DataKeyScoped::Position(round1.round_id, alice.clone())));
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round1.round_id, bob.clone())));
+            .has(&DataKeyScoped::Position(round1.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 1
@@ -873,7 +873,7 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round2.round_id, alice.clone())));
+            .has(&DataKeyScoped::Position(round2.round_id, alice.clone())));
     });
 
     // Resolve at 2298 — Alice closest (diff 1) wins entire pot
@@ -897,11 +897,11 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::PrecisionPosition(round2.round_id, alice.clone())));
+            .has(&DataKeyScoped::PrecisionPosition(round2.round_id, alice.clone())));
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::PrecisionPosition(round2.round_id, bob.clone())));
+            .has(&DataKeyScoped::PrecisionPosition(round2.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 2
@@ -927,7 +927,7 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::PrecisionPosition(round2.round_id, bob.clone())));
+            .has(&DataKeyScoped::PrecisionPosition(round2.round_id, bob.clone())));
     });
 
     // Resolve — DOWN wins (price 2.5 < 3.0)
@@ -951,11 +951,11 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round3.round_id, alice.clone())));
+            .has(&DataKeyScoped::Position(round3.round_id, alice.clone())));
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round3.round_id, bob.clone())));
+            .has(&DataKeyScoped::Position(round3.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 3

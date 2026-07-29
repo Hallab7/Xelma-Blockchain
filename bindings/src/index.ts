@@ -231,6 +231,7 @@ export enum ConfigChangeKind {
   MintLimit = 9,
   ArchiveRetention = 10,
   CloseBufferLedgers = 11,
+  EpochMintBudget = 12,
 }
 
 /**
@@ -257,7 +258,8 @@ export type ConfigChangePayload =
   | {tag: "MaxPrecisionParticipants", values: readonly [u32]}
   | {tag: "MintLimit", values: readonly [u32]}
   | {tag: "ArchiveRetention", values: readonly [u32]}
-  | {tag: "CloseBufferLedgers", values: readonly [u32]};
+  | {tag: "CloseBufferLedgers", values: readonly [u32]}
+  | {tag: "EpochMintBudget", values: readonly [i128]};
 
 
 /**
@@ -496,6 +498,9 @@ export const ContractError = {
    */
   64: {message:"InvalidSalt"},
   /**
+   * Epoch mint budget has been fully consumed
+   */
+  66: {message:"EpochBudgetExceeded"}
    * create_next_from_template called with no round template configured
    */
   65: {message:"NoRoundTemplate"},
@@ -1071,6 +1076,8 @@ export interface Client {
   withdraw_protocol_fee: ({recipient, amount}: {recipient: string, amount: i128}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
   set_mint_limit: ({limit}: {limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
   get_mint_limit: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  set_epoch_mint_budget: ({budget}: {budget: i128}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_epoch_mint_budget: (options?: MethodOptions) => Promise<AssembledTransaction<i128>>
   set_archive_retention: ({limit}: {limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
   get_archive_retention: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
   set_close_buffer_ledgers: ({buffer_ledgers}: {buffer_ledgers: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
@@ -1283,6 +1290,8 @@ export class Client extends ContractClient {
         withdraw_protocol_fee: this.txFromJSON<Result<i128>>,
         set_mint_limit: this.txFromJSON<Result<void>>,
         get_mint_limit: this.txFromJSON<u32>,
+        set_epoch_mint_budget: this.txFromJSON<Result<void>>,
+        get_epoch_mint_budget: this.txFromJSON<i128>,
         set_archive_retention: this.txFromJSON<Result<void>>,
         get_archive_retention: this.txFromJSON<u32>,
         set_close_buffer_ledgers: this.txFromJSON<Result<void>>,

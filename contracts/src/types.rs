@@ -46,15 +46,19 @@ pub enum RoundPhase {
     Resolvable = 3,
 }
 
+/// Parameterless system, config, and metadata storage keys.
+///
+/// Split from `DataKey` to stay under the XDR union 50-case limit
+/// (`VecM<ScSpecUdtUnionCaseV0, 50>` in stellar-xdr).
 /// Storage keys for contract data
 #[contracttype]
 #[derive(Clone)]
-pub enum DataKey {
-    Balance(Address),
+pub enum DataKeyCore {
     Admin,
     Oracle,
     SchemaVersion,
     ActiveRound,
+    Positions,          // Legacy key — read-only migration compat
     UpDownPositions,    // Legacy key — read-only migration compat
     PrecisionPositions, // Legacy key — read-only migration compat
     PendingWinnings(Address),
@@ -64,6 +68,7 @@ pub enum DataKey {
     RunWindowLedgers,
     CloseBufferLedgers,
     LastRoundId,
+    /// Maximum stake allowed per individual bet (None = unlimited)
     Position(u64, Address),
     PrecisionPosition(u64, Address),
     PrecisionCommitment(u64, Address),
@@ -71,6 +76,7 @@ pub enum DataKey {
     MaxStake,
     MaxUserRoundExposure,
     MaxPendingWinnings,
+    /// Minimum participant count for competitive settlement; unset = no minimum enforced
     CancelledRound(u64),
     ConsumedOracleNonce(u64, u64),
     MinParticipants,
@@ -81,6 +87,13 @@ pub enum DataKey {
     OracleDeviationOverrideArmed,
     OracleMinConfidenceBps,
     OracleStrictMode,
+    /// Ordered round ids for archive retention (oldest at index 0).
+    RecentArchivedRoundIds,
+    /// Marker written by migrate_schema_v2_to_v3 to prove the migration ran.
+    MigratedToV3,
+    /// Optional protocol settlement fee in basis points (1 bp = 0.01%).
+    /// `None` (key absent) means fee disabled — no behaviour change.
+    /// Hard cap on fee is enforced at the contract layer, not by storage shape.
     ArchivedRound(u64),
     RecentArchivedRoundIds,
     UserRoundOutcome(u64, Address),
@@ -88,6 +101,7 @@ pub enum DataKey {
     PendingConfigChange(ConfigChangeKind),
     ProtocolFeeBps,
     ProtocolFeeTreasury,
+    /// Mint limit configuration: maximum number of mints allowed per ledger.
     LedgerMintCounter(u32),
     MintLimitConfig,
     OracleRotationProposal,
@@ -104,9 +118,54 @@ pub enum DataKeyExt {
     LeaderboardWins,
     LeaderboardStreak,
     SeasonId,
+    /// Bounded index of user addresses in the *active* season sorted by
+    /// season-scoped total wins descending.
     SeasonUserStats(u32, Address),
     SeasonLeaderboardWins,
     SeasonLeaderboardStreak,
+}
+
+/// Parameterised and round-scoped storage keys.
+///
+/// Split from `DataKey` to stay under the XDR union 50-case limit.
+/// These variants carry per-user, per-round, or compound-key payloads.
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKeyScoped {
+    /// User financial balance
+    Balance(Address),
+    /// User pending winnings accumulator
+    PendingWinnings(Address),
+    /// User performance statistics
+    UserStats(Address),
+    /// Per-user UpDown position: (round_id, address) → UserPosition
+    Position(u64, Address),
+    /// Per-user Precision prediction: (round_id, address) → PrecisionPrediction
+    PrecisionPosition(u64, Address),
+    /// Per-user Precision commitment: (round_id, address) → PrecisionCommitment
+    PrecisionCommitment(u64, Address),
+    /// Ordered participant list for a round: round_id → Vec<Address>
+    RoundParticipants(u64),
+    /// Marker for a cancelled round: round_id → true
+    CancelledRound(u64),
+    /// Per-round consumed oracle nonce: (round_id, nonce) → true.
+    /// Used to reject duplicate oracle payload submissions for the same round.
+    ConsumedOracleNonce(u64, u64),
+    /// Per-user outcome record for a specific archived round (round_id, user).
+    /// Persisted at settlement for user history queries without event replay.
+    UserRoundOutcome(u64, Address),
+    /// Timelocked pending critical config change keyed by change kind.
+    PendingConfigChange(ConfigChangeKind),
+    /// Per-ledger mint counter: wraps the explicit ledger sequence number.
+    LedgerMintCounter(u32),
+    /// Compact post-settlement summary keyed by round id for historical queries.
+    ArchivedRound(u64),
+    /// Per-season, per-user win/loss/streak stats: (season_id, address) →
+    /// UserStats, scoped independently of the lifetime `UserStats` totals so
+    /// a season reset never touches lifetime history.
+    SeasonUserStats(u32, Address),
+    /// Frozen snapshot of a season's final rankings, written when the season
+    /// is reset. Seasons are never deleted — this is a permanent archive.
     SeasonArchive(u32),
 }
 
@@ -217,7 +276,7 @@ pub struct OraclePayload {
     /// The oracle service must generate a unique value per submission for a
     /// given round (e.g. a monotonic counter or random 64-bit value). The
     /// contract records each consumed nonce under
-    /// `DataKey::ConsumedOracleNonce(round_id, nonce)` and rejects any reuse,
+    /// `DataKeyScoped::ConsumedOracleNonce(round_id, nonce)` and rejects any reuse,
     /// making resolution idempotent against accidental duplicate submissions.
     pub nonce: u64,
     /// SHA-256 hash of the network passphrase this payload targets.

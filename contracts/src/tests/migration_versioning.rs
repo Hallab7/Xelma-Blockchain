@@ -4,7 +4,7 @@
 use crate::common::_migrated_key;
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::DataKey;
+use crate::types::{DataKeyCore, DataKeyScoped};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
 
@@ -24,7 +24,7 @@ fn test_rejects_unsupported_schema_version() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::SchemaVersion, &999u32);
+            .set(&DataKeyCore::SchemaVersion, &999u32);
     });
 
     // Any mutating entrypoint should fail clearly.
@@ -46,7 +46,7 @@ fn test_migrate_v1_to_v2_happy_path() {
 
     // Simulate legacy deployment missing schema version (treated as v1).
     env.as_contract(&contract_id, || {
-        env.storage().persistent().remove(&DataKey::SchemaVersion);
+        env.storage().persistent().remove(&DataKeyCore::SchemaVersion);
     });
 
     assert_eq!(client.get_schema_version(), 1u32);
@@ -68,7 +68,7 @@ fn test_migration_blocked_when_round_active() {
 
     // Simulate legacy schema.
     env.as_contract(&contract_id, || {
-        env.storage().persistent().remove(&DataKey::SchemaVersion);
+        env.storage().persistent().remove(&DataKeyCore::SchemaVersion);
     });
 
     // Create an active round so migration is blocked.
@@ -93,18 +93,17 @@ fn test_migrate_v2_to_v3_happy_path() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::SchemaVersion, &2u32);
+            .set(&DataKeyCore::SchemaVersion, &2u32);
     });
 
     assert_eq!(client.get_schema_version(), 2u32);
     client.migrate_schema_v2_to_v3();
     assert_eq!(client.get_schema_version(), 3u32);
 
-    let mig_key = _migrated_key(&env);
     let migrated = env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .get::<_, bool>(&mig_key)
+            .get::<_, bool>(&DataKeyCore::MigratedToV3)
     });
     assert_eq!(migrated, Some(true));
 }
@@ -125,7 +124,7 @@ fn test_migration_v2_to_v3_blocked_when_round_active() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::SchemaVersion, &2u32);
+            .set(&DataKeyCore::SchemaVersion, &2u32);
     });
 
     client.create_round(&1_0000000u128, &None);

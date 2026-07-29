@@ -94,6 +94,12 @@ fn test_event_coverage_direct_config_setters_emit_audit_event() {
         ConfigChangePayload::ArchiveRetention(64),
     );
 
+    client.set_epoch_mint_budget(&5000_0000000);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::EpochMintBudget,
+        ConfigChangePayload::EpochMintBudget(0),
+        ConfigChangePayload::EpochMintBudget(5000_0000000),
     client.set_precision_payout_policy(&1);
     assert_last_config_updated(
         &env,
@@ -458,7 +464,7 @@ fn test_action_rejected_oracle_heartbeat_invalid_status() {
     // Use env.as_contract to read oracle for our own check
     let _oracle: Address = env.as_contract(&env.register(VirtualTokenContract, ()), || {
         // We need the actual oracle address — extract from the setup helper
-        // which stores it at DataKey::Oracle
+        // which stores it at DataKeyCore::Oracle
         Address::generate(&env)
     });
 
@@ -499,7 +505,7 @@ fn test_action_rejected_resolve_round_oracle_nonce_reused() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&crate::types::DataKey::ActiveRound, &round);
+            .set(&crate::types::DataKeyCore::ActiveRound, &round);
     });
 
     // Second resolve with same nonce should be rejected

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
+use crate::types::{ArchivedRoundSummary, DataKeyCore, DataKeyScoped, OraclePayload};
+use std::vec::Vec;
 use crate::types::{ArchivedRoundSummary, DataKey, OraclePayload};
 use soroban_sdk::{
     symbol_short,
@@ -124,15 +126,15 @@ fn test_fifo_pruning_with_small_limit() {
 
     // Round 1 and 2 should be pruned from storage
     env.as_contract(&contract_id_obj, || {
-        let archived_key1 = DataKey::ArchivedRound(1u64);
+        let archived_key1 = DataKeyScoped::ArchivedRound(1u64);
         assert!(!env.storage().persistent().has(&archived_key1));
-        let archived_key2 = DataKey::ArchivedRound(2u64);
+        let archived_key2 = DataKeyScoped::ArchivedRound(2u64);
         assert!(!env.storage().persistent().has(&archived_key2));
 
         // Round 3 and 4 should still exist
-        let archived_key3 = DataKey::ArchivedRound(3u64);
+        let archived_key3 = DataKeyScoped::ArchivedRound(3u64);
         assert!(env.storage().persistent().has(&archived_key3));
-        let archived_key4 = DataKey::ArchivedRound(4u64);
+        let archived_key4 = DataKeyScoped::ArchivedRound(4u64);
         assert!(env.storage().persistent().has(&archived_key4));
     });
 }

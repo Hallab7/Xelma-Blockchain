@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
 use crate::common::{
-    _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance,
-    assert_no_active_round, balance, BPS_DENOMINATOR, DEFAULT_BET_WINDOW_LEDGERS,
+    _accumulate_pending, _current_epoch_id, _emit_action_rejected, _extend_persistent_ttl,
+    _set_balance, assert_no_active_round, balance, BPS_DENOMINATOR, DEFAULT_BET_WINDOW_LEDGERS,
     DEFAULT_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_START_PRICE,
 };
 use crate::config::{
@@ -11,11 +11,11 @@ use crate::config::{
 use crate::errors::ContractError;
 use crate::settlement::_persist_user_outcome;
 use crate::types::{
-    BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round, RoundMode, RoundTemplate,
-    UserOutcomeType, UserPosition,
+    BetSide, DataKey, DataKeyCore, DataKeyScoped, PrecisionCommitment, PrecisionPrediction, Round,
+    RoundMode, RoundTemplate, UserOutcomeType, UserPosition,
 };
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 /// Commitment preimage format (Precision commit-reveal):
 ///
@@ -82,7 +82,7 @@ pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<()
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
 
     admin.require_auth();
@@ -94,33 +94,33 @@ pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<()
     })?;
 
     // Get configured windows (with defaults)
-    _extend_persistent_ttl(&env, &DataKey::BetWindowLedgers);
+    _extend_persistent_ttl(&env, &DataKeyCore::BetWindowLedgers);
     let bet_ledgers: u32 = env
         .storage()
         .persistent()
-        .get(&DataKey::BetWindowLedgers)
+        .get(&DataKeyCore::BetWindowLedgers)
         .unwrap_or(DEFAULT_BET_WINDOW_LEDGERS);
-    _extend_persistent_ttl(&env, &DataKey::RunWindowLedgers);
+    _extend_persistent_ttl(&env, &DataKeyCore::RunWindowLedgers);
     let run_ledgers: u32 = env
         .storage()
         .persistent()
-        .get(&DataKey::RunWindowLedgers)
+        .get(&DataKeyCore::RunWindowLedgers)
         .unwrap_or(DEFAULT_RUN_WINDOW_LEDGERS);
 
     // Generate unique round ID
-    _extend_persistent_ttl(&env, &DataKey::LastRoundId);
+    _extend_persistent_ttl(&env, &DataKeyCore::LastRoundId);
     let last_round_id: u64 = env
         .storage()
         .persistent()
-        .get(&DataKey::LastRoundId)
+        .get(&DataKeyCore::LastRoundId)
         .unwrap_or(0);
     let round_id = last_round_id
         .checked_add(1)
         .ok_or(ContractError::Overflow)?;
     env.storage()
         .persistent()
-        .set(&DataKey::LastRoundId, &round_id);
-    _extend_persistent_ttl(&env, &DataKey::LastRoundId);
+        .set(&DataKeyCore::LastRoundId, &round_id);
+    _extend_persistent_ttl(&env, &DataKeyCore::LastRoundId);
 
     let start_ledger = env.ledger().sequence();
     let bet_end_ledger = start_ledger
@@ -143,8 +143,8 @@ pub fn create_round(env: Env, start_price: u128, mode: Option<u32>) -> Result<()
 
     env.storage()
         .persistent()
-        .set(&DataKey::ActiveRound, &round);
-    _extend_persistent_ttl(&env, &DataKey::ActiveRound);
+        .set(&DataKeyCore::ActiveRound, &round);
+    _extend_persistent_ttl(&env, &DataKeyCore::ActiveRound);
 
     #[allow(deprecated)]
     env.events().publish(
@@ -176,7 +176,7 @@ pub fn create_next_from_template(env: Env) -> Result<u64, ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -186,8 +186,8 @@ pub fn create_next_from_template(env: Env) -> Result<u64, ContractError> {
     let template: RoundTemplate = env
         .storage()
         .persistent()
-        .get(&DataKey::RoundTemplate)
-        .ok_or(ContractError::CommitmentNotFound)
+        .get(&DataKeyCore::RoundTemplate)
+        .ok_or(ContractError::NoRoundTemplate)
         .inspect_err(|&e| {
             _emit_action_rejected(&env, &admin, symbol_short!("nxttmpl"), e);
         })?;
@@ -197,7 +197,7 @@ pub fn create_next_from_template(env: Env) -> Result<u64, ContractError> {
     let round_id: u64 = env
         .storage()
         .persistent()
-        .get(&DataKey::LastRoundId)
+        .get(&DataKeyCore::LastRoundId)
         .unwrap_or(0);
 
     #[allow(deprecated)]
@@ -227,7 +227,7 @@ pub fn place_bet(
     if let Some(max_stake) = env
         .storage()
         .persistent()
-        .get::<_, i128>(&DataKey::MaxStake)
+        .get::<_, i128>(&DataKeyCore::MaxStake)
     {
         if amount > max_stake {
             return Err(ContractError::StakeExceedsMax);
@@ -238,14 +238,14 @@ pub fn place_bet(
     let mut round: Round = env
         .storage()
         .persistent()
-        .get(&DataKey::ActiveRound)
+        .get(&DataKeyCore::ActiveRound)
         .ok_or(ContractError::NoActiveRound)?;
 
     // Enforce per-user round exposure cap
     if let Some(max_exposure) = env
         .storage()
         .persistent()
-        .get::<_, i128>(&DataKey::MaxUserRoundExposure)
+        .get::<_, i128>(&DataKeyCore::MaxUserRoundExposure)
     {
         if amount > max_exposure {
             return Err(ContractError::ExposureCapExceeded);
@@ -261,7 +261,7 @@ pub fn place_bet(
     let close_buffer_ledgers = env
         .storage()
         .persistent()
-        .get::<_, u32>(&DataKey::CloseBufferLedgers)
+        .get::<_, u32>(&DataKeyCore::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger {
@@ -277,7 +277,7 @@ pub fn place_bet(
     }
 
     // O(1) duplicate-bet check
-    let pos_key = DataKey::Position(round.round_id, user.clone());
+    let pos_key = DataKeyScoped::Position(round.round_id, user.clone());
     if env.storage().persistent().has(&pos_key) {
         return Err(ContractError::AlreadyBet);
     }
@@ -296,7 +296,7 @@ pub fn place_bet(
     env.storage().persistent().set(&pos_key, &position);
 
     // Append to participant list
-    let participants_key = DataKey::RoundParticipants(round.round_id);
+    let participants_key = DataKeyScoped::RoundParticipants(round.round_id);
     let mut participants: Vec<Address> = env
         .storage()
         .persistent()
@@ -324,7 +324,7 @@ pub fn place_bet(
     }
     env.storage()
         .persistent()
-        .set(&DataKey::ActiveRound, &round);
+        .set(&DataKeyCore::ActiveRound, &round);
 
     let side_value: u32 = match side {
         BetSide::Up => 0,
@@ -357,7 +357,7 @@ pub fn place_precision_prediction(
     if let Some(max_stake) = env
         .storage()
         .persistent()
-        .get::<_, i128>(&DataKey::MaxStake)
+        .get::<_, i128>(&DataKeyCore::MaxStake)
     {
         if amount > max_stake {
             return Err(ContractError::StakeExceedsMax);
@@ -372,14 +372,14 @@ pub fn place_precision_prediction(
     let round: Round = env
         .storage()
         .persistent()
-        .get(&DataKey::ActiveRound)
+        .get(&DataKeyCore::ActiveRound)
         .ok_or(ContractError::NoActiveRound)?;
 
     // Enforce per-user round exposure cap
     if let Some(max_exposure) = env
         .storage()
         .persistent()
-        .get::<_, i128>(&DataKey::MaxUserRoundExposure)
+        .get::<_, i128>(&DataKeyCore::MaxUserRoundExposure)
     {
         if amount > max_exposure {
             return Err(ContractError::ExposureCapExceeded);
@@ -395,7 +395,7 @@ pub fn place_precision_prediction(
     let close_buffer_ledgers = env
         .storage()
         .persistent()
-        .get::<_, u32>(&DataKey::CloseBufferLedgers)
+        .get::<_, u32>(&DataKeyCore::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger {
@@ -405,13 +405,13 @@ pub fn place_precision_prediction(
         return Err(ContractError::BettingClosed);
     }
 
-    let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-    let commit_key = DataKey::PrecisionCommitment(round.round_id, user.clone());
+    let pred_key = DataKeyScoped::PrecisionPosition(round.round_id, user.clone());
+    let commit_key = DataKeyScoped::PrecisionCommitment(round.round_id, user.clone());
     if env.storage().persistent().has(&pred_key) || env.storage().persistent().has(&commit_key) {
         return Err(ContractError::AlreadyBet);
     }
 
-    let participants_key = DataKey::RoundParticipants(round.round_id);
+    let participants_key = DataKeyScoped::RoundParticipants(round.round_id);
     let mut participants: Vec<Address> = env
         .storage()
         .persistent()
@@ -488,7 +488,7 @@ pub fn commit_prediction(
     if let Some(max_stake) = env
         .storage()
         .persistent()
-        .get::<_, i128>(&DataKey::MaxStake)
+        .get::<_, i128>(&DataKeyCore::MaxStake)
     {
         if amount > max_stake {
             return Err(ContractError::StakeExceedsMax);
@@ -499,14 +499,14 @@ pub fn commit_prediction(
     let round: Round = env
         .storage()
         .persistent()
-        .get(&DataKey::ActiveRound)
+        .get(&DataKeyCore::ActiveRound)
         .ok_or(ContractError::NoActiveRound)?;
 
     // Enforce per-user round exposure cap
     if let Some(max_exposure) = env
         .storage()
         .persistent()
-        .get::<_, i128>(&DataKey::MaxUserRoundExposure)
+        .get::<_, i128>(&DataKeyCore::MaxUserRoundExposure)
     {
         if amount > max_exposure {
             return Err(ContractError::ExposureCapExceeded);
@@ -522,7 +522,7 @@ pub fn commit_prediction(
     let close_buffer_ledgers = env
         .storage()
         .persistent()
-        .get::<_, u32>(&DataKey::CloseBufferLedgers)
+        .get::<_, u32>(&DataKeyCore::CloseBufferLedgers)
         .unwrap_or(0);
     let close_ledger = round.bet_end_ledger.saturating_sub(close_buffer_ledgers);
     if current_ledger >= round.bet_end_ledger {
@@ -538,8 +538,8 @@ pub fn commit_prediction(
     }
 
     // Check duplicate bet or commitment
-    let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
-    let commit_key = DataKey::PrecisionCommitment(round.round_id, user.clone());
+    let pred_key = DataKeyScoped::PrecisionPosition(round.round_id, user.clone());
+    let commit_key = DataKeyScoped::PrecisionCommitment(round.round_id, user.clone());
     if env.storage().persistent().has(&pred_key) || env.storage().persistent().has(&commit_key) {
         return Err(ContractError::AlreadyBet);
     }
@@ -559,7 +559,7 @@ pub fn commit_prediction(
     env.storage().persistent().set(&commit_key, &commitment);
 
     // Append to shared participant list
-    let participants_key = DataKey::RoundParticipants(round.round_id);
+    let participants_key = DataKeyScoped::RoundParticipants(round.round_id);
     let mut participants: Vec<Address> = env
         .storage()
         .persistent()
@@ -598,7 +598,7 @@ pub fn reveal_prediction(
     let round: Round = env
         .storage()
         .persistent()
-        .get(&DataKey::ActiveRound)
+        .get(&DataKeyCore::ActiveRound)
         .ok_or(ContractError::NoActiveRound)?;
 
     // Verify round is in Precision mode
@@ -613,7 +613,7 @@ pub fn reveal_prediction(
     }
 
     // Retrieve commitment
-    let commit_key = DataKey::PrecisionCommitment(round.round_id, user.clone());
+    let commit_key = DataKeyScoped::PrecisionCommitment(round.round_id, user.clone());
     let mut commitment: PrecisionCommitment = env
         .storage()
         .persistent()
@@ -640,7 +640,7 @@ pub fn reveal_prediction(
     env.storage().persistent().set(&commit_key, &commitment);
 
     // Store prediction for resolution
-    let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
+    let pred_key = DataKeyScoped::PrecisionPosition(round.round_id, user.clone());
     let prediction = PrecisionPrediction {
         user: user.clone(),
         predicted_price,
@@ -828,7 +828,7 @@ pub fn mint_initial(env: Env, user: Address) -> i128 {
         soroban_sdk::panic_with_error!(&env, e);
     }
 
-    let key = DataKey::Balance(user.clone());
+    let key = DataKeyScoped::Balance(user.clone());
 
     if let Some(existing_balance) = env.storage().persistent().get(&key) {
         _extend_persistent_ttl(&env, &key);
@@ -839,10 +839,10 @@ pub fn mint_initial(env: Env, user: Address) -> i128 {
     if let Some(limit) = env
         .storage()
         .instance()
-        .get::<_, u32>(&DataKey::MintLimitConfig)
+        .get::<_, u32>(&DataKeyCore::MintLimitConfig)
     {
         if limit > 0 {
-            let counter_key = DataKey::LedgerMintCounter(sequence);
+            let counter_key = DataKeyScoped::LedgerMintCounter(sequence);
             let current_count = env
                 .storage()
                 .temporary()
@@ -858,6 +858,49 @@ pub fn mint_initial(env: Env, user: Address) -> i128 {
     }
 
     let initial_amount: i128 = 1000_0000000;
+
+    // ─── Epoch budget check ──────────────────────────────────────────────
+    const EP_BUDGET_KEY: Symbol = symbol_short!("EpMintBgt");
+    let epoch_budget: i128 = env
+        .storage()
+        .instance()
+        .get(&EP_BUDGET_KEY)
+        .unwrap_or(0);
+    if epoch_budget > 0 {
+        let current_epoch = _current_epoch_id(&env);
+        const EP_CONSUMED_KEY: Symbol = symbol_short!("EpMintCsm");
+        const EP_EPOCH_KEY: Symbol = symbol_short!("EpMintEpc");
+        let stored_epoch: u32 = env
+            .storage()
+            .temporary()
+            .get(&EP_EPOCH_KEY)
+            .unwrap_or(0);
+        let consumed: i128 = if stored_epoch == current_epoch {
+            env.storage()
+                .temporary()
+                .get(&EP_CONSUMED_KEY)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let new_consumed = consumed.checked_add(initial_amount);
+        match new_consumed {
+            Some(val) if val <= epoch_budget => {
+                env.storage()
+                    .temporary()
+                    .set(&EP_CONSUMED_KEY, &val);
+                if stored_epoch != current_epoch {
+                    env.storage()
+                        .temporary()
+                        .set(&EP_EPOCH_KEY, &current_epoch);
+                }
+            }
+            _ => {
+                soroban_sdk::panic_with_error!(&env, ContractError::EpochBudgetExceeded);
+            }
+        }
+    }
+
     env.storage().persistent().set(&key, &initial_amount);
     _extend_persistent_ttl(&env, &key);
 
