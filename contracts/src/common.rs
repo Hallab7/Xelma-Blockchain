@@ -47,6 +47,12 @@ pub const MIN_ARCHIVE_RETENTION: u32 = 1;
 pub const MAX_ARCHIVE_RETENTION: u32 = 10_000;
 pub const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
 
+// ─── Multi-feed oracle defaults ──────────────────────────────────────────────
+pub const DEFAULT_ORACLE_QUORUM_MIN_OBSERVATIONS: u32 = 3;
+pub const DEFAULT_ORACLE_QUORUM_THRESHOLD: u32 = 3;
+pub const DEFAULT_ORACLE_OUTLIER_THRESHOLD_BPS: u32 = 500;
+pub const MAX_ORACLE_OBSERVATIONS: u32 = 32;
+
 /// Bumps/extends the TTL of the given persistent storage key if its remaining TTL
 /// is less than the threshold. Enforces rent policy (Issue #142).
 pub fn _extend_persistent_ttl(env: &Env, key: &DataKey) {

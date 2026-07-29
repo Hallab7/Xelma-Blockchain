@@ -102,4 +102,18 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Multi-feed resolution: fewer observations survived outlier rejection
+    /// than the configured quorum threshold.
+    InsufficientOracleQuorum = 66,
+    /// Multi-feed resolution: payload contains fewer observations than the
+    /// configured minimum.
+    TooFewObservations = 67,
+    /// Multi-feed resolution: outlier observations would dominate the result
+    /// (too many rejected, cannot form quorum).
+    OracleOutlierRejected = 68,
+    /// Multi-feed payload contains duplicate source identifiers.
+    DuplicateOracleSource = 69,
+    /// Multi-feed payload has observations that are not sorted or sources
+    /// are out of expected range.
+    InvalidObservationOrder = 70,
 }

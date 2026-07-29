@@ -4,7 +4,7 @@
 use super::config_helpers::{apply_oracle_max_deviation_bps, apply_oracle_stale_threshold};
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{DataKey, OraclePayload};
+use crate::types::{DataKey, MultiFeedPayload, OraclePayload, OracleQuorumConfig};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -1249,4 +1249,276 @@ fn test_no_confidence_check_when_threshold_unset() {
         contract_addr: contract_id.clone(),
         confidence: Some(0u32),
     });
+}
+
+// ─── Multi-feed oracle resolution tests (Issue #262) ────────────────────────
+
+/// Multi-feed resolution succeeds with valid observations meeting quorum.
+#[test]
+fn test_multi_feed_valid_quorum_resolves() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+
+    // Configure quorum: 3 feeds, 3 quorum, 5% outlier threshold
+    client.set_oracle_quorum_config(&Some(OracleQuorumConfig {
+        min_observations: 3,
+        quorum_threshold: 3,
+        outlier_threshold_bps: 500,
+    }));
+
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 12;
+        li.timestamp = 1000;
+    });
+
+    // Three closely agreeing feeds: $0.2300, $0.2310, $0.2295
+    // Median ≈ $0.2300, all within 5%
+    client.resolve_round_multi(&MultiFeedPayload {
+        prices: soroban_sdk::vec![&env, 2300u128, 2310u128, 2295u128],
+        sources: soroban_sdk::vec![&env, 0u32, 1u32, 2u32],
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        timestamp: 900,
+    });
+
+    assert_eq!(client.get_active_round(), None);
+}
+
+/// Multi-feed rejects when quorum config is not set.
+#[test]
+fn test_multi_feed_rejected_without_quorum_config() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 12;
+        li.timestamp = 1000;
+    });
+
+    let result = client.try_resolve_round_multi(&MultiFeedPayload {
+        prices: soroban_sdk::vec![&env, 2300u128, 2310u128, 2295u128],
+        sources: soroban_sdk::vec![&env, 0u32, 1u32, 2u32],
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        timestamp: 900,
+    });
+    assert_eq!(result, Err(Ok(ContractError::OracleNotSet)));
+}
+
+/// Outlier-dominated payload fails quorum.
+#[test]
+fn test_multi_feed_outlier_dominates_fails_quorum() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.set_oracle_quorum_config(&Some(OracleQuorumConfig {
+        min_observations: 3,
+        quorum_threshold: 3,
+        outlier_threshold_bps: 500, // 5%
+    }));
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 12;
+        li.timestamp = 1000;
+    });
+
+    // Two feeds agree at $2300, third is wildly off at $5000
+    // The $5000 feed is >5% from median, so only 2 survive, quorum=3 fails
+    let result = client.try_resolve_round_multi(&MultiFeedPayload {
+        prices: soroban_sdk::vec![&env, 2300u128, 2350u128, 5000u128],
+        sources: soroban_sdk::vec![&env, 0u32, 1u32, 2u32],
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        timestamp: 900,
+    });
+    assert_eq!(result, Err(Ok(ContractError::InsufficientOracleQuorum)));
+}
+
+/// Duplicate sources in multi-feed payload are rejected.
+#[test]
+fn test_multi_feed_duplicate_source_rejected() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.set_oracle_quorum_config(&Some(OracleQuorumConfig {
+        min_observations: 3,
+        quorum_threshold: 3,
+        outlier_threshold_bps: 500,
+    }));
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 12;
+        li.timestamp = 1000;
+    });
+
+    // Source 0 appears twice
+    let result = client.try_resolve_round_multi(&MultiFeedPayload {
+        prices: soroban_sdk::vec![&env, 2300u128, 2310u128, 2295u128],
+        sources: soroban_sdk::vec![&env, 0u32, 1u32, 0u32],
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        timestamp: 900,
+    });
+    assert_eq!(result, Err(Ok(ContractError::DuplicateOracleSource)));
+}
+
+/// Too few observations in multi-feed payload are rejected.
+#[test]
+fn test_multi_feed_too_few_observations_rejected() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.set_oracle_quorum_config(&Some(OracleQuorumConfig {
+        min_observations: 5,
+        quorum_threshold: 3,
+        outlier_threshold_bps: 500,
+    }));
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 12;
+        li.timestamp = 1000;
+    });
+
+    // Only 3 observations but min_observations = 5
+    let result = client.try_resolve_round_multi(&MultiFeedPayload {
+        prices: soroban_sdk::vec![&env, 2300u128, 2310u128, 2295u128],
+        sources: soroban_sdk::vec![&env, 0u32, 1u32, 2u32],
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        timestamp: 900,
+    });
+    assert_eq!(result, Err(Ok(ContractError::TooFewObservations)));
+}
+
+/// Multi-feed median is computed correctly (even N).
+#[test]
+fn test_multi_feed_median_with_even_count_resolves() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.set_oracle_quorum_config(&Some(OracleQuorumConfig {
+        min_observations: 4,
+        quorum_threshold: 3,
+        outlier_threshold_bps: 500,
+    }));
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 12;
+        li.timestamp = 1000;
+    });
+
+    // 4 feeds: 100, 200, 300, 400 => median = (200+300)/2 = 250
+    client.resolve_round_multi(&MultiFeedPayload {
+        prices: soroban_sdk::vec![&env, 100u128, 300u128, 200u128, 400u128],
+        sources: soroban_sdk::vec![&env, 0u32, 1u32, 2u32, 3u32],
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        timestamp: 900,
+    });
+
+    assert_eq!(client.get_active_round(), None);
+}
+
+/// Multi-feed deviation guardrail also applies to the median price.
+#[test]
+fn test_multi_feed_deviation_guardrail_applies() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.set_oracle_quorum_config(&Some(OracleQuorumConfig {
+        min_observations: 3,
+        quorum_threshold: 3,
+        outlier_threshold_bps: 5000,
+    }));
+
+    // Start price = $1.00, set max deviation to 5%
+    client.create_round(&1_0000000, &None);
+    let round = client.get_active_round().unwrap();
+    super::config_helpers::apply_oracle_max_deviation_bps(&env, &client, Some(500u32));
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 12;
+        li.timestamp = 1000;
+    });
+
+    // Median = $2.00 (100% jump) — violates 5% deviation guardrail
+    let result = client.try_resolve_round_multi(&MultiFeedPayload {
+        prices: soroban_sdk::vec![&env, 2_0000000u128, 2_0100000u128, 1_9900000u128],
+        sources: soroban_sdk::vec![&env, 0u32, 1u32, 2u32],
+        round_id: round.start_ledger,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        timestamp: 900,
+    });
+    assert_eq!(result, Err(Ok(ContractError::OracleDeviationExceeded)));
 }

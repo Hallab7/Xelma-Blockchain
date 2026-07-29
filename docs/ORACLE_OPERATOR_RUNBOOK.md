@@ -194,6 +194,8 @@ heartbeat is older than the threshold.
 
 ## 5. Resolution Flow (Step by Step)
 
+### 5.1 Legacy Single-Feed Path (`resolve_round`)
+
 1. **Verify round eligibility**
    - `get_active_round()` returns a round.
    - `env.ledger().sequence() >= round.end_ledger`.
@@ -222,6 +224,81 @@ heartbeat is older than the threshold.
    - If the call fails with `OracleNonceReused`, increment the nonce and retry.
    - If the call fails for any other reason, the nonce is **not** consumed and
      can be reused.
+
+### 5.2 Multi-Feed Path (`resolve_round_multi`) — Issue #262
+
+When `OracleQuorumConfig` is configured by the admin, the oracle SHOULD use
+`resolve_round_multi` for improved settlement safety. This path accepts N
+independent feed observations, computes the median price, rejects outliers,
+and requires a quorum of feeds to agree.
+
+**MultiFeedPayload structure:**
+
+| Field           | Type          | Required | Description |
+|-----------------|---------------|----------|-------------|
+| `prices`        | `Vec<u128>`   | Yes      | N feed prices, 4 decimals, all non-zero. |
+| `sources`       | `Vec<u32>`    | Yes      | N feed identifiers, 0-based, must all be unique. |
+| `round_id`      | `u32`         | Yes      | Must match `ActiveRound.start_ledger`. |
+| `nonce`         | `u64`         | Yes      | Per-round replay protection, unique per round. |
+| `network_id`    | `BytesN<32>`  | Yes      | SHA-256 of network passphrase. |
+| `contract_addr` | `Address`     | Yes      | Target contract address. |
+| `timestamp`     | `u64`         | Yes      | Unix epoch seconds when observations were collected. |
+
+**Quorum configuration (set by admin):**
+
+| Parameter             | Range    | Default | Description |
+|-----------------------|----------|---------|-------------|
+| `min_observations`    | 3–32     | 3       | Minimum feeds in payload. |
+| `quorum_threshold`    | 3–min_obs| 3       | Minimum survivors for settlement. |
+| `outlier_threshold_bps`| 1–10000 | 500     | Max deviation from median (5% default). |
+
+**Multi-feed resolution steps:**
+
+1. **Collect feed observations**
+   - Query N independent price feeds (e.g., Coinbase, Binance, Kraken).
+   - Each feed must have a unique `source` identifier.
+   - All prices scaled to 4 decimal places, non-zero.
+
+2. **Build payload**
+   - `prices`: ordered list of feed prices.
+   - `sources`: corresponding feed source IDs (0, 1, 2, …).
+   - Same `round_id`, `nonce`, `network_id`, `contract_addr` conventions
+     as the legacy path.
+
+3. **Submit `resolve_round_multi(payload)`**
+   - Signed with the oracle key (same key as legacy path).
+
+4. **On-chain processing:**
+   a. Validates payload (lengths match, prices > 0, sources unique).
+   b. Checks `n >= min_observations` and `n <= 32` (gas cap).
+   c. Sorts prices, computes **median**.
+   d. Applies deviation guardrail (same `OracleMaxDeviationBps` as legacy).
+   e. **Outlier rejection**: each feed's price is compared to the median.
+      If `|price - median| / median * 10000 > outlier_threshold_bps`,
+      the observation is rejected.
+   f. **Quorum check**: surviving count must be `>= quorum_threshold`.
+   g. If quorum passes, the **median price** is used for settlement.
+
+5. **Events emitted:**
+   - `("oracle", "multisum")` — summary of multi-feed resolution (round_id,
+     observation_count, survivor_count, median_price, quorum_threshold).
+   - `("round", "resolved")` — standard resolved event.
+   - If quorum fails: `("oracle", "nofed")` — failure details.
+
+**Example multi-feed payload (3 feeds):**
+
+```rust
+MultiFeedPayload {
+    // Feed 0: $0.2300, Feed 1: $0.2310, Feed 2: $0.2295
+    prices: vec![&env, 2300u128, 2310u128, 2295u128],
+    sources: vec![&env, 0u32, 1u32, 2u32],
+    round_id: 1234567,       // ActiveRound.start_ledger
+    nonce: 1,
+    network_id: BytesN::from_array(&env, &[/* SHA-256 of passphrase */]),
+    contract_addr: contract_id,
+    timestamp: 1700000000,
+}
+```
 
 ---
 
@@ -384,6 +461,32 @@ Prevention:
   - Use a monotonic counter per round stored in your oracle service.
   - After a successful resolution, persist the consumed nonce off-chain
     so the next round starts fresh.
+```
+
+### Playbook F: Multi-feed quorum failure
+
+```
+Symptom:  resolve_round_multi returns InsufficientOracleQuorum
+Diagnosis:
+  1. Check the ("oracle", "nofed") event for survivor_count vs quorum_threshold.
+  2. Determine which feeds are producing outlier prices.
+Decision:
+  - One feed consistently out of line? Disable it from the payload.
+  - Market conditions causing wide spreads?
+    → Admin can increase outlier_threshold_bps via set_oracle_quorum_config.
+    → Or reduce quorum_threshold if fewer feeds are available.
+  - All feeds diverging? Consider falling back to legacy resolve_round.
+```
+
+### Playbook G: Multi-feed duplicate sources
+
+```
+Symptom:  resolve_round_multi returns DuplicateOracleSource
+Cause:    Two or more observations share the same source identifier.
+Fix:      Ensure each feed has a unique source ID (0, 1, 2, …).
+Prevention:
+  - Maintain a mapping of feed name → source ID in your oracle service.
+  - Validate sources are unique before building the payload.
 ```
 
 ---
