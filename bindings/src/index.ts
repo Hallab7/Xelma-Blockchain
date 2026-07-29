@@ -494,7 +494,11 @@ export const ContractError = {
   /**
    * Reveal salt fails minimum entropy rules (all-zero or constant-byte)
    */
-  64: {message:"InvalidSalt"}
+  64: {message:"InvalidSalt"},
+  /**
+   * No round template configured
+   */
+  65: {message:"NoRoundTemplate"}
 }
 
 /**
@@ -1233,6 +1237,18 @@ export class Client extends ContractClient {
         set_close_buffer_ledgers: this.txFromJSON<Result<void>>,
         get_close_buffer_ledgers: this.txFromJSON<u32>,
         get_round_pool_stats: this.txFromJSON<Option<RoundPoolStats>>,
-        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>
+        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>,
+        set_round_template: this.txFromJSON<Result<void>>,
+        clear_round_template: this.txFromJSON<Result<void>>,
+        get_round_template: this.txFromJSON<Option<any>>,
+        create_next_from_template: this.txFromJSON<Result<any>>,
+        get_leaderboard_by_wins: this.txFromJSON<Array<any>>,
+        get_leaderboard_by_streak: this.txFromJSON<Array<any>>,
+        get_current_season_id: this.txFromJSON<u32>,
+        get_season_user_stats: this.txFromJSON<Option<any>>,
+        reset_leaderboard_season: this.txFromJSON<Result<void>>,
+        get_season_archive: this.txFromJSON<Option<any>>,
+        get_season_leaderboard_by_wins: this.txFromJSON<Array<any>>,
+        get_season_leaderboard_by_streak: this.txFromJSON<Array<any>>
   }
 }
