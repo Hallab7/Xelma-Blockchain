@@ -12,6 +12,15 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Payout policy for Precision mode
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum PrecisionPayoutPolicy {
+    Equal = 0,         // Split payout pool equally among winners (default)
+    StakeWeighted = 1, // Split payout pool proportionally to winner stakes
+}
+
 /// Runtime mode for the contract lifecycle
 #[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -85,6 +94,7 @@ pub enum DataKey {
     OracleRotationProposal,
     ArchiveRetention,
     RoundTemplate,
+    PrecisionPayoutPolicy,
     Ext(DataKeyExt),
 }
 
@@ -119,6 +129,7 @@ pub enum ConfigChangeKind {
     MintLimit = 9,
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
+    PrecisionPayoutPolicy = 12,
 }
 
 /// Payload for a scheduled critical config change.
@@ -137,6 +148,7 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
+    PrecisionPayoutPolicy(u32),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.

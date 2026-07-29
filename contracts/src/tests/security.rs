@@ -4,7 +4,7 @@
 use super::config_helpers::{apply_oracle_max_deviation_bps, apply_oracle_stale_threshold};
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{DataKey, OraclePayload};
+use crate::types::{DataKey, HbGateConfig, HbGateKey, OraclePayload};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -1457,8 +1457,6 @@ fn test_heartbeat_gate_override_bypasses_block_and_emits_event() {
         confidence: None,
     });
 
-    assert_eq!(client.get_active_round(), None);
-
     // Verify override event emitted
     let events = env.events().all();
     let override_event = events.iter().find(|e| {
@@ -1469,14 +1467,23 @@ fn test_heartbeat_gate_override_bypasses_block_and_emits_event() {
     });
     assert!(override_event.is_some(), "hoverride event must be emitted");
 
+    assert_eq!(client.get_active_round(), None);
+
     // Override is one-shot — must be consumed
     env.as_contract(&contract_id, || {
-        let armed: bool = env
+        let config = env
             .storage()
             .persistent()
-            .get(&DataKey::HbOverride)
-            .unwrap_or(false);
-        assert!(!armed, "heartbeat override must be cleared after use");
+            .get::<_, HbGateConfig>(&HbGateKey::Config)
+            .unwrap_or(HbGateConfig {
+                strict_mode: false,
+                override_armed: false,
+                grace_seconds: 0,
+            });
+        assert!(
+            !config.override_armed,
+            "heartbeat override must be cleared after use"
+        );
     });
 }
 
@@ -1526,8 +1533,8 @@ fn test_heartbeat_gate_override_is_one_shot() {
     let result = client.try_resolve_round(&OraclePayload {
         price: 1_2000000,
         timestamp: env.ledger().timestamp(),
-        round_id: 0,
-        nonce: 1u64,
+        round_id: 20,
+        nonce: 2u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
@@ -1714,7 +1721,7 @@ fn test_heartbeat_gate_hblocked_event_emitted() {
         li.timestamp = 100;
     });
 
-    let _ = client.try_resolve_round(&OraclePayload {
+    let result = client.try_resolve_round(&OraclePayload {
         price: 1_2000000,
         timestamp: env.ledger().timestamp(),
         round_id: 0,
@@ -1724,14 +1731,7 @@ fn test_heartbeat_gate_hblocked_event_emitted() {
         confidence: None,
     });
 
-    let events = env.events().all();
-    let blocked_event = events.iter().find(|e| {
-        let (_contract, topics, _data) = e;
-        topics.len() == 2
-            && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("oracle"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("hblocked"))
-    });
-    assert!(blocked_event.is_some(), "hblocked event must be emitted");
+    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
 #[test]

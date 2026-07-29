@@ -106,4 +106,6 @@ pub enum ContractError {
     NoRoundTemplate = 65,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
     OracleNotLive = 66,
+    /// Invalid precision payout policy
+    InvalidPayoutPolicy = 67,
 }
