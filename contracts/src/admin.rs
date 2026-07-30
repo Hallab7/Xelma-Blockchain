@@ -2,10 +2,15 @@
 use crate::common::{
     _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, CURRENT_SCHEMA_VERSION,
     DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
+    MAX_TWAP_WINDOW_SAMPLES, MIN_TWAP_WINDOW_SAMPLES, TTL_BUMP_AMOUNT, TTL_BUMP_THRESHOLD,
 };
 use crate::errors::ContractError;
-use crate::types::{DataKey, HbGateConfig, HbGateKey, OracleHeartbeatRecord, ProtocolHealthStatus, Round, RuntimeMode};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use crate::types::{
+    AttestationConfig, AttestationConfigKey, DataKeyCore, DataKeyExt, DeviationConfig,
+    DeviationConfigKey, DeviationReferenceMode, HbGateConfig, HbGateKey, OracleHeartbeatRecord,
+    PolicyAction, ProtocolHealthStatus, Round, RuntimeMode,
+};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, Symbol, Vec};
 
 /// Initializes the contract with admin and oracle addresses (one-time only)
 pub fn initialize(env: Env, admin: Address, oracle: Address) -> Result<(), ContractError> {
@@ -15,46 +20,50 @@ pub fn initialize(env: Env, admin: Address, oracle: Address) -> Result<(), Contr
         return Err(ContractError::OracleNetworkMismatch);
     }
 
-    if env.storage().persistent().has(&DataKey::Admin) {
+    if env.storage().persistent().has(&DataKeyCore::Admin) {
         return Err(ContractError::AlreadyInitialized);
     }
 
-    env.storage().persistent().set(&DataKey::Admin, &admin);
-    env.storage().persistent().set(&DataKey::Oracle, &oracle);
+    env.storage().persistent().set(&DataKeyCore::Admin, &admin);
+    env.storage().persistent().set(&DataKeyCore::Oracle, &oracle);
     env.storage()
         .persistent()
-        .set(&DataKey::Paused, &RuntimeMode::Normal);
+        .set(&DataKeyCore::Paused, &RuntimeMode::Normal);
     env.storage()
         .persistent()
-        .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
+        .set(&DataKeyCore::SchemaVersion, &CURRENT_SCHEMA_VERSION);
 
     // Set default window values
     env.storage()
         .persistent()
-        .set(&DataKey::BetWindowLedgers, &DEFAULT_BET_WINDOW_LEDGERS);
+        .set(&DataKeyCore::BetWindowLedgers, &DEFAULT_BET_WINDOW_LEDGERS);
     env.storage()
         .persistent()
-        .set(&DataKey::RunWindowLedgers, &DEFAULT_RUN_WINDOW_LEDGERS);
+        .set(&DataKeyCore::RunWindowLedgers, &DEFAULT_RUN_WINDOW_LEDGERS);
 
-    _extend_persistent_ttl(&env, &DataKey::Admin);
-    _extend_persistent_ttl(&env, &DataKey::Oracle);
-    _extend_persistent_ttl(&env, &DataKey::Paused);
-    _extend_persistent_ttl(&env, &DataKey::SchemaVersion);
-    _extend_persistent_ttl(&env, &DataKey::BetWindowLedgers);
-    _extend_persistent_ttl(&env, &DataKey::RunWindowLedgers);
+    _extend_persistent_ttl(&env, &DataKeyCore::Admin);
+    _extend_persistent_ttl(&env, &DataKeyCore::Oracle);
+    _extend_persistent_ttl(&env, &DataKeyCore::Paused);
+    _extend_persistent_ttl(&env, &DataKeyCore::SchemaVersion);
+    _extend_persistent_ttl(&env, &DataKeyCore::BetWindowLedgers);
+    _extend_persistent_ttl(&env, &DataKeyCore::RunWindowLedgers);
 
     Ok(())
 }
 
 /// Returns the stored schema version. If unset, returns legacy version 1.
 pub fn get_schema_version(env: Env) -> u32 {
-    let key = DataKey::SchemaVersion;
+    let key = DataKeyCore::SchemaVersion;
     _extend_persistent_ttl(&env, &key);
     _schema_version(&env).unwrap_or(1)
 }
 
 /// Migrates legacy schema version 1 → version 2 (admin only).
-pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
+///
+/// When `dry_run` is `true`, all validation checks are performed but no storage
+/// writes or events are emitted. This lets operators verify that a migration
+/// would succeed before committing to it.
+pub fn migrate_schema_v1_to_v2(env: Env, dry_run: bool) -> Result<(), ContractError> {
     let admin_key = DataKey::Admin;
     _extend_persistent_ttl(&env, &admin_key);
     let admin: Address = env
@@ -67,7 +76,7 @@ pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
         _emit_action_rejected(&env, &admin, symbol_short!("migrate"), e);
     })?;
 
-    if env.storage().persistent().has(&DataKey::ActiveRound) {
+    if env.storage().persistent().has(&DataKeyCore::ActiveRound) {
         _emit_action_rejected(
             &env,
             &admin,
@@ -89,6 +98,10 @@ pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
         return Err(ContractError::UnsupportedSchemaVersion);
     }
 
+    if dry_run {
+        return Ok(());
+    }
+
     let schema_key = DataKey::SchemaVersion;
     env.storage().persistent().set(&schema_key, &TARGET_VERSION);
     _extend_persistent_ttl(&env, &schema_key);
@@ -103,7 +116,11 @@ pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
 }
 
 /// Migrates schema version 2 → version 3 (admin only).
-pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
+///
+/// When `dry_run` is `true`, all validation checks are performed but no storage
+/// writes or events are emitted. This lets operators verify that a migration
+/// would succeed before committing to it.
+pub fn migrate_schema_v2_to_v3(env: Env, dry_run: bool) -> Result<(), ContractError> {
     let admin_key = DataKey::Admin;
     _extend_persistent_ttl(&env, &admin_key);
     let admin: Address = env
@@ -116,7 +133,7 @@ pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
         _emit_action_rejected(&env, &admin, symbol_short!("migrate"), e);
     })?;
 
-    if env.storage().persistent().has(&DataKey::ActiveRound) {
+    if env.storage().persistent().has(&DataKeyCore::ActiveRound) {
         _emit_action_rejected(
             &env,
             &admin,
@@ -138,13 +155,17 @@ pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
         return Err(ContractError::UnsupportedSchemaVersion);
     }
 
+    if dry_run {
+        return Ok(());
+    }
+
     let schema_key = DataKey::SchemaVersion;
     env.storage().persistent().set(&schema_key, &TARGET_VERSION);
     _extend_persistent_ttl(&env, &schema_key);
 
     env.storage()
         .persistent()
-        .set(&DataKey::MigratedToV3, &true);
+        .set(&DataKeyCore::MigratedToV3, &true);
 
     #[allow(deprecated)]
     env.events().publish(
@@ -155,9 +176,74 @@ pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
     Ok(())
 }
 
+/// Announces a target schema version for the next planned migration (admin only).
+///
+/// This sets a "v-next schema template" that operators can inspect before the
+/// real migration executes. It is purely informational — it does NOT change
+/// the active schema or gate any entrypoints. Use `get_next_schema` to read
+/// the announced version and `clear_next_schema` to unset it.
+pub fn announce_next_schema(env: Env, target_version: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+
+    if target_version == 0 || target_version <= CURRENT_SCHEMA_VERSION {
+        return Err(ContractError::UnsupportedSchemaVersion);
+    }
+
+    let key = DataKey::NextSchemaVersion;
+    env.storage().persistent().set(&key, &target_version);
+    _extend_persistent_ttl(&env, &key);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("schema"), symbol_short!("next_ann")),
+        (CURRENT_SCHEMA_VERSION, target_version),
+    );
+
+    Ok(())
+}
+
+/// Returns the announced next schema version, if any.
+pub fn get_next_schema(env: Env) -> Option<u32> {
+    let key = DataKey::NextSchemaVersion;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
+/// Clears a previously announced next schema version (admin only).
+pub fn clear_next_schema(env: Env) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+
+    let key = DataKey::NextSchemaVersion;
+    if !env.storage().persistent().has(&key) {
+        return Err(ContractError::UnsupportedSchemaVersion);
+    }
+    let previous: u32 = env.storage().persistent().get(&key).unwrap();
+    env.storage().persistent().remove(&key);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("schema"), symbol_short!("next_clr")),
+        (previous,),
+    );
+
+    Ok(())
+}
+
 /// Returns whether the contract is currently paused
 pub fn is_paused(env: Env) -> bool {
-    let key = DataKey::Paused;
+    let key = DataKeyCore::Paused;
     _extend_persistent_ttl(&env, &key);
     let mode = env
         .storage()
@@ -173,7 +259,7 @@ pub fn pause_contract(env: Env) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
 
     admin.require_auth();
@@ -191,7 +277,7 @@ pub fn unpause_contract(env: Env) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
 
     admin.require_auth();
@@ -205,7 +291,7 @@ pub fn unpause_contract(env: Env) -> Result<(), ContractError> {
 
 /// Returns the current runtime mode (0 = Normal, 1 = ClaimsOnly, 2 = FullyPaused)
 pub fn get_runtime_mode(env: Env) -> u32 {
-    let key = DataKey::Paused;
+    let key = DataKeyCore::Paused;
     _extend_persistent_ttl(&env, &key);
     let mode = env
         .storage()
@@ -221,7 +307,7 @@ pub fn set_runtime_mode(env: Env, mode: u32) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
 
     admin.require_auth();
@@ -239,13 +325,13 @@ pub fn set_runtime_mode(env: Env, mode: u32) -> Result<(), ContractError> {
 }
 
 pub fn get_admin(env: Env) -> Option<Address> {
-    let key = DataKey::Admin;
+    let key = DataKeyCore::Admin;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
 
 pub fn get_oracle(env: Env) -> Option<Address> {
-    let key = DataKey::Oracle;
+    let key = DataKeyCore::Oracle;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -257,14 +343,14 @@ pub fn set_oracle_max_deviation_bps(env: Env, bps: Option<u32>) -> Result<(), Co
 
 /// Returns the configured oracle max deviation bps, if set.
 pub fn get_oracle_max_deviation_bps(env: Env) -> Option<u32> {
-    let key = DataKey::OracleMaxDeviationBps;
+    let key = DataKeyCore::OracleMaxDeviationBps;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
 
 /// Arms a one-shot override to bypass deviation checks for the next settlement (admin only).
 pub fn arm_oracle_deviation_override(env: Env) -> Result<(), ContractError> {
-    let admin_key = DataKey::Admin;
+    let admin_key = DataKeyCore::Admin;
     _extend_persistent_ttl(&env, &admin_key);
     let admin: Address = env
         .storage()
@@ -276,10 +362,152 @@ pub fn arm_oracle_deviation_override(env: Env) -> Result<(), ContractError> {
         _emit_action_rejected(&env, &admin, symbol_short!("arm_ovr"), e);
     })?;
 
-    let override_key = DataKey::OracleDeviationOverrideArmed;
+    let override_key = DataKeyCore::OracleDeviationOverrideArmed;
     env.storage().persistent().set(&override_key, &true);
     _extend_persistent_ttl(&env, &override_key);
     Ok(())
+}
+
+/// Loads the deviation guardrail config, returning the `StartPrice` default if unset (Issue #266).
+pub fn _load_deviation_config(env: &Env) -> DeviationConfig {
+    let key = DeviationConfigKey::Config;
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            crate::common::TTL_BUMP_THRESHOLD,
+            crate::common::TTL_BUMP_AMOUNT,
+        );
+    }
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DeviationConfig {
+            reference_mode: DeviationReferenceMode::StartPrice,
+            window_samples: MIN_TWAP_WINDOW_SAMPLES,
+        })
+}
+
+fn _save_deviation_config(env: &Env, config: &DeviationConfig) {
+    let key = DeviationConfigKey::Config;
+    env.storage().persistent().set(&key, config);
+    env.storage().persistent().extend_ttl(
+        &key,
+        crate::common::TTL_BUMP_THRESHOLD,
+        crate::common::TTL_BUMP_AMOUNT,
+    );
+}
+
+/// Sets the oracle deviation reference mode and (for `Twap`) the trailing
+/// sample window size (admin only, Issue #266). Defaults to `StartPrice`
+/// with no config stored, preserving pre-#266 behaviour exactly.
+pub fn set_deviation_ref_mode(
+    env: Env,
+    mode: DeviationReferenceMode,
+    window_samples: u32,
+) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKeyCore::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("devref"), e);
+    })?;
+
+    if mode == DeviationReferenceMode::Twap
+        && !(MIN_TWAP_WINDOW_SAMPLES..=MAX_TWAP_WINDOW_SAMPLES).contains(&window_samples)
+    {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("devref"),
+            ContractError::WindowOutOfRange,
+        );
+        return Err(ContractError::WindowOutOfRange);
+    }
+
+    _save_deviation_config(
+        &env,
+        &DeviationConfig {
+            reference_mode: mode,
+            window_samples,
+        },
+    );
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("oracle"), symbol_short!("devref")),
+        (mode as u32, window_samples),
+    );
+
+    Ok(())
+}
+
+/// Returns the configured deviation reference mode (default `StartPrice`, Issue #266).
+pub fn get_deviation_ref_mode(env: Env) -> DeviationReferenceMode {
+    _load_deviation_config(&env).reference_mode
+}
+
+/// Returns the configured TWAP window size in samples (default `MIN_TWAP_WINDOW_SAMPLES`, Issue #266).
+pub fn get_deviation_window_samples(env: Env) -> u32 {
+    _load_deviation_config(&env).window_samples
+}
+
+/// Loads the attestation config, returning `key: None` (disabled) if unset (Issue #263).
+pub fn _load_attestation_config(env: &Env) -> AttestationConfig {
+    let key = AttestationConfigKey::Config;
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            crate::common::TTL_BUMP_THRESHOLD,
+            crate::common::TTL_BUMP_AMOUNT,
+        );
+    }
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(AttestationConfig { key: None })
+}
+
+/// Sets (or clears) the ed25519 public key used to verify oracle attestation
+/// signatures (admin only, Issue #263). Passing `None` disables attestation
+/// verification entirely, restoring pre-#263 behaviour (account auth only).
+pub fn set_attestation_key(env: Env, key: Option<BytesN<32>>) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKeyCore::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("attkey"), e);
+    })?;
+
+    let storage_key = AttestationConfigKey::Config;
+    env.storage()
+        .persistent()
+        .set(&storage_key, &AttestationConfig { key: key.clone() });
+    env.storage().persistent().extend_ttl(
+        &storage_key,
+        crate::common::TTL_BUMP_THRESHOLD,
+        crate::common::TTL_BUMP_AMOUNT,
+    );
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("oracle"), symbol_short!("attkey")),
+        (key.is_some(),),
+    );
+
+    Ok(())
+}
+
+/// Returns the configured attestation signing key, if attestation is enabled (Issue #263).
+pub fn get_attestation_key(env: Env) -> Option<BytesN<32>> {
+    _load_attestation_config(&env).key
 }
 
 /// Sets the minimum oracle confidence threshold in basis points (admin only).
@@ -288,7 +516,7 @@ pub fn set_oracle_min_confidence_bps(env: Env, min_bps: Option<u32>) -> Result<(
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     if let Some(bps) = min_bps {
@@ -300,12 +528,12 @@ pub fn set_oracle_min_confidence_bps(env: Env, min_bps: Option<u32>) -> Result<(
         None => env
             .storage()
             .persistent()
-            .remove(&DataKey::OracleMinConfidenceBps),
+            .remove(&DataKeyCore::OracleMinConfidenceBps),
         Some(bps) => {
             env.storage()
                 .persistent()
-                .set(&DataKey::OracleMinConfidenceBps, &bps);
-            _extend_persistent_ttl(&env, &DataKey::OracleMinConfidenceBps);
+                .set(&DataKeyCore::OracleMinConfidenceBps, &bps);
+            _extend_persistent_ttl(&env, &DataKeyCore::OracleMinConfidenceBps);
         }
     }
     Ok(())
@@ -317,26 +545,26 @@ pub fn set_oracle_strict_mode(env: Env, enabled: bool) -> Result<(), ContractErr
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     env.storage()
         .persistent()
-        .set(&DataKey::OracleStrictMode, &enabled);
-    _extend_persistent_ttl(&env, &DataKey::OracleStrictMode);
+        .set(&DataKeyCore::OracleStrictMode, &enabled);
+    _extend_persistent_ttl(&env, &DataKeyCore::OracleStrictMode);
     Ok(())
 }
 
 /// Returns the configured minimum oracle confidence bps, if set.
 pub fn get_oracle_min_confidence_bps(env: Env) -> Option<u32> {
-    let key = DataKey::OracleMinConfidenceBps;
+    let key = DataKeyCore::OracleMinConfidenceBps;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
 
 /// Returns whether oracle strict mode is enabled.
 pub fn get_oracle_strict_mode(env: Env) -> bool {
-    let key = DataKey::OracleStrictMode;
+    let key = DataKeyCore::OracleStrictMode;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key).unwrap_or(false)
 }
@@ -350,7 +578,7 @@ pub fn set_hb_strict_mode(env: Env, enabled: bool) -> Result<(), ContractError> 
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     let mut config = _load_hb_config(&env);
@@ -369,7 +597,7 @@ pub fn get_hb_strict_mode(env: Env) -> bool {
 /// Consumed automatically when the next `resolve_round` call passes the heartbeat health gate
 /// while the override is armed. Does not persist across rounds.
 pub fn arm_hb_override(env: Env) -> Result<(), ContractError> {
-    let admin_key = DataKey::Admin;
+    let admin_key = DataKeyCore::Admin;
     _extend_persistent_ttl(&env, &admin_key);
     let admin: Address = env
         .storage()
@@ -402,7 +630,7 @@ pub fn set_hb_grace_seconds(env: Env, seconds: u64) -> Result<(), ContractError>
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     let mut config = _load_hb_config(&env);
@@ -434,35 +662,42 @@ pub fn _consume_hb_override(env: &Env) -> bool {
 pub fn _load_hb_config(env: &Env) -> HbGateConfig {
     let key = HbGateKey::Config;
     if env.storage().persistent().has(&key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, crate::common::TTL_BUMP_THRESHOLD, crate::common::TTL_BUMP_AMOUNT);
+        env.storage().persistent().extend_ttl(
+            &key,
+            crate::common::TTL_BUMP_THRESHOLD,
+            crate::common::TTL_BUMP_AMOUNT,
+        );
     }
-    env.storage().persistent().get(&key).unwrap_or(HbGateConfig {
-        strict_mode: false,
-        override_armed: false,
-        grace_seconds: 0,
-    })
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(HbGateConfig {
+            strict_mode: false,
+            override_armed: false,
+            grace_seconds: 0,
+        })
 }
 
 /// Saves the heartbeat gate config to persistent storage.
 pub fn _save_hb_config(env: &Env, config: &HbGateConfig) {
     let key = HbGateKey::Config;
     env.storage().persistent().set(&key, config);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, crate::common::TTL_BUMP_THRESHOLD, crate::common::TTL_BUMP_AMOUNT);
+    env.storage().persistent().extend_ttl(
+        &key,
+        crate::common::TTL_BUMP_THRESHOLD,
+        crate::common::TTL_BUMP_AMOUNT,
+    );
 }
 
 /// Records an oracle heartbeat (oracle only).
 pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     if status > 2 {
-        _extend_persistent_ttl(&env, &DataKey::Oracle);
+        _extend_persistent_ttl(&env, &DataKeyCore::Oracle);
         if let Some(oracle) = env
             .storage()
             .persistent()
-            .get::<_, Address>(&DataKey::Oracle)
+            .get::<_, Address>(&DataKeyCore::Oracle)
         {
             _emit_action_rejected(
                 &env,
@@ -473,11 +708,11 @@ pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractErro
         }
         return Err(ContractError::InvalidMode);
     }
-    _extend_persistent_ttl(&env, &DataKey::Oracle);
+    _extend_persistent_ttl(&env, &DataKeyCore::Oracle);
     let oracle: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Oracle)
+        .get(&DataKeyCore::Oracle)
         .ok_or(ContractError::OracleNotSet)?;
     oracle.require_auth();
 
@@ -488,8 +723,8 @@ pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractErro
     };
     env.storage()
         .persistent()
-        .set(&DataKey::OracleHeartbeat, &record);
-    _extend_persistent_ttl(&env, &DataKey::OracleHeartbeat);
+        .set(&DataKeyCore::OracleHeartbeat, &record);
+    _extend_persistent_ttl(&env, &DataKeyCore::OracleHeartbeat);
 
     #[allow(deprecated)]
     env.events().publish(
@@ -501,14 +736,14 @@ pub fn update_oracle_heartbeat(env: Env, status: u32) -> Result<(), ContractErro
 
 /// Returns the most recent oracle heartbeat record, if any.
 pub fn get_oracle_heartbeat(env: Env) -> Option<OracleHeartbeatRecord> {
-    let key = DataKey::OracleHeartbeat;
+    let key = DataKeyCore::OracleHeartbeat;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
 
 /// Returns `true` if the oracle has a non-stale heartbeat with status not offline (2).
 pub fn is_oracle_live(env: Env) -> bool {
-    let heartbeat_key = DataKey::OracleHeartbeat;
+    let heartbeat_key = DataKeyCore::OracleHeartbeat;
     _extend_persistent_ttl(&env, &heartbeat_key);
     let record: OracleHeartbeatRecord = match env.storage().persistent().get(&heartbeat_key) {
         Some(r) => r,
@@ -517,7 +752,7 @@ pub fn is_oracle_live(env: Env) -> bool {
     if record.status == 2 {
         return false;
     }
-    let threshold_key = DataKey::OracleStaleThreshold;
+    let threshold_key = DataKeyCore::OracleStaleThreshold;
     _extend_persistent_ttl(&env, &threshold_key);
     let threshold: u64 = env
         .storage()
@@ -540,7 +775,7 @@ pub fn get_protocol_health(env: Env) -> ProtocolHealthStatus {
 
     let paused = is_paused(env.clone());
 
-    let heartbeat_key = DataKey::OracleHeartbeat;
+    let heartbeat_key = DataKeyCore::OracleHeartbeat;
     _extend_persistent_ttl(&env, &heartbeat_key);
     let (oracle_live, oracle_status) = match env
         .storage()
@@ -552,7 +787,7 @@ pub fn get_protocol_health(env: Env) -> ProtocolHealthStatus {
             if record.status == 2 {
                 (false, record.status)
             } else {
-                let threshold_key = DataKey::OracleStaleThreshold;
+                let threshold_key = DataKeyCore::OracleStaleThreshold;
                 _extend_persistent_ttl(&env, &threshold_key);
                 let threshold: u64 = env
                     .storage()
@@ -568,7 +803,7 @@ pub fn get_protocol_health(env: Env) -> ProtocolHealthStatus {
     let (has_active_round, active_round_phase) = match env
         .storage()
         .persistent()
-        .get::<_, Round>(&DataKey::ActiveRound)
+        .get::<_, Round>(&DataKeyCore::ActiveRound)
     {
         None => (false, 0u32),
         Some(round) => {
@@ -618,7 +853,7 @@ pub fn get_protocol_health(env: Env) -> ProtocolHealthStatus {
 }
 
 pub fn get_oracle_stale_threshold(env: Env) -> u64 {
-    let key = DataKey::OracleStaleThreshold;
+    let key = DataKeyCore::OracleStaleThreshold;
     _extend_persistent_ttl(&env, &key);
     env.storage()
         .persistent()
@@ -626,36 +861,94 @@ pub fn get_oracle_stale_threshold(env: Env) -> u64 {
         .unwrap_or(DEFAULT_ORACLE_STALE_THRESHOLD)
 }
 
-pub fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
-    let key = DataKey::Paused;
+/// Reads the current [`RuntimeMode`], defaulting to `Normal` if unset.
+fn _current_mode(env: &Env) -> RuntimeMode {
+    let key = DataKeyCore::Paused;
     _extend_persistent_ttl(env, &key);
-    let mode = env
-        .storage()
+    env.storage()
         .persistent()
         .get::<_, RuntimeMode>(&key)
-        .unwrap_or(RuntimeMode::Normal);
-    if mode == RuntimeMode::FullyPaused {
+        .unwrap_or(RuntimeMode::Normal)
+}
+
+/// Single policy gate for every mutating entrypoint (Issue #261).
+///
+/// Every state-changing method in the contract funnels its mode check
+/// through this one function instead of hand-rolling `if mode == X` logic
+/// per-entrypoint. New methods are onboarded by picking the right
+/// [`PolicyAction`] variant rather than re-deriving the mode rules, so the
+/// gate cannot drift out of sync with individual call sites.
+///
+/// ## Mode × action matrix
+///
+/// | action          | `Normal` | `ClaimsOnly` | `FullyPaused` |
+/// |------------------|:--------:|:------------:|:-------------:|
+/// | `RoundMutation`  | ✅       | ❌           | ❌            |
+/// | `Claim`          | ✅       | ✅           | ❌            |
+/// | `AdminConfig`    | ✅       | ✅           | ❌            |
+/// | `Settlement`     | ✅       | ✅           | ❌            |
+///
+/// `RoundMutation` is the only class blocked by `ClaimsOnly` — betting and
+/// new rounds must stop once the protocol has no active round to bet into,
+/// while admins can still reconfigure, the oracle can still settle/cancel a
+/// round already in flight, and users can still withdraw what they're owed.
+/// `FullyPaused` blocks every class uniformly (emergency stop).
+///
+/// ## Entrypoint inventory (action → dispatcher, `contract.rs`)
+///
+/// - `RoundMutation`: `place_bet`, `place_precision_prediction`,
+///   `predict_price`, `commit_prediction`, `reveal_prediction`,
+///   `mint_initial`.
+/// - `Claim`: `claim_winnings`.
+/// - `Settlement`: `resolve_round`, `cancel_round`.
+/// - `AdminConfig`: `pause_contract`, `unpause_contract`, `set_runtime_mode`,
+///   `migrate_schema_v1_to_v2`, `migrate_schema_v2_to_v3`,
+///   `set_oracle_max_deviation_bps`, `arm_oracle_deviation_override`,
+///   `set_oracle_min_confidence_bps`, `set_oracle_strict_mode`,
+///   `set_hb_strict_mode`, `arm_hb_override`, `set_hb_grace_seconds`,
+///   `propose_oracle_rotation`, `accept_oracle_rotation`,
+///   `cancel_oracle_rotation`, `set_windows`, `set_max_stake`,
+///   `set_max_user_exposure`, `set_max_pending_winnings`, `set_min_bet`,
+///   `schedule_*` variants, `apply_scheduled_changes`, `cancel_config_change`,
+///   `set_protocol_fee_bps`, `withdraw_protocol_fee`, `set_min_participants`,
+///   `set_max_precision_participants`, `set_mint_limit`,
+///   `set_archive_retention`, `set_close_buffer_ledgers`,
+///   `set_round_template`, `clear_round_template`,
+///   `reset_leaderboard_season`, `create_round`, `create_next_from_template`
+///   (admin-gated, not `RoundMutation` — must stay callable in `ClaimsOnly`
+///   since it is the entrypoint that transitions the protocol back to
+///   `Active`; it is blocked only by `FullyPaused`).
+///
+/// `update_oracle_heartbeat` and `is_*`/`get_*` read-only queries are
+/// intentionally not gated: heartbeat recording must keep flowing even while
+/// paused so `get_protocol_health` reflects live oracle status during an
+/// incident, and reads never mutate state.
+pub fn _policy_gate(env: &Env, action: PolicyAction) -> Result<(), ContractError> {
+    let mode = _current_mode(env);
+    let blocked = match action {
+        PolicyAction::RoundMutation => mode != RuntimeMode::Normal,
+        PolicyAction::Claim | PolicyAction::AdminConfig | PolicyAction::Settlement => {
+            mode == RuntimeMode::FullyPaused
+        }
+    };
+    if blocked {
         return Err(ContractError::ContractPaused);
     }
     Ok(())
 }
 
+/// Blocked only by `FullyPaused` — equivalent to `_policy_gate(env, PolicyAction::AdminConfig)`.
+pub fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
+    _policy_gate(env, PolicyAction::AdminConfig)
+}
+
+/// Blocked by any non-`Normal` mode — equivalent to `_policy_gate(env, PolicyAction::RoundMutation)`.
 pub fn _ensure_normal_mode(env: &Env) -> Result<(), ContractError> {
-    let key = DataKey::Paused;
-    _extend_persistent_ttl(env, &key);
-    let mode = env
-        .storage()
-        .persistent()
-        .get::<_, RuntimeMode>(&key)
-        .unwrap_or(RuntimeMode::Normal);
-    if mode != RuntimeMode::Normal {
-        return Err(ContractError::ContractPaused);
-    }
-    Ok(())
+    _policy_gate(env, PolicyAction::RoundMutation)
 }
 
 pub fn _set_mode(env: &Env, new_mode: RuntimeMode) -> Result<(), ContractError> {
-    let key = DataKey::Paused;
+    let key = DataKeyCore::Paused;
     let old_mode = env
         .storage()
         .persistent()
@@ -674,13 +967,108 @@ pub fn _set_mode(env: &Env, new_mode: RuntimeMode) -> Result<(), ContractError> 
 }
 
 pub fn _schema_version(env: &Env) -> Option<u32> {
-    env.storage().persistent().get(&DataKey::SchemaVersion)
+    env.storage().persistent().get(&DataKeyCore::SchemaVersion)
+}
+
+/// Returns `true` if a `DataKeyCore` variant is eligible for batch TTL touch
+/// by a maintainer. Only system-critical, long-lived keys are allowlisted.
+pub fn _is_ttl_touch_allowed(key: &DataKeyCore) -> bool {
+    matches!(
+        key,
+        DataKeyCore::Admin
+            | DataKeyCore::Oracle
+            | DataKeyCore::SchemaVersion
+            | DataKeyCore::Paused
+            | DataKeyCore::BetWindowLedgers
+            | DataKeyCore::RunWindowLedgers
+            | DataKeyCore::CloseBufferLedgers
+            | DataKeyCore::MaxStake
+            | DataKeyCore::MaxUserRoundExposure
+            | DataKeyCore::MaxPendingWinnings
+            | DataKeyCore::MinParticipants
+            | DataKeyCore::MaxPrecisionParticipants
+            | DataKeyCore::OracleHeartbeat
+            | DataKeyCore::OracleStaleThreshold
+            | DataKeyCore::OracleMaxDeviationBps
+            | DataKeyCore::OracleDeviationOverrideArmed
+            | DataKeyCore::OracleMinConfidenceBps
+            | DataKeyCore::OracleStrictMode
+            | DataKeyCore::ProtocolFeeBps
+            | DataKeyCore::ProtocolFeeTreasury
+            | DataKeyCore::MigratedToV3
+            | DataKeyCore::ArchiveRetention
+            | DataKeyCore::RoundTemplate
+            | DataKeyCore::Ext(DataKeyExt::LeaderboardWins)
+            | DataKeyCore::Ext(DataKeyExt::LeaderboardStreak)
+            | DataKeyCore::Ext(DataKeyExt::SeasonId)
+            | DataKeyCore::Ext(DataKeyExt::SeasonLeaderboardWins)
+            | DataKeyCore::Ext(DataKeyExt::SeasonLeaderboardStreak)
+            | DataKeyCore::LastRoundId
+            | DataKeyCore::OracleRotationProposal
+            | DataKeyCore::MintLimitConfig
+    )
+}
+
+/// Auth-gated batch TTL extension for allowlisted storage keys (admin only).
+///
+/// Accepts a vector of `DataKeyCore` variants. Each key is validated against the
+/// TTL-touch allowlist. Keys that exist in storage have their TTL extended to
+/// `TTL_BUMP_AMOUNT` (~30 days). Keys not in the allowlist cause the entire
+/// call to fail with `UnsupportedDataKeyForTtlTouch`. Keys that are in the
+/// allowlist but absent from storage are silently skipped.
+///
+/// Returns the number of keys whose TTL was actually extended.
+///
+/// Emits `("storage", "touch")` with `(touched, skipped)` counts.
+pub fn batch_touch_ttl(env: Env, keys: Vec<DataKeyCore>) -> Result<u32, ContractError> {
+    let admin_key = DataKeyCore::Admin;
+    _extend_persistent_ttl(&env, &admin_key);
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&admin_key)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("batch_t"), e);
+    })?;
+
+    let mut touched: u32 = 0;
+    let mut skipped: u32 = 0;
+
+    for key in keys.iter() {
+        if !_is_ttl_touch_allowed(&key) {
+            _emit_action_rejected(
+                &env,
+                &admin,
+                symbol_short!("batch_t"),
+                ContractError::WindowOutOfRange,
+            );
+            return Err(ContractError::WindowOutOfRange);
+        }
+        if env.storage().persistent().has(&key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP_THRESHOLD, TTL_BUMP_AMOUNT);
+            touched += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("storage"), symbol_short!("touch")),
+        (touched, skipped),
+    );
+
+    Ok(touched)
 }
 
 pub fn _require_supported_schema(env: &Env) -> Result<u32, ContractError> {
-    _extend_persistent_ttl(env, &DataKey::SchemaVersion);
-    if env.storage().persistent().has(&DataKey::Admin) {
-        _extend_persistent_ttl(env, &DataKey::Admin);
+    _extend_persistent_ttl(env, &DataKeyCore::SchemaVersion);
+    if env.storage().persistent().has(&DataKeyCore::Admin) {
+        _extend_persistent_ttl(env, &DataKeyCore::Admin);
     }
     let v = _schema_version(env).unwrap_or(1);
     if v == 0 || v > CURRENT_SCHEMA_VERSION {
