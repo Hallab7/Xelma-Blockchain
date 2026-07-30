@@ -168,6 +168,10 @@ pub enum DataKey {
     /// Admin-configured multi-feed oracle quorum parameters.
     /// When set, `resolve_round_multi` is enabled.
     OracleQuorum,
+    /// Announced next schema version for migration preview (v-next template).
+    /// When set, operators can inspect this value before executing a real migration.
+    /// Absent means no next migration has been announced.
+    NextSchemaVersion,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.

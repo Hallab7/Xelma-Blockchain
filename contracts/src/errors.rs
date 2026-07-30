@@ -110,6 +110,8 @@ pub enum ContractError {
     OracleNotLive = 67,
     /// Invalid precision payout policy
     InvalidPayoutPolicy = 68,
+    /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
+    BelowMinBet = 69,
     /// Multi-feed resolution: fewer observations survived outlier rejection
     /// than the configured quorum threshold.
     InsufficientOracleQuorum = 71,
