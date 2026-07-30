@@ -105,7 +105,7 @@ proptest! {
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
         confidence: None,
-        });
+        attestation: None,        });
 
         let alice_pending = client.get_pending_winnings(&alice);
         let bob_pending = client.get_pending_winnings(&bob);
@@ -221,7 +221,7 @@ proptest! {
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
         confidence: None,
-        });
+        attestation: None,        });
 
         let alice_pending = client.get_pending_winnings(&alice);
         let bob_pending = client.get_pending_winnings(&bob);
@@ -358,7 +358,7 @@ proptest! {
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
             confidence: None,
-        });
+            attestation: None,        });
 
         let alice_pending   = client.get_pending_winnings(&alice);
         let bob_pending     = client.get_pending_winnings(&bob);
@@ -460,7 +460,7 @@ proptest! {
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
             confidence: None,
-        });
+            attestation: None,        });
 
         let alice_pending   = client.get_pending_winnings(&alice);
         let bob_pending     = client.get_pending_winnings(&bob);
@@ -548,7 +548,7 @@ proptest! {
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
             confidence: None,
-        });
+            attestation: None,        });
 
         let alice_refund   = client.get_pending_winnings(&alice);
         let bob_refund     = client.get_pending_winnings(&bob);
