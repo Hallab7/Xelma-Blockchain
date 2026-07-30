@@ -110,13 +110,37 @@ impl VirtualTokenContract {
     }
 
     /// Migrates legacy schema version 1 → version 2 (admin only).
-    pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
-        admin::migrate_schema_v1_to_v2(env)
+    ///
+    /// When `dry_run` is `true`, all validation checks are performed but no
+    /// storage writes or events are emitted.
+    pub fn migrate_schema_v1_to_v2(env: Env, dry_run: bool) -> Result<(), ContractError> {
+        admin::migrate_schema_v1_to_v2(env, dry_run)
     }
 
     /// Migrates schema version 2 → version 3 (admin only).
-    pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
-        admin::migrate_schema_v2_to_v3(env)
+    ///
+    /// When `dry_run` is `true`, all validation checks are performed but no
+    /// storage writes or events are emitted.
+    pub fn migrate_schema_v2_to_v3(env: Env, dry_run: bool) -> Result<(), ContractError> {
+        admin::migrate_schema_v2_to_v3(env, dry_run)
+    }
+
+    /// Announces a target schema version for the next planned migration (admin only).
+    ///
+    /// This sets a "v-next schema template" that operators can inspect before
+    /// the real migration executes. It does NOT change the active schema.
+    pub fn announce_next_schema(env: Env, target_version: u32) -> Result<(), ContractError> {
+        admin::announce_next_schema(env, target_version)
+    }
+
+    /// Returns the announced next schema version, if any.
+    pub fn get_next_schema(env: Env) -> Option<u32> {
+        admin::get_next_schema(env)
+    }
+
+    /// Clears a previously announced next schema version (admin only).
+    pub fn clear_next_schema(env: Env) -> Result<(), ContractError> {
+        admin::clear_next_schema(env)
     }
 
     /// Returns whether the contract is currently paused

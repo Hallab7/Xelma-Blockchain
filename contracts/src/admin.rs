@@ -59,8 +59,12 @@ pub fn get_schema_version(env: Env) -> u32 {
 }
 
 /// Migrates legacy schema version 1 → version 2 (admin only).
-pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
-    let admin_key = DataKeyCore::Admin;
+///
+/// When `dry_run` is `true`, all validation checks are performed but no storage
+/// writes or events are emitted. This lets operators verify that a migration
+/// would succeed before committing to it.
+pub fn migrate_schema_v1_to_v2(env: Env, dry_run: bool) -> Result<(), ContractError> {
+    let admin_key = DataKey::Admin;
     _extend_persistent_ttl(&env, &admin_key);
     let admin: Address = env
         .storage()
@@ -94,7 +98,11 @@ pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
         return Err(ContractError::UnsupportedSchemaVersion);
     }
 
-    let schema_key = DataKeyCore::SchemaVersion;
+    if dry_run {
+        return Ok(());
+    }
+
+    let schema_key = DataKey::SchemaVersion;
     env.storage().persistent().set(&schema_key, &TARGET_VERSION);
     _extend_persistent_ttl(&env, &schema_key);
 
@@ -108,8 +116,12 @@ pub fn migrate_schema_v1_to_v2(env: Env) -> Result<(), ContractError> {
 }
 
 /// Migrates schema version 2 → version 3 (admin only).
-pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
-    let admin_key = DataKeyCore::Admin;
+///
+/// When `dry_run` is `true`, all validation checks are performed but no storage
+/// writes or events are emitted. This lets operators verify that a migration
+/// would succeed before committing to it.
+pub fn migrate_schema_v2_to_v3(env: Env, dry_run: bool) -> Result<(), ContractError> {
+    let admin_key = DataKey::Admin;
     _extend_persistent_ttl(&env, &admin_key);
     let admin: Address = env
         .storage()
@@ -143,7 +155,11 @@ pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
         return Err(ContractError::UnsupportedSchemaVersion);
     }
 
-    let schema_key = DataKeyCore::SchemaVersion;
+    if dry_run {
+        return Ok(());
+    }
+
+    let schema_key = DataKey::SchemaVersion;
     env.storage().persistent().set(&schema_key, &TARGET_VERSION);
     _extend_persistent_ttl(&env, &schema_key);
 
@@ -155,6 +171,71 @@ pub fn migrate_schema_v2_to_v3(env: Env) -> Result<(), ContractError> {
     env.events().publish(
         (symbol_short!("schema"), symbol_short!("migrated")),
         (from, TARGET_VERSION),
+    );
+
+    Ok(())
+}
+
+/// Announces a target schema version for the next planned migration (admin only).
+///
+/// This sets a "v-next schema template" that operators can inspect before the
+/// real migration executes. It is purely informational — it does NOT change
+/// the active schema or gate any entrypoints. Use `get_next_schema` to read
+/// the announced version and `clear_next_schema` to unset it.
+pub fn announce_next_schema(env: Env, target_version: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+
+    if target_version == 0 || target_version <= CURRENT_SCHEMA_VERSION {
+        return Err(ContractError::UnsupportedSchemaVersion);
+    }
+
+    let key = DataKey::NextSchemaVersion;
+    env.storage().persistent().set(&key, &target_version);
+    _extend_persistent_ttl(&env, &key);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("schema"), symbol_short!("next_ann")),
+        (CURRENT_SCHEMA_VERSION, target_version),
+    );
+
+    Ok(())
+}
+
+/// Returns the announced next schema version, if any.
+pub fn get_next_schema(env: Env) -> Option<u32> {
+    let key = DataKey::NextSchemaVersion;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
+/// Clears a previously announced next schema version (admin only).
+pub fn clear_next_schema(env: Env) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+
+    let key = DataKey::NextSchemaVersion;
+    if !env.storage().persistent().has(&key) {
+        return Err(ContractError::UnsupportedSchemaVersion);
+    }
+    let previous: u32 = env.storage().persistent().get(&key).unwrap();
+    env.storage().persistent().remove(&key);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("schema"), symbol_short!("next_clr")),
+        (previous,),
     );
 
     Ok(())
