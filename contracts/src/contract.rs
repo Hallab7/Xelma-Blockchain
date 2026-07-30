@@ -7,12 +7,11 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    FeeModel, LeaderboardEntry, OracleHeartbeatRecord, OraclePayload,
-    OracleRotationProposal, PendingConfigChange, PrecisionPrediction,
-    ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundPhase,
-    RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode, SeasonArchive,
-    SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
+    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped,
+    LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
+    PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
+    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
+    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
     UserStats,
 };
 
@@ -34,6 +33,10 @@ const MAX_ORACLE_STALE_THRESHOLD: u64 = 86_400; // 24 hours
 
 // ─── Oracle rotation expiry ───────────────────────────────────────────────────
 const MIN_ROTATION_EXPIRY_SECONDS: u64 = 60; // 1 minute minimum
+/// Minimum delay between proposing and accepting an oracle rotation.
+/// Prevents quiet takeovers: even with admin key compromise, a 1-hour window
+/// gives operators and monitoring dashboards time to react.
+const MIN_ROTATION_DELAY_SECONDS: u64 = 3_600; // 1 hour
 
 const DEFAULT_BET_WINDOW_LEDGERS: u32 = 6;
 const DEFAULT_RUN_WINDOW_LEDGERS: u32 = 12;
@@ -260,7 +263,7 @@ impl VirtualTokenContract {
     pub fn get_protocol_status(env: Env) -> ProtocolStatus {
         if Self::is_paused(env.clone()) {
             ProtocolStatus::Paused
-        } else if env.storage().persistent().has(&DataKey::ActiveRound) {
+        } else if env.storage().persistent().has(&DataKeyCore::ActiveRound) {
             ProtocolStatus::Active
         } else {
             ProtocolStatus::ClaimsOnly
@@ -295,7 +298,7 @@ impl VirtualTokenContract {
         if let Some(active_round) = env
             .storage()
             .persistent()
-            .get::<_, Round>(&DataKey::ActiveRound)
+            .get::<_, Round>(&DataKeyCore::ActiveRound)
         {
             if active_round.round_id == round_id {
                 let phase = Self::_derive_round_phase(env.ledger().sequence(), &active_round);
@@ -308,7 +311,7 @@ impl VirtualTokenContract {
         }
 
         // Second, check the archived rounds summary
-        let archive_key = DataKey::ArchivedRound(round_id);
+        let archive_key = DataKeyScoped::ArchivedRound(round_id);
         if let Some(archive) = env
             .storage()
             .persistent()
@@ -335,6 +338,21 @@ impl VirtualTokenContract {
         admin::get_oracle_stale_threshold(env)
     }
 
+    /// Auth-gated batch TTL extension for allowlisted storage keys (admin only).
+    ///
+    /// Accepts a vector of `DataKeyCore` variants. Each key is validated against the
+    /// TTL-touch allowlist. Keys that exist in storage have their TTL extended to
+    /// `TTL_BUMP_AMOUNT` (~30 days). Keys not in the allowlist cause the entire
+    /// call to fail with `UnsupportedDataKeyForTtlTouch`. Keys that are in the
+    /// allowlist but absent from storage are silently skipped.
+    ///
+    /// Returns the number of keys whose TTL was actually extended.
+    ///
+    /// Event: `("storage", "touch")` with `(touched, skipped)` counts.
+    pub fn batch_touch_ttl(env: Env, keys: Vec<DataKeyCore>) -> Result<u32, ContractError> {
+        admin::batch_touch_ttl(env, keys)
+    }
+
     // ─── Oracle rotation (two-step with expiry) ─────────────────────────────
 
     /// Proposes a new oracle address with an expiry window (admin only).
@@ -353,12 +371,12 @@ impl VirtualTokenContract {
         let admin: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&DataKeyCore::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
         Self::_ensure_not_paused(&env)?;
 
-        if expires_in_seconds < MIN_ROTATION_EXPIRY_SECONDS {
+        if expires_in_seconds < MIN_ROTATION_DELAY_SECONDS {
             return Err(ContractError::InvalidDuration);
         }
 
@@ -373,7 +391,7 @@ impl VirtualTokenContract {
             expires_at,
         };
 
-        let key = DataKey::OracleRotationProposal;
+        let key = DataKeyCore::OracleRotationProposal;
         env.storage().persistent().set(&key, &proposal);
         Self::_extend_persistent_ttl(&env, &key);
 
@@ -388,15 +406,22 @@ impl VirtualTokenContract {
 
     /// Accepts a pending oracle rotation proposal before expiry (any caller).
     ///
-    /// If the proposal has expired the call returns `RotationExpired` and the
+    /// **Security**: A mandatory `MIN_ROTATION_DELAY_SECONDS` (1 hour) must
+    /// elapse between proposal and acceptance. This prevents quiet one-block
+    /// takeovers — even if the admin key is compromised, the community has a
+    /// full hour to observe the proposal event and react before the oracle
+    /// actually changes.
+    ///
+    /// If the delay has not elapsed the call returns `RotationDelayNotElapsed`.
+    /// If the proposal has expired it returns `NoPendingRotation` and the
     /// stale proposal is removed after emitting `("oracle", "expired")`.
     /// On success the stored oracle address is updated and
-    /// `("oracle", "accept")` is emitted.
+    /// `("oracle", "accept")` is emitted with the previous and new addresses.
     pub fn accept_oracle_rotation(env: Env) -> Result<(), ContractError> {
         Self::_require_supported_schema(&env)?;
         Self::_ensure_not_paused(&env)?;
 
-        let key = DataKey::OracleRotationProposal;
+        let key = DataKeyCore::OracleRotationProposal;
         let proposal: OracleRotationProposal = env
             .storage()
             .persistent()
@@ -404,6 +429,24 @@ impl VirtualTokenContract {
             .ok_or(ContractError::NoPendingRotation)?;
 
         let current_ts = env.ledger().timestamp();
+
+        // Mandatory delay before acceptance (prevents quiet takeovers)
+        let earliest_accept = proposal
+            .proposed_at
+            .checked_add(MIN_ROTATION_DELAY_SECONDS)
+            .ok_or(ContractError::Overflow)?;
+        if current_ts < earliest_accept {
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("oracle"), symbol_short!("early")),
+                (
+                    proposal.new_oracle.clone(),
+                    current_ts,
+                    earliest_accept,
+                ),
+            );
+            return Err(ContractError::RotationDelayNotElapsed);
+        }
 
         if current_ts > proposal.expires_at {
             env.storage().persistent().remove(&key);
@@ -419,7 +462,7 @@ impl VirtualTokenContract {
             return Err(ContractError::NoPendingRotation);
         }
 
-        let oracle_key = DataKey::Oracle;
+        let oracle_key = DataKeyCore::Oracle;
         let previous: Address = env
             .storage()
             .persistent()
@@ -449,12 +492,12 @@ impl VirtualTokenContract {
         let admin: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Admin)
+            .get(&DataKeyCore::Admin)
             .ok_or(ContractError::AdminNotSet)?;
         admin.require_auth();
         Self::_ensure_not_paused(&env)?;
 
-        let key = DataKey::OracleRotationProposal;
+        let key = DataKeyCore::OracleRotationProposal;
         let proposal: OracleRotationProposal = env
             .storage()
             .persistent()
@@ -474,7 +517,7 @@ impl VirtualTokenContract {
 
     /// Returns the pending oracle rotation proposal, if any.
     pub fn get_oracle_rotation_proposal(env: Env) -> Option<OracleRotationProposal> {
-        let key = DataKey::OracleRotationProposal;
+        let key = DataKeyCore::OracleRotationProposal;
         Self::_extend_persistent_ttl(&env, &key);
         let proposal: Option<OracleRotationProposal> = env.storage().persistent().get(&key);
         if let Some(ref prop) = proposal {
@@ -617,12 +660,28 @@ impl VirtualTokenContract {
         config::get_max_precision_participants(env)
     }
 
+    pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), ContractError> {
+        config::set_precision_payout_policy(env, policy)
+    }
+
+    pub fn get_precision_payout_policy(env: Env) -> u32 {
+        config::get_precision_payout_policy(env)
+    }
+
     pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
         config::set_mint_limit(env, limit)
     }
 
     pub fn get_mint_limit(env: Env) -> u32 {
         config::get_mint_limit(env)
+    }
+
+    pub fn set_epoch_mint_budget(env: Env, budget: i128) -> Result<(), ContractError> {
+        config::set_epoch_mint_budget(env, budget)
+    }
+
+    pub fn get_epoch_mint_budget(env: Env) -> i128 {
+        config::get_epoch_mint_budget(env)
     }
 
     pub fn set_archive_retention(env: Env, limit: u32) -> Result<(), ContractError> {
@@ -639,6 +698,18 @@ impl VirtualTokenContract {
 
     pub fn get_close_buffer_ledgers(env: Env) -> u32 {
         config::get_close_buffer_ledgers(env)
+    }
+
+    /// Sets the early cash-out penalty rate in basis points (admin only).
+    /// `None` disables early cash-out entirely (default).
+    /// `Some(bps)` enables it with the given penalty rate (1–1000 bps).
+    pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
+        config::set_early_cashout_bps(env, bps)
+    }
+
+    /// Returns the configured early cash-out penalty bps, if enabled.
+    pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
+        config::get_early_cashout_bps(env)
     }
 
     /// Creates a new prediction round (admin only)
@@ -740,6 +811,22 @@ impl VirtualTokenContract {
 
     pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
         settlement::claim_winnings(env, user)
+    }
+
+    /// Early cash-out during the Running phase for UpDown rounds.
+    ///
+    /// Allows a bettor to exit their position early, forfeiting a percentage
+    /// of their stake to the protocol treasury. The forfeited amount is
+    /// determined by the `EarlyCashoutBps` config (set by admin).
+    ///
+    /// # Errors
+    /// - `EarlyCashoutDisabled` — feature not enabled (no penalty bps configured)
+    /// - `EarlyCashoutPhaseInvalid` — not in Running phase
+    /// - `EarlyCashoutNotUpDown` — round is not UpDown mode
+    /// - `NoActiveRound` — no active round exists
+    /// - `PositionNotFound` — user has no position in the active round
+    pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
+        betting::cash_out_early(env, user)
     }
 
     pub fn get_active_round(env: Env) -> Option<Round> {
@@ -898,13 +985,13 @@ impl VirtualTokenContract {
 
 impl VirtualTokenContract {
     pub(crate) fn _set_balance(env: &Env, user: Address, amount: i128) {
-        let key = DataKey::Balance(user);
+        let key = DataKeyScoped::Balance(user);
         env.storage().persistent().set(&key, &amount);
         Self::_extend_persistent_ttl(env, &key);
     }
 
     fn _ensure_not_paused(env: &Env) -> Result<(), ContractError> {
-        let key = DataKey::Paused;
+        let key = DataKeyCore::Paused;
         Self::_extend_persistent_ttl(env, &key);
         let mode = env
             .storage()
@@ -918,7 +1005,7 @@ impl VirtualTokenContract {
     }
 
     fn _ensure_normal_mode(env: &Env) -> Result<(), ContractError> {
-        let key = DataKey::Paused;
+        let key = DataKeyCore::Paused;
         Self::_extend_persistent_ttl(env, &key);
         let mode = env
             .storage()
@@ -932,7 +1019,7 @@ impl VirtualTokenContract {
     }
 
     fn _set_mode(env: &Env, new_mode: RuntimeMode) -> Result<(), ContractError> {
-        let key = DataKey::Paused;
+        let key = DataKeyCore::Paused;
         let old_mode = env
             .storage()
             .persistent()
@@ -962,13 +1049,13 @@ impl VirtualTokenContract {
     }
 
     fn _schema_version(env: &Env) -> Option<u32> {
-        env.storage().persistent().get(&DataKey::SchemaVersion)
+        env.storage().persistent().get(&DataKeyCore::SchemaVersion)
     }
 
     fn _require_supported_schema(env: &Env) -> Result<u32, ContractError> {
-        Self::_extend_persistent_ttl(env, &DataKey::SchemaVersion);
-        if env.storage().persistent().has(&DataKey::Admin) {
-            Self::_extend_persistent_ttl(env, &DataKey::Admin);
+        Self::_extend_persistent_ttl(env, &DataKeyCore::SchemaVersion);
+        if env.storage().persistent().has(&DataKeyCore::Admin) {
+            Self::_extend_persistent_ttl(env, &DataKeyCore::Admin);
         }
         let v = Self::_schema_version(env).unwrap_or(1);
         if v == 0 || v > CURRENT_SCHEMA_VERSION {
@@ -978,7 +1065,7 @@ impl VirtualTokenContract {
     }
 
     fn assert_no_active_round(env: &Env) -> Result<(), ContractError> {
-        if env.storage().persistent().has(&DataKey::ActiveRound) {
+        if env.storage().persistent().has(&DataKeyCore::ActiveRound) {
             return Err(ContractError::RoundAlreadyActive);
         }
 
@@ -1023,10 +1110,10 @@ impl VirtualTokenContract {
 
     /// Accumulates `amount` into a user's pending winnings, enforcing the cap if set (Issue #120).
     ///
-    /// Reads and writes `DataKey::PendingWinnings(user)` in one place, ensuring the cap
+    /// Reads and writes `DataKeyScoped::PendingWinnings(user)` in one place, ensuring the cap
     /// check and overflow protection are applied consistently across all payout paths.
     fn _accumulate_pending(env: &Env, user: Address, amount: i128) -> Result<(), ContractError> {
-        let key = DataKey::PendingWinnings(user);
+        let key = DataKeyScoped::PendingWinnings(user);
         let existing: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         let new_pending = Self::payout_add(existing, amount)?;
 
@@ -1034,7 +1121,7 @@ impl VirtualTokenContract {
         if let Some(cap) = env
             .storage()
             .persistent()
-            .get::<_, i128>(&DataKey::MaxPendingWinnings)
+            .get::<_, i128>(&DataKeyCore::MaxPendingWinnings)
         {
             if new_pending > cap {
                 return Err(ContractError::PendingWinningsCapExceeded);
@@ -1098,6 +1185,120 @@ impl VirtualTokenContract {
         Ok(())
     }
 
+    /// Reads the currently-configured protocol fee in bps (Issue #162).
+    /// Bumps TTL only when the key is present (avoids extra storage writes
+    /// on the hot "fee disabled" path through every competitive settlement).
+    fn _read_protocol_fee_bps(env: &Env) -> Option<u32> {
+        let key = DataKeyCore::ProtocolFeeBps;
+        let v: Option<u32> = env.storage().persistent().get(&key);
+        if v.is_some() {
+            Self::_extend_persistent_ttl(env, &key);
+        }
+        v
+    }
+
+    /// Credits `fee_amount` stroops to the protocol fee treasury and emits
+    /// `("protocol", "fee_collected")` (Issue #162). TTL on the treasury
+    /// key is extended on every write so the cumulative balance never
+    /// falls into archival. Payload mirrors the active bps so indexers
+    /// do not need an extra storage read.
+    fn _collect_protocol_fee(
+        env: &Env,
+        round_id: u64,
+        fee_amount: i128,
+        bps_active: Option<u32>,
+    ) -> Result<(), ContractError> {
+        if fee_amount <= 0 {
+            return Ok(());
+        }
+        let treasury_key = DataKeyCore::ProtocolFeeTreasury;
+        let current: i128 = env.storage().persistent().get(&treasury_key).unwrap_or(0);
+        let new_treasury = current
+            .checked_add(fee_amount)
+            .ok_or(ContractError::Overflow)?;
+        env.storage().persistent().set(&treasury_key, &new_treasury);
+        Self::_extend_persistent_ttl(env, &treasury_key);
+
+        let bps_value: u32 = bps_active.unwrap_or(0);
+
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("protocol"), symbol_short!("collected")),
+            (round_id, fee_amount, new_treasury, bps_value),
+        );
+
+        Ok(())
+    }
+
+    /// Splits a `(winning_pool, losing_pool)` pair into the post-fee pools
+    /// and the treasury's cut, used by both UpDown settlement paths
+    /// (Issue #162). Conservation invariant
+    ///   dist_winning + dist_losing + fee == winning + losing
+    /// holds ALWAYS, even in the pathological case `fee > losing_pool`
+    /// (very thin losing-side liquidity near the bps cap): the spillover
+    /// is then deducted from `winning_pool`, so winners lose a portion
+    /// of their principal rather than the fee being silently dropped.
+    /// Behaviour is documented in `docs/EVENT_SCHEMA.md` and exercised
+    /// by `test_protocol_fee_thin_losing_pool`.
+    fn _apply_protocol_fee_updown(
+        env: &Env,
+        round_id: u64,
+        winning_pool: i128,
+        losing_pool: i128,
+    ) -> Result<(i128, i128, i128), ContractError> {
+        let bps = Self::_read_protocol_fee_bps(env);
+        if bps.is_none() {
+            return Ok((winning_pool, losing_pool, 0));
+        }
+        let bps_value = bps.unwrap();
+        let total_pot = Self::payout_add(winning_pool, losing_pool)?;
+        let fee_amount = total_pot
+            .checked_mul(bps_value as i128)
+            .ok_or(ContractError::Overflow)?
+            / BPS_DENOMINATOR;
+        if fee_amount == 0 {
+            return Ok((winning_pool, losing_pool, 0));
+        }
+        let fee_from_losing = fee_amount.min(losing_pool);
+        let fee_from_winning = fee_amount
+            .checked_sub(fee_from_losing)
+            .ok_or(ContractError::Overflow)?;
+        let dist_winning = winning_pool
+            .checked_sub(fee_from_winning)
+            .ok_or(ContractError::Overflow)?;
+        let dist_losing = losing_pool
+            .checked_sub(fee_from_losing)
+            .ok_or(ContractError::Overflow)?;
+        Self::_collect_protocol_fee(env, round_id, fee_amount, Some(bps_value))?;
+        Ok((dist_winning, dist_losing, fee_amount))
+    }
+
+    /// Splits a precision-mode `total_pot` into the distributable amount
+    /// (split among winners per the existing remainder policy) and the
+    /// treasury's cut (Issue #162). Returns `(distributable, fee_amount)`.
+    fn _apply_protocol_fee_precision(
+        env: &Env,
+        round_id: u64,
+        total_pot: i128,
+    ) -> Result<(i128, i128), ContractError> {
+        let bps = Self::_read_protocol_fee_bps(env);
+        if bps.is_none() || total_pot <= 0 {
+            return Ok((total_pot, 0));
+        }
+        let bps_value = bps.unwrap();
+        let fee_amount = total_pot
+            .checked_mul(bps_value as i128)
+            .ok_or(ContractError::Overflow)?
+            / BPS_DENOMINATOR;
+        let distributable = total_pot
+            .checked_sub(fee_amount)
+            .ok_or(ContractError::Overflow)?;
+        if fee_amount > 0 {
+            Self::_collect_protocol_fee(env, round_id, fee_amount, Some(bps_value))?;
+        }
+        Ok((distributable, fee_amount))
+    }
+
     fn _emit_action_rejected(env: &Env, actor: &Address, action: Symbol, reason: ContractError) {
         // Privacy: event payload contains only the actor Address, an action
         // symbol, and a numeric reason code. No personally identifiable
@@ -1130,7 +1331,7 @@ impl VirtualTokenContract {
         config::_apply_config_payload(env, kind, payload)
     }
 
-    fn _extend_persistent_ttl(env: &Env, key: &DataKey) {
+    fn _extend_persistent_ttl<T: soroban_sdk::IntoVal<soroban_sdk::Env, soroban_sdk::Val>>(env: &Env, key: &T) {
         if env.storage().persistent().has(key) {
             env.storage()
                 .persistent()
