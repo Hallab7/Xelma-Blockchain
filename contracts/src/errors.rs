@@ -94,6 +94,8 @@ pub enum ContractError {
     MintLimitExceeded = 53,
     /// No pending oracle rotation proposal to accept or cancel
     NoPendingRotation = 54,
+    /// Oracle rotation delay has not elapsed yet (must wait MIN_ROTATION_DELAY_SECONDS)
+    RotationDelayNotElapsed = 55,
     /// Invalid archive retention limit
     InvalidArchiveRetention = 62,
     /// Commitment hash is malformed (e.g. the all-zero placeholder)
@@ -105,6 +107,12 @@ pub enum ContractError {
     /// Pending winnings entry exists but has not yet reached the configured
     /// expiry threshold — caller must wait before reclaiming.
     PendingWinningsNotExpired = 66,
+    /// Epoch mint budget has been fully consumed
+    EpochBudgetExceeded = 66,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
-    OracleNotLive = 66,
+    OracleNotLive = 67,
+    /// Invalid precision payout policy
+    InvalidPayoutPolicy = 68,
+    /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
+    BelowMinBet = 69,
 }

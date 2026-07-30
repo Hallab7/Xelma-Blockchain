@@ -145,6 +145,30 @@ pub fn compute_fee(pot: i128, fee_bps: Option<u32>) -> i128 {
     }
 }
 
+/// Fee incidence model constants (mirrors contract's `FeeModel` enum, Issue #268).
+pub const FEE_MODEL_ON_POT: u32 = 0;
+pub const FEE_MODEL_ON_WINNINGS: u32 = 1;
+
+/// Computes the protocol fee with explicit fee model support (Issue #268).
+///
+/// - `FeeOnPot` (0): fee = taxable_base * bps / 10_000  (taxable_base = pot)
+/// - `FeeOnWinnings` (1): fee = profit * bps / 10_000 (profit = losing_pool for UpDown,
+///   profit = pot - winner_stakes for Precision)
+pub fn compute_fee_with_model(
+    taxable_base: i128,
+    fee_bps: Option<u32>,
+) -> i128 {
+    match fee_bps {
+        None | Some(0) => 0,
+        Some(bps) => {
+            if taxable_base <= 0 {
+                return 0;
+            }
+            taxable_base * (bps as i128) / BPS_DENOMINATOR
+        }
+    }
+}
+
 /// Reference implementation of the **Up/Down** settlement with fees.
 ///
 /// Mirrors `_apply_protocol_fee_updown` + proportional winner payout math.
@@ -161,19 +185,39 @@ pub fn ref_updown_settle(
     winner_stakes: &[i128],
     fee_bps: Option<u32>,
 ) -> (i128, i128) {
+    ref_updown_settle_with_model(winning_pool, losing_pool, winner_stakes, fee_bps, FEE_MODEL_ON_POT)
+}
+
+/// Reference UpDown settlement with explicit fee model (Issue #268).
+pub fn ref_updown_settle_with_model(
+    winning_pool: i128,
+    losing_pool: i128,
+    winner_stakes: &[i128],
+    fee_bps: Option<u32>,
+    fee_model: u32,
+) -> (i128, i128) {
     if winning_pool == 0 || winner_stakes.is_empty() {
         return (0, 0);
     }
 
     let pot = winning_pool + losing_pool;
-    let fee = compute_fee(pot, fee_bps);
+    let fee = match fee_model {
+        FEE_MODEL_ON_WINNINGS => compute_fee_with_model(losing_pool, fee_bps),
+        _ => compute_fee(pot, fee_bps),
+    };
 
-    // Mirror the contract's fee-allocation logic.
-    let fee_from_losing = fee.min(losing_pool);
-    let fee_from_winning = fee - fee_from_losing;
-    let dist_winning = winning_pool - fee_from_winning;
-    let dist_losing = losing_pool - fee_from_losing;
-    let total_distributable = dist_winning + dist_losing;
+    // Mirror the contract's fee-allocation logic per model.
+    let total_distributable = match fee_model {
+        FEE_MODEL_ON_WINNINGS => {
+            // Winners keep full principal; fee comes only from losing pool.
+            winning_pool + (losing_pool - fee)
+        }
+        _ => {
+            let fee_from_losing = fee.min(losing_pool);
+            let fee_from_winning = fee - fee_from_losing;
+            (winning_pool - fee_from_winning) + (losing_pool - fee_from_losing)
+        }
+    };
 
     // Per-winner payout uses integer division, matching `payout_mul / winning_pool`.
     let sum_payouts: i128 = winner_stakes
@@ -199,11 +243,33 @@ pub fn ref_precision_settle(
     winner_count: i128,
     fee_bps: Option<u32>,
 ) -> (i128, i128) {
+    ref_precision_settle_with_model(total_pot, winner_count, 0, fee_bps, FEE_MODEL_ON_POT)
+}
+
+/// Reference Precision settlement with explicit fee model (Issue #268).
+/// `winner_stakes` is the sum of all winners' own stakes; used for FeeOnWinnings.
+pub fn ref_precision_settle_with_model(
+    total_pot: i128,
+    winner_count: i128,
+    winner_stakes: i128,
+    fee_bps: Option<u32>,
+    fee_model: u32,
+) -> (i128, i128) {
     if winner_count == 0 || total_pot <= 0 {
         return (0, 0);
     }
 
-    let fee = compute_fee(total_pot, fee_bps);
+    let fee = match fee_model {
+        FEE_MODEL_ON_WINNINGS => {
+            let profit = total_pot.saturating_sub(winner_stakes);
+            if profit <= 0 {
+                0
+            } else {
+                compute_fee_with_model(profit, fee_bps)
+            }
+        }
+        _ => compute_fee(total_pot, fee_bps),
+    };
     let distributable = total_pot - fee;
     // Remainder goes to first winner, so sum == distributable exactly.
     (distributable, fee)

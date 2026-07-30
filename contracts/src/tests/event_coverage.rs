@@ -93,6 +93,22 @@ fn test_event_coverage_direct_config_setters_emit_audit_event() {
         ConfigChangePayload::ArchiveRetention(128),
         ConfigChangePayload::ArchiveRetention(64),
     );
+
+    client.set_epoch_mint_budget(&5000_0000000);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::EpochMintBudget,
+        ConfigChangePayload::EpochMintBudget(0),
+        ConfigChangePayload::EpochMintBudget(5000_0000000),
+    );
+
+    client.set_precision_payout_policy(&1);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::PrecisionPayoutPolicy,
+        ConfigChangePayload::PrecisionPayoutPolicy(0),
+        ConfigChangePayload::PrecisionPayoutPolicy(1),
+    );
 }
 
 #[test]
@@ -302,7 +318,7 @@ fn test_event_coverage_resolve_round() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let last_event = events.last().unwrap();
@@ -319,7 +335,7 @@ fn test_event_coverage_resolve_round() {
     );
     assert_eq!(
         data.try_into_val(&env),
-        Ok((1u64, 1_2000000u128, 0u32, Option::<u32>::None))
+        Ok((1u64, 1_2000000u128, 0u32, Option::<u32>::None, 0u32))
     );
 }
 
@@ -366,7 +382,7 @@ fn test_event_coverage_claim_winnings() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     client.claim_winnings(&user);
 
@@ -450,7 +466,7 @@ fn test_action_rejected_oracle_heartbeat_invalid_status() {
     // Use env.as_contract to read oracle for our own check
     let _oracle: Address = env.as_contract(&env.register(VirtualTokenContract, ()), || {
         // We need the actual oracle address — extract from the setup helper
-        // which stores it at DataKey::Oracle
+        // which stores it at DataKeyCore::Oracle
         Address::generate(&env)
     });
 
@@ -480,7 +496,7 @@ fn test_action_rejected_resolve_round_oracle_nonce_reused() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let round = client.get_active_round().unwrap();
 
@@ -491,7 +507,7 @@ fn test_action_rejected_resolve_round_oracle_nonce_reused() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&crate::types::DataKey::ActiveRound, &round);
+            .set(&crate::types::DataKeyCore::ActiveRound, &round);
     });
 
     // Second resolve with same nonce should be rejected
@@ -522,7 +538,7 @@ fn test_action_rejected_resolve_round_invalid_round_id() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::InvalidOracleRound)));
@@ -662,7 +678,7 @@ fn test_action_rejected_resolve_round_future_timestamp() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::FutureOracleData)));
@@ -691,7 +707,7 @@ fn test_action_rejected_resolve_round_stale_data() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::StaleOracleData)));
@@ -719,7 +735,7 @@ fn test_action_rejected_resolve_round_wrong_network() {
         network_id: BytesN::from_array(&env, &[1; 32]), // wrong network
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
@@ -749,7 +765,7 @@ fn test_action_rejected_resolve_round_not_ended() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::RoundNotEnded)));
@@ -782,7 +798,7 @@ fn test_event_coverage_round_summary() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let summary_event = events
@@ -835,7 +851,7 @@ fn test_event_coverage_round_summary() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let summary_event = events
