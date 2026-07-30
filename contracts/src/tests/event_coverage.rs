@@ -93,6 +93,20 @@ fn test_event_coverage_direct_config_setters_emit_audit_event() {
         ConfigChangePayload::ArchiveRetention(128),
         ConfigChangePayload::ArchiveRetention(64),
     );
+
+    client.set_epoch_mint_budget(&5000_0000000);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::EpochMintBudget,
+        ConfigChangePayload::EpochMintBudget(0),
+        ConfigChangePayload::EpochMintBudget(5000_0000000),
+    client.set_precision_payout_policy(&1);
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::PrecisionPayoutPolicy,
+        ConfigChangePayload::PrecisionPayoutPolicy(0),
+        ConfigChangePayload::PrecisionPayoutPolicy(1),
+    );
 }
 
 #[test]
@@ -332,6 +346,12 @@ fn test_event_coverage_resolve_round() {
     assert_eq!(canon.10, 0i128);         // fee_amount
     assert_eq!(canon.11, 12u32);         // settled_at_ledger
     assert_eq!(canon.12, None);          // confidence
+        Ok(symbol_short!("resolved"))
+    );
+    assert_eq!(
+        data.try_into_val(&env),
+        Ok((1u64, 1_2000000u128, 0u32, Option::<u32>::None, 0u32))
+    );
 }
 
 #[test]
@@ -474,7 +494,7 @@ fn test_action_rejected_oracle_heartbeat_invalid_status() {
     // Use env.as_contract to read oracle for our own check
     let _oracle: Address = env.as_contract(&env.register(VirtualTokenContract, ()), || {
         // We need the actual oracle address — extract from the setup helper
-        // which stores it at DataKey::Oracle
+        // which stores it at DataKeyCore::Oracle
         Address::generate(&env)
     });
 
@@ -515,7 +535,7 @@ fn test_action_rejected_resolve_round_oracle_nonce_reused() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&crate::types::DataKey::ActiveRound, &round);
+            .set(&crate::types::DataKeyCore::ActiveRound, &round);
     });
 
     // Second resolve with same nonce should be rejected
