@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #![no_std]
+extern crate alloc;
 //! # XLM Price Prediction Market
 //!
 //! Secure Soroban-based prediction market for XLM price movements.
@@ -25,6 +26,7 @@ mod leaderboard;
 mod queries;
 mod settlement;
 mod storage;
+mod settlement_math;
 mod types;
 
 #[cfg(test)]
