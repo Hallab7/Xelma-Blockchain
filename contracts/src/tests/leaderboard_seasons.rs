@@ -38,7 +38,10 @@ fn test_season_defaults_to_one_and_starts_empty() {
 
     assert_eq!(client.get_current_season_id(), 1);
     assert_eq!(client.get_season_leaderboard_by_wins(&1, &0, &10).len(), 0);
-    assert_eq!(client.get_season_leaderboard_by_streak(&1, &0, &10).len(), 0);
+    assert_eq!(
+        client.get_season_leaderboard_by_streak(&1, &0, &10).len(),
+        0
+    );
 
     let alice = Address::generate(&env);
     let stats = client.get_season_user_stats(&1, &alice);
@@ -137,7 +140,9 @@ fn test_reset_season_archives_scopes_queries_and_preserves_lifetime_history() {
     assert_eq!(client.get_current_season_id(), 2);
 
     // Archive preserved: season 1's frozen ranking is retrievable directly...
-    let archive = client.get_season_archive(&1).expect("season 1 must be archived");
+    let archive = client
+        .get_season_archive(&1)
+        .expect("season 1 must be archived");
     assert_eq!(archive.season_id, 1);
     assert_eq!(archive.participant_count, 2);
     assert_eq!(archive.wins.len(), 2);
@@ -187,11 +192,17 @@ fn test_season_boundary_unknown_and_zero_season_ids_return_empty() {
 
     // Season 0 never existed (seasons start at 1).
     assert_eq!(client.get_season_leaderboard_by_wins(&0, &0, &10).len(), 0);
-    assert_eq!(client.get_season_leaderboard_by_streak(&0, &0, &10).len(), 0);
+    assert_eq!(
+        client.get_season_leaderboard_by_streak(&0, &0, &10).len(),
+        0
+    );
     assert!(client.get_season_archive(&0).is_none());
 
     // A season far beyond anything ever reset.
-    assert_eq!(client.get_season_leaderboard_by_wins(&999, &0, &10).len(), 0);
+    assert_eq!(
+        client.get_season_leaderboard_by_wins(&999, &0, &10).len(),
+        0
+    );
     assert!(client.get_season_archive(&999).is_none());
 }
 
@@ -204,7 +215,9 @@ fn test_season_boundary_reset_with_zero_participants() {
     let new_season_id = client.reset_leaderboard_season();
     assert_eq!(new_season_id, 2);
 
-    let archive = client.get_season_archive(&1).expect("empty season must still archive");
+    let archive = client
+        .get_season_archive(&1)
+        .expect("empty season must still archive");
     assert_eq!(archive.participant_count, 0);
     assert_eq!(archive.wins.len(), 0);
     assert_eq!(archive.streak.len(), 0);
