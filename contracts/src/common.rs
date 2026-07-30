@@ -64,6 +64,12 @@ pub const MAX_ARCHIVE_RETENTION: u32 = 10_000;
 pub const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
 pub const EPOCH_LEDGERS: u32 = 1440; // ~2 hours at 5s/ledger
 
+// ─── Oracle TWAP / reference deviation guardrails (Issue #266) ──────────────
+/// Minimum number of trailing samples required to enable `Twap` reference mode.
+pub const MIN_TWAP_WINDOW_SAMPLES: u32 = 2;
+/// Maximum trailing samples configurable — bounds the ring buffer's storage cost.
+pub const MAX_TWAP_WINDOW_SAMPLES: u32 = 64;
+
 /// Bumps/extends the TTL of the given persistent storage key if its remaining TTL
 /// is less than the threshold. Enforces rent policy (Issue #142).
 pub fn _extend_persistent_ttl<T: IntoVal<Env, Val>>(env: &Env, key: &T) {
@@ -163,6 +169,17 @@ pub fn _derive_round_phase(ledger_sequence: u32, round: &Round) -> RoundPhase {
     } else {
         RoundPhase::Resolvable
     }
+}
+
+/// Rejects `amount` if it falls below the configured minimum bet, when set (Issue #269).
+/// `None` (unset) preserves pre-#269 behaviour: any amount `> 0` is accepted.
+pub fn _enforce_min_bet(env: &Env, amount: i128) -> Result<(), ContractError> {
+    if let Some(min_bet) = env.storage().persistent().get::<_, i128>(&DataKeyCore::MinBet) {
+        if amount < min_bet {
+            return Err(ContractError::BelowMinBet);
+        }
+    }
+    Ok(())
 }
 
 pub fn assert_no_active_round(env: &Env) -> Result<(), ContractError> {

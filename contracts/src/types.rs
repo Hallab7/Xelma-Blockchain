@@ -109,6 +109,10 @@ pub enum DataKeyCore {
     RoundTemplate,
     PrecisionPayoutPolicy,
     EarlyCashoutBps,
+    /// Announced next schema version for migration preview (v-next template).
+    /// When set, operators can inspect this value before executing a real migration.
+    /// Absent means no next migration has been announced.
+    NextSchemaVersion,
     Ext(DataKeyExt),
 }
 
@@ -289,6 +293,11 @@ pub struct OraclePayload {
     /// When `None`, the payload is treated as a legacy submission.
     /// When strict mode is enabled, `None` is rejected.
     pub confidence: Option<u32>,
+    /// Optional ed25519 signature over the attestation domain-separated
+    /// message (Issue #263). When an attestation key is configured by the
+    /// admin, this field MUST be present; it is ignored (and may be omitted)
+    /// when no attestation key is set.
+    pub attestation: Option<BytesN<64>>,
 }
 
 /// Oracle liveness record, updated by the oracle service on each heartbeat call.

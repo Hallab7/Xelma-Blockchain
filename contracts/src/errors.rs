@@ -104,10 +104,12 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
-    /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
-    OracleNotLive = 66,
     /// Epoch mint budget has been fully consumed
-    EpochBudgetExceeded = 67,
+    EpochBudgetExceeded = 66,
+    /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
+    OracleNotLive = 67,
     /// Invalid precision payout policy
     InvalidPayoutPolicy = 68,
+    /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
+    BelowMinBet = 69,
 }

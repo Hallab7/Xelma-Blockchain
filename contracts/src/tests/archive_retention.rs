@@ -2,8 +2,6 @@
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{ArchivedRoundSummary, DataKeyCore, DataKeyScoped, OraclePayload};
-use std::vec::Vec;
-use crate::types::{ArchivedRoundSummary, DataKey, OraclePayload};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -47,7 +45,7 @@ fn create_and_resolve_round(
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 }
 
 #[test]
