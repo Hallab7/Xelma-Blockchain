@@ -1400,19 +1400,25 @@ pub fn _archive_round(
                 .persistent()
                 .remove(&DataKeyScoped::ArchivedRound(oldest));
 
+            // Clean up associated markers so the prune is complete:
+            // cancelled-round flag, if present.
+            if env
+                .storage()
+                .persistent()
+                .has(&DataKeyScoped::CancelledRound(oldest))
+            {
+                env.storage()
+                    .persistent()
+                    .remove(&DataKeyScoped::CancelledRound(oldest));
+            }
+
             #[allow(deprecated)]
             env.events().publish(
                 (symbol_short!("archive"), symbol_short!("pruned")),
                 (oldest, retention_limit),
             );
         }
-        let mut trimmed = Vec::new(env);
-        for i in 1..recent.len() {
-            if let Some(id) = recent.get(i) {
-                trimmed.push_back(id);
-            }
-        }
-        recent = trimmed;
+        recent.remove(0);
     }
 
     env.storage()
