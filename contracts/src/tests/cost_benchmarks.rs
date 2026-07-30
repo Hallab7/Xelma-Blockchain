@@ -157,7 +157,7 @@ fn bench_cost_resolve_round() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
     let (cpu, mem, _) = measure(&env, || client.resolve_round(&payload));
     report("resolve_round", cpu, mem);
     assert!(
@@ -191,7 +191,7 @@ fn bench_cost_claim_winnings() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let (cpu, mem, claimed) = measure(&env, || client.claim_winnings(&alice));
     report("claim_winnings", cpu, mem);
