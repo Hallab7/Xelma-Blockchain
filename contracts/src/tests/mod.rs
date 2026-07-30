@@ -20,6 +20,7 @@ mod leaderboard_seasons;
 mod lifecycle;
 mod migration_versioning;
 mod mode_tests;
+mod one_sided_settlement;
 mod overflow_tests;
 mod pause;
 mod property_invariants;

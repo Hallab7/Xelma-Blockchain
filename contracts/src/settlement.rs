@@ -7,7 +7,7 @@ use crate::common::{
 use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, HbGateConfig, OracleHeartbeatRecord,
+    ArchivedRoundSummary, BetSide, DataKey, HbGateConfig, OneSidedPolicy, OracleHeartbeatRecord,
     OraclePayload, PrecisionCommitment, PrecisionPrediction, Round, RoundArchiveStatus,
     RoundMode, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
@@ -456,14 +456,7 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
 
     let fee_amount = match round.mode {
         RoundMode::UpDown => {
-            let (one_sided, fee) = _resolve_updown_mode(&env, &round, payload.price)?;
-            if one_sided {
-                #[allow(deprecated)]
-                env.events().publish(
-                    (symbol_short!("pool"), symbol_short!("onesided")),
-                    (round_id, round.pool_up, round.pool_down),
-                );
-            }
+            let (_one_sided, fee) = _resolve_updown_mode(&env, &round, payload.price)?;
             fee
         }
         RoundMode::Precision => _resolve_precision_mode(&env, round_id, payload.price)?,
@@ -524,6 +517,63 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
+/// Deterministically selects the active one-sided settlement policy for a round.
+pub fn _select_one_sided_policy(_round: &Round) -> OneSidedPolicy {
+    OneSidedPolicy::Refund
+}
+
+/// Applies deterministic one-sided settlement policy for degenerate markets.
+pub fn _apply_one_sided_policy(
+    env: &Env,
+    round: &Round,
+    policy: OneSidedPolicy,
+    participants: &Vec<Address>,
+    positions: &Option<Map<Address, UserPosition>>,
+) -> Result<i128, ContractError> {
+    let affected_side: u32 = if round.pool_up > 0 {
+        0
+    } else if round.pool_down > 0 {
+        1
+    } else {
+        2
+    };
+
+    let (refund_amount, carry_amount) = match policy {
+        OneSidedPolicy::Refund | OneSidedPolicy::Void => {
+            if !participants.is_empty() {
+                _record_refunds_indexed(env, round.round_id, 0, participants)?;
+            } else if let Some(pos_map) = positions {
+                _record_refunds_legacy(env, round.round_id, pos_map)?;
+            }
+            (round.pool_up + round.pool_down, 0i128)
+        }
+        OneSidedPolicy::CarryForward => {
+            if !participants.is_empty() {
+                _record_refunds_indexed(env, round.round_id, 0, participants)?;
+            } else if let Some(pos_map) = positions {
+                _record_refunds_legacy(env, round.round_id, pos_map)?;
+            }
+            (0i128, round.pool_up + round.pool_down)
+        }
+    };
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("pool"), symbol_short!("onesided")),
+        (
+            round.round_id,
+            policy as u32,
+            affected_side,
+            refund_amount,
+            carry_amount,
+            round.pool_up,
+            round.pool_down,
+        ),
+    );
+
+    Ok(0)
+}
+
 pub fn _resolve_updown_mode(
     env: &Env,
     round: &Round,
@@ -540,16 +590,34 @@ pub fn _resolve_updown_mode(
     let price_went_down = final_price < round.price_start;
     let price_unchanged = final_price == round.price_start;
 
-    // One-sided: exactly one pool is empty (XOR).  Regardless of which way
-    // price moved, if the winning-side pool is 0 there are no winners to pay,
-    // and if the losing-side pool is 0 there is nothing to distribute — in
-    // both cases every participant gets a full refund.
+    // One-sided: exactly one pool is empty (XOR).
     let is_one_sided = (round.pool_up == 0) != (round.pool_down == 0);
 
     let mut fee_amount = 0;
 
-    if !participants.is_empty() {
-        if price_unchanged || is_one_sided {
+    if is_one_sided {
+        let policy = _select_one_sided_policy(round);
+        let positions: Map<Address, UserPosition> = if participants.is_empty() {
+            env.storage()
+                .persistent()
+                .get(&DataKey::UpDownPositions)
+                .unwrap_or(Map::new(env))
+        } else {
+            Map::new(env)
+        };
+        fee_amount = _apply_one_sided_policy(
+            env,
+            round,
+            policy,
+            &participants,
+            &if participants.is_empty() {
+                Some(positions)
+            } else {
+                None
+            },
+        )?;
+    } else if !participants.is_empty() {
+        if price_unchanged {
             _record_refunds_indexed(env, round.round_id, 0, &participants)?;
         } else if price_went_up {
             fee_amount = _record_winnings_indexed(

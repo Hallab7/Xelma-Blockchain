@@ -1470,14 +1470,7 @@ fn test_heartbeat_gate_override_bypasses_block_and_emits_event() {
     assert!(override_event.is_some(), "hoverride event must be emitted");
 
     // Override is one-shot — must be consumed
-    env.as_contract(&contract_id, || {
-        let armed: bool = env
-            .storage()
-            .persistent()
-            .get(&DataKey::HbOverride)
-            .unwrap_or(false);
-        assert!(!armed, "heartbeat override must be cleared after use");
-    });
+    assert!(!client.get_hb_override_armed(), "heartbeat override must be cleared after use");
 }
 
 #[test]

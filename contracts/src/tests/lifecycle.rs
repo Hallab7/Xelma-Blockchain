@@ -1109,6 +1109,8 @@ fn test_create_next_from_template_after_settle() {
     let next_round_id = client.create_next_from_template();
     assert_eq!(next_round_id, round1.round_id + 1);
 
+    let events = env.events().all();
+
     let round2 = client.get_active_round().expect("template round must be active");
     assert_eq!(round2.round_id, next_round_id);
     assert_eq!(round2.price_start, 2_5000000u128);

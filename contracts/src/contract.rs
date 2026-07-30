@@ -8,7 +8,7 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    LeaderboardEntry, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
+    LeaderboardEntry, OneSidedPolicy, OracleHeartbeatRecord, OraclePayload, OracleRotationProposal,
     PendingConfigChange, PrecisionPrediction, ProtocolHealthStatus, ProtocolStatus, Round,
     RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
     SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition, UserRoundOutcome,
@@ -743,6 +743,15 @@ impl VirtualTokenContract {
 
     pub fn get_active_round(env: Env) -> Option<Round> {
         queries::get_active_round(env)
+    }
+
+    pub fn get_one_sided_policy(env: Env) -> OneSidedPolicy {
+        let active_round: Option<Round> = env.storage().persistent().get(&DataKey::ActiveRound);
+        if let Some(round) = active_round {
+            settlement::_select_one_sided_policy(&round)
+        } else {
+            OneSidedPolicy::Refund
+        }
     }
 
     pub fn get_round_pool_stats(env: Env) -> Option<RoundPoolStats> {

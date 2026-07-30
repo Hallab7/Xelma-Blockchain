@@ -148,6 +148,21 @@ pub struct PendingConfigChange {
     pub scheduled_at_ledger: u32,
 }
 
+/// Deterministic settlement policy governing degenerate (one-sided) market rounds.
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum OneSidedPolicy {
+    /// Full stake refund to all participants (active protocol policy).
+    Refund = 0,
+    /// Void round releasing stakes without mutating stats.
+    Void = 1,
+    /// Carry-forward pool stakes to subsequent round (extensibility placeholder).
+    CarryForward = 2,
+}
+
+pub type Policy = OneSidedPolicy;
+
 /// Represents which side a user bet on
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
