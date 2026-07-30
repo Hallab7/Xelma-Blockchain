@@ -49,13 +49,19 @@ pub enum ContractError {
     InvalidProtocolFeeBps = 51,
     MintLimitExceeded = 53,
     NoPendingRotation = 54,
+    /// Oracle rotation delay has not elapsed yet (must wait MIN_ROTATION_DELAY_SECONDS)
+    RotationDelayNotElapsed = 55,
+    /// Invalid archive retention limit
     InvalidArchiveRetention = 62,
     InvalidCommitment = 63,
     InvalidSalt = 64,
     NoRoundTemplate = 65,
-    OracleNotLive = 66,
-    ProposalNotFound = 67,
-    ProposalExpired = 68,
-    GovInvalidState = 69,
-    GovUnauthorized = 70,
+    /// Epoch mint budget has been fully consumed
+    EpochBudgetExceeded = 66,
+    /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
+    OracleNotLive = 67,
+    /// Invalid precision payout policy
+    InvalidPayoutPolicy = 68,
+    /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
+    BelowMinBet = 69,
 }
