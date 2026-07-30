@@ -46,6 +46,7 @@ pub const DEFAULT_ARCHIVE_RETENTION: u32 = 128;
 pub const MIN_ARCHIVE_RETENTION: u32 = 1;
 pub const MAX_ARCHIVE_RETENTION: u32 = 10_000;
 pub const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
+pub const DEFAULT_GOV_PROPOSAL_TTL_LEDGERS: u32 = 100;
 
 /// Bumps/extends the TTL of the given persistent storage key if its remaining TTL
 /// is less than the threshold. Enforces rent policy (Issue #142).

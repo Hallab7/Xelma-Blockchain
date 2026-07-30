@@ -85,6 +85,10 @@ pub enum DataKey {
     OracleRotationProposal,
     ArchiveRetention,
     RoundTemplate,
+    GovProposal(u64),
+    NextGovProposalId,
+    GovApprover,
+    GovProposalTtlLedgers,
     Ext(DataKeyExt),
 }
 
@@ -146,6 +150,51 @@ pub struct PendingConfigChange {
     pub payload: ConfigChangePayload,
     pub activation_ledger: u32,
     pub scheduled_at_ledger: u32,
+}
+
+/// Actions protected by dual-approval governance (Issue #272)
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum GovAction {
+    /// Emergency pause of all contract state mutations
+    PauseProtocol,
+    /// Unpause contract resuming normal operations
+    UnpauseProtocol,
+    /// Update protocol settlement fee in basis points
+    SetProtocolFeeBps(Option<u32>),
+    /// Withdraw accumulated protocol fees from treasury
+    WithdrawProtocolFee(Address, i128),
+    /// Update treasury recipient address
+    SetTreasuryAddress(Address),
+    /// Transfer contract primary admin role
+    SetAdmin(Address),
+    /// Rotate oracle provider address
+    SetOracle(Address),
+}
+
+/// Lifecycle status of a dual-approval governance proposal
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum GovProposalStatus {
+    Pending = 0,
+    Approved = 1,
+    Executed = 2,
+    Cancelled = 3,
+    Expired = 4,
+}
+
+/// Governance proposal record requiring dual approval before execution
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct GovProposal {
+    pub id: u64,
+    pub proposer: Address,
+    pub approver: Option<Address>,
+    pub action: GovAction,
+    pub created_at_ledger: u32,
+    pub expires_at_ledger: u32,
+    pub status: GovProposalStatus,
 }
 
 /// Deterministic settlement policy governing degenerate (one-sided) market rounds.

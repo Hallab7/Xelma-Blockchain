@@ -177,6 +177,9 @@ pub fn pause_contract(env: Env) -> Result<(), ContractError> {
         .ok_or(ContractError::AdminNotSet)?;
 
     admin.require_auth();
+    if crate::governance::_is_gov_approver_set(&env) {
+        return Err(ContractError::GovUnauthorized);
+    }
     _set_mode(&env, RuntimeMode::FullyPaused)?;
 
     Ok(())
@@ -192,6 +195,9 @@ pub fn unpause_contract(env: Env) -> Result<(), ContractError> {
         .ok_or(ContractError::AdminNotSet)?;
 
     admin.require_auth();
+    if crate::governance::_is_gov_approver_set(&env) {
+        return Err(ContractError::GovUnauthorized);
+    }
     _set_mode(&env, RuntimeMode::Normal)?;
 
     Ok(())

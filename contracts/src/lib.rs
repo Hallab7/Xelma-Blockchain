@@ -21,6 +21,7 @@ pub mod common;
 mod config;
 mod contract;
 mod errors;
+mod governance;
 mod leaderboard;
 mod queries;
 mod settlement;
@@ -33,7 +34,8 @@ pub use contract::VirtualTokenContract;
 pub use errors::ContractError;
 pub use types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    LeaderboardEntry, OracleRotationProposal, PendingConfigChange, PrecisionCommitment,
-    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundTemplate,
-    SeasonArchive, SeasonLeaderboardEntry, UserPosition, UserStats,
+    GovAction, GovProposal, GovProposalStatus, LeaderboardEntry, OracleRotationProposal,
+    PendingConfigChange, PrecisionCommitment, PrecisionPrediction, ProtocolHealthStatus,
+    Round, RoundArchiveStatus, RoundTemplate, SeasonArchive, SeasonLeaderboardEntry,
+    UserPosition, UserStats,
 };
