@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{ArchivedRoundSummary, DataKey, OraclePayload};
-use std::vec::Vec;
+use crate::types::{ArchivedRoundSummary, DataKeyCore, DataKeyScoped, OraclePayload};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
     Address, Env, TryIntoVal,
 };
+use std::vec::Vec;
 
 fn setup_with_oracle() -> (Env, VirtualTokenContractClient<'static>, Address, Address) {
     let env = Env::default();
@@ -45,7 +45,7 @@ fn create_and_resolve_round(
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 }
 
 #[test]
@@ -83,18 +83,18 @@ fn test_set_archive_retention_emits_event() {
 
     let events = env.events().all();
     // The archive event may not be the last — find it by topic
-    let has_archive_event = events
-        .iter()
-        .any(|(_, topics, _)| {
-            if topics.len() < 2 {
-                return false;
-            }
-            let t0: Result<soroban_sdk::Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
-            let t1: Result<soroban_sdk::Symbol, _> = topics.get(1).unwrap().try_into_val(&env);
-            t0.ok() == Some(symbol_short!("archive"))
-                && t1.ok() == Some(symbol_short!("retention"))
-        });
-    assert!(has_archive_event, "archive::retention event should be emitted");
+    let has_archive_event = events.iter().any(|(_, topics, _)| {
+        if topics.len() < 2 {
+            return false;
+        }
+        let t0: Result<soroban_sdk::Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
+        let t1: Result<soroban_sdk::Symbol, _> = topics.get(1).unwrap().try_into_val(&env);
+        t0.ok() == Some(symbol_short!("archive")) && t1.ok() == Some(symbol_short!("retention"))
+    });
+    assert!(
+        has_archive_event,
+        "archive::retention event should be emitted"
+    );
 }
 
 #[test]
@@ -124,15 +124,15 @@ fn test_fifo_pruning_with_small_limit() {
 
     // Round 1 and 2 should be pruned from storage
     env.as_contract(&contract_id_obj, || {
-        let archived_key1 = DataKey::ArchivedRound(1u64);
+        let archived_key1 = DataKeyScoped::ArchivedRound(1u64);
         assert!(!env.storage().persistent().has(&archived_key1));
-        let archived_key2 = DataKey::ArchivedRound(2u64);
+        let archived_key2 = DataKeyScoped::ArchivedRound(2u64);
         assert!(!env.storage().persistent().has(&archived_key2));
 
         // Round 3 and 4 should still exist
-        let archived_key3 = DataKey::ArchivedRound(3u64);
+        let archived_key3 = DataKeyScoped::ArchivedRound(3u64);
         assert!(env.storage().persistent().has(&archived_key3));
-        let archived_key4 = DataKey::ArchivedRound(4u64);
+        let archived_key4 = DataKeyScoped::ArchivedRound(4u64);
         assert!(env.storage().persistent().has(&archived_key4));
     });
 }

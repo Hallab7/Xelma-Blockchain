@@ -3,7 +3,7 @@
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{BetSide, DataKey, OraclePayload, Round, RoundArchiveStatus, RoundMode};
+use crate::types::{BetSide, DataKeyCore, DataKeyScoped, OraclePayload, Round, RoundArchiveStatus, RoundMode};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -192,7 +192,7 @@ fn test_full_round_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Round should be cleared
     assert_eq!(client.get_active_round(), None);
@@ -251,18 +251,18 @@ fn test_multiple_rounds_lifecycle() {
     client.place_bet(&alice, &100_0000000, &BetSide::Up);
 
     env.as_contract(&contract_id, || {
-        // alice's position is already stored under DataKey::Position by place_bet;
+        // alice's position is already stored under DataKeyScoped::Position by place_bet;
         // we only override the round pool totals to inject a simulated losing pool.
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     // Advance ledger to allow resolution
@@ -278,7 +278,7 @@ fn test_multiple_rounds_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     client.claim_winnings(&alice);
 
     let stats = client.get_user_stats(&alice);
@@ -293,13 +293,13 @@ fn test_multiple_rounds_lifecycle() {
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 80_0000000;
         round.pool_down = 100_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     // Advance ledger to allow resolution
@@ -315,7 +315,7 @@ fn test_multiple_rounds_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let stats = client.get_user_stats(&alice);
     assert_eq!(stats.total_wins, 2);
@@ -442,7 +442,7 @@ fn test_resolve_round_fails_without_oracle_auth() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert!(result.is_err());
 }
 
@@ -527,7 +527,7 @@ fn test_round_created_event_includes_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     client.create_round(&1_0000000, &Some(1));
 
@@ -817,7 +817,7 @@ fn test_cross_round_mode_alternation() {
 
     // No Precision keys should exist for this round
     env.as_contract(&contract_id, || {
-        let key = DataKey::PrecisionPosition(round1.round_id, alice.clone());
+        let key = DataKeyScoped::PrecisionPosition(round1.round_id, alice.clone());
         assert!(!env.storage().persistent().has(&key));
     });
 
@@ -833,7 +833,7 @@ fn test_cross_round_mode_alternation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_active_round(), None);
 
@@ -842,11 +842,11 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round1.round_id, alice.clone())));
+            .has(&DataKeyScoped::Position(round1.round_id, alice.clone())));
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round1.round_id, bob.clone())));
+            .has(&DataKeyScoped::Position(round1.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 1
@@ -873,7 +873,7 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round2.round_id, alice.clone())));
+            .has(&DataKeyScoped::Position(round2.round_id, alice.clone())));
     });
 
     // Resolve at 2298 — Alice closest (diff 1) wins entire pot
@@ -888,7 +888,7 @@ fn test_cross_round_mode_alternation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_active_round(), None);
 
@@ -897,11 +897,11 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::PrecisionPosition(round2.round_id, alice.clone())));
+            .has(&DataKeyScoped::PrecisionPosition(round2.round_id, alice.clone())));
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::PrecisionPosition(round2.round_id, bob.clone())));
+            .has(&DataKeyScoped::PrecisionPosition(round2.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 2
@@ -927,7 +927,7 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::PrecisionPosition(round2.round_id, bob.clone())));
+            .has(&DataKeyScoped::PrecisionPosition(round2.round_id, bob.clone())));
     });
 
     // Resolve — DOWN wins (price 2.5 < 3.0)
@@ -942,7 +942,7 @@ fn test_cross_round_mode_alternation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_active_round(), None);
 
@@ -951,11 +951,11 @@ fn test_cross_round_mode_alternation() {
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round3.round_id, alice.clone())));
+            .has(&DataKeyScoped::Position(round3.round_id, alice.clone())));
         assert!(!env
             .storage()
             .persistent()
-            .has(&DataKey::Position(round3.round_id, bob.clone())));
+            .has(&DataKeyScoped::Position(round3.round_id, bob.clone())));
     });
 
     // Verify archived summary for round 3
@@ -1103,17 +1103,15 @@ fn test_create_next_from_template_after_settle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 
     let next_round_id = client.create_next_from_template();
-    assert_eq!(next_round_id, round1.round_id + 1);
 
-    let round2 = client.get_active_round().expect("template round must be active");
-    assert_eq!(round2.round_id, next_round_id);
-    assert_eq!(round2.price_start, 2_5000000u128);
-    assert_eq!(round2.mode, RoundMode::Precision);
-
+    // Snapshot events immediately after the mutating call — any further
+    // contract invocation (even a read-only query) clears the recorded
+    // event log in this soroban-sdk testutils version, so assertions on
+    // `env.events()` must happen before any subsequent client call.
     let events = env.events().all();
     let created_event = events.iter().any(|e| {
         let (_c, topics, _d) = e;
@@ -1127,8 +1125,22 @@ fn test_create_next_from_template_after_settle() {
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("template"))
             && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("applied"))
     });
-    assert!(created_event, "create_next_from_template must emit round/created");
-    assert!(applied_event, "create_next_from_template must emit template/applied");
+    assert!(
+        created_event,
+        "create_next_from_template must emit round/created"
+    );
+    assert!(
+        applied_event,
+        "create_next_from_template must emit template/applied"
+    );
+
+    assert_eq!(next_round_id, round1.round_id + 1);
+    let round2 = client
+        .get_active_round()
+        .expect("template round must be active");
+    assert_eq!(round2.round_id, next_round_id);
+    assert_eq!(round2.price_start, 2_5000000u128);
+    assert_eq!(round2.mode, RoundMode::Precision);
 }
 
 /// Acceptance: cancel → next. After an admin cancellation, the keeper call
@@ -1154,7 +1166,9 @@ fn test_create_next_from_template_after_cancel() {
     let next_round_id = client.create_next_from_template();
     assert_eq!(next_round_id, round1.round_id + 1);
 
-    let round2 = client.get_active_round().expect("template round must be active");
+    let round2 = client
+        .get_active_round()
+        .expect("template round must be active");
     assert_eq!(round2.round_id, next_round_id);
     assert_eq!(round2.price_start, 4_0000000u128);
     assert_eq!(round2.mode, RoundMode::UpDown);
