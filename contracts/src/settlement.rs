@@ -15,11 +15,11 @@ use crate::config::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKeyCore, DataKeyScoped, DeviationReferenceMode,
-    HbGateConfig, MultiFeedPayload, OracleHeartbeatRecord, OraclePayload, OracleQuorumConfig,
-    PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction, PriceSample, Round,
-    RoundArchiveStatus, RoundMode, TwapSamplesKey, UserOutcomeType, UserPosition,
-    UserRoundOutcome, UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, DataKeyCore, DataKeyScoped,
+    DeviationReferenceMode, HbGateConfig, MultiFeedPayload, OracleHeartbeatRecord,
+    OraclePayload, OracleQuorumConfig, PrecisionCommitment, PrecisionPayoutPolicy,
+    PrecisionPrediction, PriceSample, Round, RoundArchiveStatus, RoundMode, TwapSamplesKey,
+    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{symbol_short, Address, Bytes, Env, Map, Vec};

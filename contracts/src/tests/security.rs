@@ -4,7 +4,8 @@
 use super::config_helpers::{apply_oracle_max_deviation_bps, apply_oracle_stale_threshold};
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{DataKeyCore, DataKeyScoped, HbGateConfig, HbGateKey, OraclePayload};
+use crate::types::{DataKeyCore, DataKeyScoped, HbGateConfig, HbGateKey, MultiFeedPayload, OraclePayload,
+    OracleQuorumConfig};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
