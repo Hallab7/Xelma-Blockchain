@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-use crate::admin::{_ensure_not_paused, _require_supported_schema};
+use crate::admin::{
+    _ensure_not_paused, _load_attestation_config, _load_deviation_config, _require_supported_schema,
+};
 use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
     payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
@@ -9,11 +11,13 @@ use crate::config::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, HbGateConfig, OracleHeartbeatRecord, OraclePayload,
-    PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction, Round, RoundArchiveStatus,
-    RoundMode, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    ArchivedRoundSummary, BetSide, DataKeyCore, DataKeyScoped, DeviationReferenceMode,
+    HbGateConfig, OracleHeartbeatRecord, OraclePayload, PrecisionCommitment,
+    PrecisionPayoutPolicy, PrecisionPrediction, PriceSample, Round, RoundArchiveStatus,
+    RoundMode, TwapSamplesKey, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
-use soroban_sdk::{symbol_short, Address, Env, Map, Vec};
+use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{symbol_short, Address, Bytes, Env, Map, Vec};
 
 /// Cancels the active round and deterministically refunds all participant stakes.
 pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
@@ -237,6 +241,38 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         return Err(ContractError::OracleNetworkMismatch);
     }
 
+    // ─── Oracle attestation (Issue #263) ────────────────────────────────────
+    //
+    // When an attestation key is configured, every payload must carry a
+    // detached ed25519 signature over a domain-separated message binding
+    // network/contract/round/price/time/nonce — stronger than
+    // `oracle.require_auth()` alone across environments where the oracle's
+    // Soroban account key and its off-chain signing key may differ (e.g. an
+    // HSM-backed signer publishing through a relayer account). When no key
+    // is configured, this block is a no-op and behaviour is identical to
+    // pre-#263 (account auth only).
+    let attestation_config = _load_attestation_config(&env);
+    if let Some(pubkey) = attestation_config.key {
+        let signature = payload.attestation.clone().ok_or_else(|| {
+            _emit_action_rejected(
+                &env,
+                &oracle,
+                symbol_short!("resolve"),
+                ContractError::WindowOutOfRange,
+            );
+            ContractError::WindowOutOfRange
+        })?;
+
+        let message = _build_attestation_message(&env, &payload);
+        // `ed25519_verify` panics on a bad signature rather than returning a
+        // Result, so validity is checked host-side first via a try/catch-free
+        // approach: Soroban's crypto host function traps the transaction on
+        // failure, which is the correct "fail closed" behaviour for a
+        // security check — an invalid signature must never let execution
+        // continue past this point.
+        env.crypto().ed25519_verify(&pubkey, &message, &signature);
+    }
+
     // Verify data freshness (max 300 seconds / 5 minutes old)
     let current_time = env.ledger().timestamp();
 
@@ -261,25 +297,34 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         return Err(ContractError::StaleOracleData);
     }
 
-    // Oracle deviation guardrails
+    // Oracle deviation guardrails (Issue #266: reference price is either the
+    // round's fixed start price, or a trailing-sample TWAP average, per the
+    // configured `DeviationReferenceMode`; default is `StartPrice`, matching
+    // pre-#266 behaviour exactly when no config has ever been set).
     _extend_persistent_ttl(&env, &DataKeyCore::OracleMaxDeviationBps);
     if let Some(max_bps) = env
         .storage()
         .persistent()
         .get::<_, u32>(&DataKeyCore::OracleMaxDeviationBps)
     {
-        let start_price = round.price_start;
-        if start_price == 0 {
+        let deviation_config = _load_deviation_config(&env);
+        let reference_price = match deviation_config.reference_mode {
+            DeviationReferenceMode::StartPrice => round.price_start,
+            DeviationReferenceMode::Twap => {
+                _twap_reference_price(&env, deviation_config.window_samples)?
+            }
+        };
+        if reference_price == 0 {
             return Err(ContractError::InvalidPrice);
         }
 
-        let diff = if payload.price >= start_price {
+        let diff = if payload.price >= reference_price {
             payload
                 .price
-                .checked_sub(start_price)
+                .checked_sub(reference_price)
                 .ok_or(ContractError::Overflow)?
         } else {
-            start_price
+            reference_price
                 .checked_sub(payload.price)
                 .ok_or(ContractError::Overflow)?
         };
@@ -287,7 +332,7 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         let diff_bps_u128 = diff
             .checked_mul(10_000u128)
             .ok_or(ContractError::Overflow)?
-            / start_price;
+            / reference_price;
         let diff_bps: u32 = diff_bps_u128
             .try_into()
             .map_err(|_| ContractError::Overflow)?;
@@ -304,7 +349,7 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
                 (symbol_short!("oracle"), symbol_short!("rejected")),
                 (
                     round.round_id,
-                    start_price,
+                    reference_price,
                     payload.price,
                     diff_bps,
                     max_bps,
@@ -323,7 +368,7 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
                 (symbol_short!("oracle"), symbol_short!("override")),
                 (
                     round.round_id,
-                    start_price,
+                    reference_price,
                     payload.price,
                     diff_bps,
                     max_bps,
@@ -424,6 +469,13 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
     }
 
     let round_id = round.round_id;
+
+    // Record this validated price into the TWAP sample ring (Issue #266).
+    // Runs once the payload has cleared every validity gate above (deviation,
+    // confidence, nonce, freshness, heartbeat) regardless of which
+    // reference mode is active, so a later switch to `Twap` mode has
+    // historical samples to draw from instead of starting empty.
+    _record_twap_sample(&env, payload.price, payload.timestamp);
 
     // Minimum participants threshold check
     if let Some(min) = env
@@ -1497,6 +1549,91 @@ pub fn _refund_under_threshold(
     Ok(())
 }
 
+/// Domain-separation prefix for oracle attestation messages (Issue #263).
+/// Ensures an attestation signature can never be replayed against another
+/// message type that happens to XDR-encode to the same bytes (e.g. a
+/// different contract's signed struct), independent of the on-chain
+/// network_id/contract_addr equality checks performed separately.
+const ATTESTATION_DOMAIN_PREFIX: &[u8] = b"XELMA_ORACLE_ATTESTATION_V1";
+
+/// Builds the canonical message an oracle operator signs off-chain
+/// (Issue #263): a fixed domain prefix followed by the XDR encoding of
+/// every field that binds this payload to a specific network, contract,
+/// round, price, timestamp, and nonce. Verified on-chain via
+/// `env.crypto().ed25519_verify()` against the configured attestation key.
+///
+/// Deliberately excludes `confidence` and `attestation` itself — the former
+/// is advisory metadata, the latter is the signature being verified.
+pub fn _build_attestation_message(env: &Env, payload: &OraclePayload) -> Bytes {
+    let mut message = Bytes::from_slice(env, ATTESTATION_DOMAIN_PREFIX);
+    message.append(&payload.network_id.clone().into());
+    message.append(&payload.contract_addr.clone().to_xdr(env));
+    message.append(&payload.round_id.to_xdr(env));
+    message.append(&payload.price.to_xdr(env));
+    message.append(&payload.timestamp.to_xdr(env));
+    message.append(&payload.nonce.to_xdr(env));
+    message
+}
+
+/// Computes the TWAP reference price from the last `window_samples` recorded
+/// settlement prices (Issue #266). Simple arithmetic mean — samples are
+/// recorded once per settled round (not on a continuous clock), so a
+/// duration-weighted average would weight every sample equally anyway.
+///
+/// Returns `InsufficientTwapSamples` if fewer than `window_samples` have
+/// been recorded yet, so an admin can't silently settle against a thin or
+/// empty window early in a deployment's life.
+pub fn _twap_reference_price(env: &Env, window_samples: u32) -> Result<u128, ContractError> {
+    let samples = _load_twap_samples(env);
+    if samples.len() < window_samples {
+        return Err(ContractError::WindowOutOfRange);
+    }
+
+    let start = samples.len() - window_samples;
+    let mut sum: u128 = 0;
+    let mut count: u128 = 0;
+    for i in start..samples.len() {
+        if let Some(sample) = samples.get(i) {
+            sum = sum.checked_add(sample.price).ok_or(ContractError::Overflow)?;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return Err(ContractError::WindowOutOfRange);
+    }
+    Ok(sum / count)
+}
+
+/// Loads the bounded ring of recent settlement price samples (Issue #266).
+pub fn _load_twap_samples(env: &Env) -> Vec<PriceSample> {
+    let key = TwapSamplesKey::Samples;
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            crate::common::TTL_BUMP_THRESHOLD,
+            crate::common::TTL_BUMP_AMOUNT,
+        );
+    }
+    env.storage().persistent().get(&key).unwrap_or(Vec::new(env))
+}
+
+/// Appends a settled price to the TWAP sample ring, evicting the oldest
+/// entry once the ring exceeds `MAX_TWAP_WINDOW_SAMPLES` (Issue #266).
+pub fn _record_twap_sample(env: &Env, price: u128, timestamp: u64) {
+    let key = TwapSamplesKey::Samples;
+    let mut samples = _load_twap_samples(env);
+    samples.push_back(PriceSample { price, timestamp });
+    while samples.len() > crate::common::MAX_TWAP_WINDOW_SAMPLES {
+        samples.remove(0);
+    }
+    env.storage().persistent().set(&key, &samples);
+    env.storage().persistent().extend_ttl(
+        &key,
+        crate::common::TTL_BUMP_THRESHOLD,
+        crate::common::TTL_BUMP_AMOUNT,
+    );
+}
+
 /// Returns `true` if the oracle heartbeat health gate should block settlement (Issue #264).
 ///
 /// Checks:
@@ -1507,7 +1644,7 @@ pub fn _refund_under_threshold(
 pub fn _check_heartbeat_health_blocked(env: &Env, config: &HbGateConfig) -> bool {
     use crate::common::DEFAULT_ORACLE_STALE_THRESHOLD;
 
-    let heartbeat_key = DataKey::OracleHeartbeat;
+    let heartbeat_key = DataKeyCore::OracleHeartbeat;
     _extend_persistent_ttl(env, &heartbeat_key);
     let record: OracleHeartbeatRecord = match env.storage().persistent().get(&heartbeat_key) {
         Some(r) => r,
@@ -1520,7 +1657,7 @@ pub fn _check_heartbeat_health_blocked(env: &Env, config: &HbGateConfig) -> bool
     }
 
     // Check staleness with grace period
-    let threshold_key = DataKey::OracleStaleThreshold;
+    let threshold_key = DataKeyCore::OracleStaleThreshold;
     _extend_persistent_ttl(env, &threshold_key);
     let threshold: u64 = env
         .storage()

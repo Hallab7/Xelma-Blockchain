@@ -12,9 +12,8 @@ use crate::common::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingConfigChange, RoundTemplate,
-    ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, PrecisionPayoutPolicy,
-    RoundTemplate,
+    ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingConfigChange,
+    PrecisionPayoutPolicy, RoundTemplate,
 };
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
@@ -28,6 +27,29 @@ pub fn set_max_stake(env: Env, max_amount: Option<i128>) -> Result<(), ContractE
 
 pub fn get_max_stake(env: Env) -> Option<i128> {
     let key = DataKeyCore::MaxStake;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
+/// Schedules a timelocked minimum-bet (dust protection) update (Issue #269).
+pub fn set_min_bet(env: Env, min_amount: Option<i128>) -> Result<(), ContractError> {
+    schedule_min_bet(env, min_amount)
+}
+
+pub fn schedule_min_bet(env: Env, min_amount: Option<i128>) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _validate_min_bet(min_amount)?;
+    _schedule_config_change(
+        &env,
+        ConfigChangeKind::MinBet,
+        ConfigChangePayload::MinBet(min_amount),
+    )
+}
+
+/// Returns the configured minimum bet, if enabled. `None` disables the check
+/// entirely, preserving pre-#269 behaviour (any positive amount accepted).
+pub fn get_min_bet(env: Env) -> Option<i128> {
+    let key = DataKeyCore::MinBet;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -436,7 +458,7 @@ pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), Contract
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -453,7 +475,7 @@ pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), Contract
         return Err(ContractError::InvalidPayoutPolicy);
     }
 
-    let key = DataKey::PrecisionPayoutPolicy;
+    let key = DataKeyCore::PrecisionPayoutPolicy;
     let old_policy: u32 = env.storage().persistent().get(&key).unwrap_or(0); // Default to 0 = Equal
     env.storage().persistent().set(&key, &policy);
     _extend_persistent_ttl(&env, &key);
@@ -467,13 +489,13 @@ pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), Contract
 }
 
 pub fn get_precision_payout_policy(env: Env) -> u32 {
-    let key = DataKey::PrecisionPayoutPolicy;
+    let key = DataKeyCore::PrecisionPayoutPolicy;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key).unwrap_or(0) // Default to 0 = Equal
 }
 
 pub fn _read_precision_payout_policy(env: &Env) -> PrecisionPayoutPolicy {
-    let key = DataKey::PrecisionPayoutPolicy;
+    let key = DataKeyCore::PrecisionPayoutPolicy;
     _extend_persistent_ttl(env, &key);
     let policy_val: u32 = env.storage().persistent().get(&key).unwrap_or(0);
     if policy_val == 1 {
@@ -524,7 +546,7 @@ pub fn set_epoch_mint_budget(env: Env, budget: i128) -> Result<(), ContractError
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -710,7 +732,7 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -729,7 +751,7 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
         }
     }
 
-    let key = DataKey::EarlyCashoutBps;
+    let key = DataKeyCore::EarlyCashoutBps;
     if let Some(v) = bps {
         env.storage().persistent().set(&key, &v);
         _extend_persistent_ttl(&env, &key);
@@ -747,7 +769,7 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
 
 /// Returns the configured early cash-out penalty bps, if enabled.
 pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
-    let key = DataKey::EarlyCashoutBps;
+    let key = DataKeyCore::EarlyCashoutBps;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -791,6 +813,15 @@ pub fn _validate_close_buffer_ledgers(buffer_ledgers: u32) -> Result<(), Contrac
 
 pub fn _validate_max_stake(max_amount: Option<i128>) -> Result<(), ContractError> {
     if let Some(v) = max_amount {
+        if v < MIN_CAP_VALUE {
+            return Err(ContractError::InvalidBetAmount);
+        }
+    }
+    Ok(())
+}
+
+pub fn _validate_min_bet(min_amount: Option<i128>) -> Result<(), ContractError> {
+    if let Some(v) = min_amount {
         if v < MIN_CAP_VALUE {
             return Err(ContractError::InvalidBetAmount);
         }
@@ -1072,14 +1103,19 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKeyCore::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
         ),
+        ConfigChangeKind::MinBet => {
+            ConfigChangePayload::MinBet(env.storage().persistent().get(&DataKeyCore::MinBet))
+        }
         ConfigChangeKind::EpochMintBudget => ConfigChangePayload::EpochMintBudget(
             env.storage()
                 .instance()
                 .get(&EPOCH_MINT_BUDGET_KEY)
+                .unwrap_or(0),
+        ),
         ConfigChangeKind::PrecisionPayoutPolicy => ConfigChangePayload::PrecisionPayoutPolicy(
             env.storage()
                 .persistent()
-                .get(&DataKey::PrecisionPayoutPolicy)
+                .get(&DataKeyCore::PrecisionPayoutPolicy)
                 .unwrap_or(0),
         ),
     }
@@ -1217,6 +1253,16 @@ pub fn _apply_config_payload(
                 env.storage().persistent().remove(&key);
             }
         }
+        (ConfigChangeKind::MinBet, ConfigChangePayload::MinBet(min)) => {
+            _validate_min_bet(*min)?;
+            let key = DataKeyCore::MinBet;
+            if let Some(v) = min {
+                env.storage().persistent().set(&key, v);
+                _extend_persistent_ttl(env, &key);
+            } else {
+                env.storage().persistent().remove(&key);
+            }
+        }
         (ConfigChangeKind::ProtocolFeeBps, ConfigChangePayload::ProtocolFeeBps(bps)) => {
             _validate_protocol_fee_bps(*bps)?;
             let key = DataKeyCore::ProtocolFeeBps;
@@ -1239,7 +1285,7 @@ pub fn _apply_config_payload(
             if *policy > 1 {
                 return Err(ContractError::InvalidPayoutPolicy);
             }
-            let key = DataKey::PrecisionPayoutPolicy;
+            let key = DataKeyCore::PrecisionPayoutPolicy;
             env.storage().persistent().set(&key, policy);
             _extend_persistent_ttl(env, &key);
         }

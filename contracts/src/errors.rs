@@ -107,7 +107,9 @@ pub enum ContractError {
     /// Epoch mint budget has been fully consumed
     EpochBudgetExceeded = 66,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
-    OracleNotLive = 66,
+    OracleNotLive = 67,
     /// Invalid precision payout policy
-    InvalidPayoutPolicy = 67,
+    InvalidPayoutPolicy = 68,
+    /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
+    BelowMinBet = 69,
 }
