@@ -160,6 +160,43 @@ pub fn get_protocol_fee_treasury(env: Env) -> i128 {
     env.storage().persistent().get(&key).unwrap_or(0)
 }
 
+// ─── Fee incidence model (Issue #268) ────────────────────────────────────────
+
+/// Sets the fee incidence model directly (admin only, no timelock).
+///
+/// The model determines whether the protocol fee is calculated on the total pot
+/// (`FeeOnPot`, default) or only on net winnings / profit (`FeeOnWinnings`).
+pub fn set_fee_model(env: Env, model: FeeModel) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("fee_mod"), e);
+    })?;
+
+    let key = DataKey::FeeModel;
+    let old_model = _read_fee_model(&env);
+    env.storage().persistent().set(&key, &model);
+    _extend_persistent_ttl(&env, &key);
+
+    _emit_config_updated(
+        &env,
+        ConfigChangeKind::FeeModel,
+        ConfigChangePayload::FeeModel(old_model),
+        ConfigChangePayload::FeeModel(model),
+    );
+    Ok(())
+}
+
+/// Returns the configured fee incidence model, defaulting to `FeeOnPot`.
+pub fn get_fee_model(env: Env) -> FeeModel {
+    _read_fee_model(&env)
+}
+
 pub fn withdraw_protocol_fee(
     env: Env,
     recipient: Address,
@@ -817,6 +854,18 @@ pub fn _validate_protocol_fee_bps(bps: Option<u32>) -> Result<(), ContractError>
     Ok(())
 }
 
+/// Default fee incidence model: fee-on-pot for backward compatibility.
+pub const DEFAULT_FEE_MODEL: FeeModel = FeeModel::FeeOnPot;
+
+pub fn _read_fee_model(env: &Env) -> FeeModel {
+    let key = DataKey::FeeModel;
+    let v: Option<FeeModel> = env.storage().persistent().get(&key);
+    if v.is_some() {
+        _extend_persistent_ttl(env, &key);
+    }
+    v.unwrap_or(DEFAULT_FEE_MODEL)
+}
+
 pub fn _read_protocol_fee_bps(env: &Env) -> Option<u32> {
     let key = DataKeyCore::ProtocolFeeBps;
     let v: Option<u32> = env.storage().persistent().get(&key);
@@ -831,6 +880,7 @@ pub fn _collect_protocol_fee(
     round_id: u64,
     fee_amount: i128,
     bps_active: Option<u32>,
+    model: FeeModel,
 ) -> Result<(), ContractError> {
     if fee_amount <= 0 {
         return Ok(());
@@ -844,11 +894,12 @@ pub fn _collect_protocol_fee(
     _extend_persistent_ttl(env, &treasury_key);
 
     let bps_value: u32 = bps_active.unwrap_or(0);
+    let model_value: u32 = model as u32;
 
     #[allow(deprecated)]
     env.events().publish(
         (symbol_short!("protocol"), symbol_short!("fee_coll")),
-        (round_id, fee_amount, new_treasury, bps_value),
+        (round_id, fee_amount, new_treasury, bps_value, model_value),
     );
 
     Ok(())
@@ -856,6 +907,7 @@ pub fn _collect_protocol_fee(
 
 pub fn calculate_protocol_fee_updown(
     bps: Option<u32>,
+    model: FeeModel,
     winning_pool: i128,
     losing_pool: i128,
 ) -> Result<(i128, i128, i128), ContractError> {
@@ -863,25 +915,53 @@ pub fn calculate_protocol_fee_updown(
         return Ok((winning_pool, losing_pool, 0));
     }
     let bps_value = bps.unwrap();
-    let total_pot = payout_add(winning_pool, losing_pool)?;
-    let fee_amount = total_pot
-        .checked_mul(bps_value as i128)
-        .ok_or(ContractError::Overflow)?
-        / BPS_DENOMINATOR;
+
+    let fee_amount = match model {
+        FeeModel::FeeOnPot => {
+            let total_pot = payout_add(winning_pool, losing_pool)?;
+            total_pot
+                .checked_mul(bps_value as i128)
+                .ok_or(ContractError::Overflow)?
+                / BPS_DENOMINATOR
+        }
+        FeeModel::FeeOnWinnings => {
+            // Fee only on the profit (losing_pool); winners retain their principal.
+            // Since bps ≤ 1000 (10%), fee can never exceed losing_pool.
+            losing_pool
+                .checked_mul(bps_value as i128)
+                .ok_or(ContractError::Overflow)?
+                / BPS_DENOMINATOR
+        }
+    };
+
     if fee_amount == 0 {
         return Ok((winning_pool, losing_pool, 0));
     }
-    let fee_from_losing = fee_amount.min(losing_pool);
-    let fee_from_winning = fee_amount
-        .checked_sub(fee_from_losing)
-        .ok_or(ContractError::Overflow)?;
-    let dist_winning = winning_pool
-        .checked_sub(fee_from_winning)
-        .ok_or(ContractError::Overflow)?;
-    let dist_losing = losing_pool
-        .checked_sub(fee_from_losing)
-        .ok_or(ContractError::Overflow)?;
-    Ok((dist_winning, dist_losing, fee_amount))
+
+    match model {
+        FeeModel::FeeOnPot => {
+            // Fee is split across both pools: losing pool first, then winning pool (spillover).
+            let fee_from_losing = fee_amount.min(losing_pool);
+            let fee_from_winning = fee_amount
+                .checked_sub(fee_from_losing)
+                .ok_or(ContractError::Overflow)?;
+            let dist_winning = winning_pool
+                .checked_sub(fee_from_winning)
+                .ok_or(ContractError::Overflow)?;
+            let dist_losing = losing_pool
+                .checked_sub(fee_from_losing)
+                .ok_or(ContractError::Overflow)?;
+            Ok((dist_winning, dist_losing, fee_amount))
+        }
+        FeeModel::FeeOnWinnings => {
+            // Fee is deducted entirely from the losing pool (the profit).
+            // Winners always get their full principal back.
+            let dist_losing = losing_pool
+                .checked_sub(fee_amount)
+                .ok_or(ContractError::Overflow)?;
+            Ok((winning_pool, dist_losing, fee_amount))
+        }
+    }
 }
 
 pub fn _apply_protocol_fee_updown(
@@ -891,26 +971,47 @@ pub fn _apply_protocol_fee_updown(
     losing_pool: i128,
 ) -> Result<(i128, i128, i128), ContractError> {
     let bps = _read_protocol_fee_bps(env);
+    let model = _read_fee_model(env);
     let (dist_winning, dist_losing, fee_amount) =
-        calculate_protocol_fee_updown(bps, winning_pool, losing_pool)?;
+        calculate_protocol_fee_updown(bps, model, winning_pool, losing_pool)?;
     if fee_amount > 0 {
-        _collect_protocol_fee(env, round_id, fee_amount, bps)?;
+        _collect_protocol_fee(env, round_id, fee_amount, bps, model)?;
     }
     Ok((dist_winning, dist_losing, fee_amount))
 }
 
 pub fn calculate_protocol_fee_precision(
     bps: Option<u32>,
+    model: FeeModel,
     total_pot: i128,
+    winner_stakes: i128,
 ) -> Result<(i128, i128), ContractError> {
     if bps.is_none() || total_pot <= 0 {
         return Ok((total_pot, 0));
     }
     let bps_value = bps.unwrap();
-    let fee_amount = total_pot
+
+    let taxable_base = match model {
+        FeeModel::FeeOnPot => total_pot,
+        FeeModel::FeeOnWinnings => {
+            // Fee only on profits = total_pot minus winners' own stakes.
+            let profit = total_pot
+                .checked_sub(winner_stakes)
+                .ok_or(ContractError::Overflow)?;
+            if profit <= 0 {
+                return Ok((total_pot, 0));
+            }
+            profit
+        }
+    };
+
+    let fee_amount = taxable_base
         .checked_mul(bps_value as i128)
         .ok_or(ContractError::Overflow)?
         / BPS_DENOMINATOR;
+    if fee_amount == 0 {
+        return Ok((total_pot, 0));
+    }
     let distributable = total_pot
         .checked_sub(fee_amount)
         .ok_or(ContractError::Overflow)?;
@@ -921,11 +1022,14 @@ pub fn _apply_protocol_fee_precision(
     env: &Env,
     round_id: u64,
     total_pot: i128,
+    winner_stakes: i128,
 ) -> Result<(i128, i128), ContractError> {
     let bps = _read_protocol_fee_bps(env);
-    let (distributable, fee_amount) = calculate_protocol_fee_precision(bps, total_pot)?;
+    let model = _read_fee_model(env);
+    let (distributable, fee_amount) =
+        calculate_protocol_fee_precision(bps, model, total_pot, winner_stakes)?;
     if fee_amount > 0 {
-        _collect_protocol_fee(env, round_id, fee_amount, bps)?;
+        _collect_protocol_fee(env, round_id, fee_amount, bps, model)?;
     }
     Ok((distributable, fee_amount))
 }

@@ -6,7 +6,9 @@ use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
     payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
 };
-use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
+use crate::config::{
+    _apply_protocol_fee_precision, _apply_protocol_fee_updown, _read_fee_model,
+};
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKeyCore, DataKeyScoped, DeviationReferenceMode,
@@ -941,7 +943,17 @@ pub fn _resolve_precision_mode(
 
     let mut fee_amount = 0;
     if !winners.is_empty() && total_pot > 0 {
-        let (payout_pool, fee) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        // Sum winner stakes for fee-on-winnings calculation.
+        // Must propagate overflow error rather than silently truncating.
+        let mut winner_stakes: i128 = 0;
+        for i in 0..winners.len() {
+            if let Some(w) = winners.get(i) {
+                winner_stakes = winner_stakes
+                    .checked_add(w.amount)
+                    .ok_or(ContractError::Overflow)?;
+            }
+        }
+        let (payout_pool, fee) = _apply_protocol_fee_precision(env, round_id, total_pot, winner_stakes)?;
         fee_amount = fee;
         let payouts = _calculate_precision_payouts(env, &winners, payout_pool)?;
 
@@ -1077,7 +1089,17 @@ pub fn _resolve_precision_legacy(
 
     let mut fee_amount = 0;
     if !winners.is_empty() && total_pot > 0 {
-        let (payout_pool, fee) = _apply_protocol_fee_precision(env, round_id, total_pot)?;
+        // Sum winner stakes for fee-on-winnings calculation.
+        // Must propagate overflow error rather than silently truncating.
+        let mut winner_stakes: i128 = 0;
+        for i in 0..winners.len() {
+            if let Some(w) = winners.get(i) {
+                winner_stakes = winner_stakes
+                    .checked_add(w.amount)
+                    .ok_or(ContractError::Overflow)?;
+            }
+        }
+        let (payout_pool, fee) = _apply_protocol_fee_precision(env, round_id, total_pot, winner_stakes)?;
         fee_amount = fee;
         let payouts = _calculate_precision_payouts(env, &winners, payout_pool)?;
 
@@ -1327,6 +1349,8 @@ pub fn _archive_round(
         }
     }
 
+    let fee_model_value: u32 = _read_fee_model(env) as u32;
+
     #[allow(deprecated)]
     env.events().publish(
         (symbol_short!("round"), symbol_short!("summary")),
@@ -1339,6 +1363,7 @@ pub fn _archive_round(
             total_pot,
             fee_amount,
             status_val,
+            fee_model_value,
         ),
     );
 

@@ -994,6 +994,21 @@ impl VirtualTokenContract {
         queries::simulate_payout(env, final_price)
     }
 
+    // ─── Fee incidence model (Issue #268) ──────────────────────────────────
+
+    /// Sets the fee incidence model (admin only).
+    ///
+    /// `FeeOnPot` (0): fee is calculated on the total round pot (default).
+    /// `FeeOnWinnings` (1): fee is calculated only on net winnings / profit.
+    pub fn set_fee_model(env: Env, model: FeeModel) -> Result<(), ContractError> {
+        config::set_fee_model(env, model)
+    }
+
+    /// Returns the configured fee incidence model, defaulting to `FeeOnPot`.
+    pub fn get_fee_model(env: Env) -> FeeModel {
+        config::get_fee_model(env)
+    }
+
     // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────
 
     /// Paginated lifetime wins leaderboard (all-time, independent of seasons).
