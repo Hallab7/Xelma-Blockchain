@@ -8,11 +8,12 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore,
-    DataKeyScoped, DeviationReferenceMode, LeaderboardEntry, OracleHeartbeatRecord, OraclePayload,
-    OracleRotationProposal, PendingConfigChange, PolicyAction, PrecisionPrediction, PriceSample,
-    ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundPhase, RoundPoolStats,
-    RoundStatus, RoundTemplate, RuntimeMode, SeasonArchive, SeasonLeaderboardEntry,
-    SimulationResult, UserPosition, UserRoundOutcome, UserStats,
+    DataKeyScoped, DeviationReferenceMode, LeaderboardEntry, MultiFeedPayload, OracleHeartbeatRecord,
+    OraclePayload, OracleQuorumConfig, OracleRotationProposal, PendingConfigChange,
+    PolicyAction, PrecisionPrediction, PriceSample, ProtocolHealthStatus, ProtocolStatus, Round,
+    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
+    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition,
+    UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -797,6 +798,22 @@ impl VirtualTokenContract {
         config::set_close_buffer_ledgers(env, buffer_ledgers)
     }
 
+    /// Sets the multi-feed oracle quorum configuration (admin only).
+    ///
+    /// When `Some(config)`, `resolve_round_multi` is enabled. When `None`,
+    /// multi-feed resolution is disabled. The legacy path is unaffected.
+    pub fn set_oracle_quorum_config(
+        env: Env,
+        config: Option<OracleQuorumConfig>,
+    ) -> Result<(), ContractError> {
+        admin::set_oracle_quorum_config(env, config)
+    }
+
+    /// Returns the configured multi-feed oracle quorum config, if any.
+    pub fn get_oracle_quorum_config(env: Env) -> Option<OracleQuorumConfig> {
+        admin::get_oracle_quorum_config(env)
+    }
+
     pub fn get_close_buffer_ledgers(env: Env) -> u32 {
         config::get_close_buffer_ledgers(env)
     }
@@ -900,6 +917,19 @@ impl VirtualTokenContract {
 
     pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractError> {
         settlement::resolve_round(env, payload)
+    }
+
+    /// Resolves the active round using a multi-feed oracle payload with
+    /// median settlement and quorum-based outlier rejection.
+    ///
+    /// Requires `OracleQuorumConfig` to be configured by the admin before
+    /// this path is available. The legacy single-oracle `resolve_round`
+    /// remains available independently.
+    pub fn resolve_round_multi(
+        env: Env,
+        payload: MultiFeedPayload,
+    ) -> Result<(), ContractError> {
+        settlement::resolve_round_multi(env, payload)
     }
 
     pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {

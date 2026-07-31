@@ -243,7 +243,7 @@ Emitted for every admin configuration mutation when a value is actually written,
 
 Example payload for a windows update: `(Windows, Windows(6, 12), Windows(10, 20))`.
 
-`ConfigChangeKind` values currently include `Windows`, `MaxStake`, `MaxUserRoundExposure`, `MaxPendingWinnings`, `OracleStaleThreshold`, `OracleMaxDeviationBps`, `ProtocolFeeBps`, `MinParticipants`, `MaxPrecisionParticipants`, `MintLimit`, and `ArchiveRetention`.
+`ConfigChangeKind` values currently include `Windows`, `MaxStake`, `MaxUserRoundExposure`, `MaxPendingWinnings`, `OracleStaleThreshold`, `OracleMaxDeviationBps`, `ProtocolFeeBps`, `MinParticipants`, `MaxPrecisionParticipants`, `MintLimit`, `ArchiveRetention`, `CloseBufferLedgers`, and `OracleQuorum`.
 
 ---
 
@@ -283,6 +283,52 @@ enum variants in `contracts/src/errors.rs`.
 
 **Reason codes** are the integer values of `ContractError` — see
 `contracts/src/errors.rs`.
+
+---
+
+---
+
+## `("oracle", "multisum")` — Multi-feed settlement summary (Issue #262)
+
+Emitted when `resolve_round_multi` successfully computes the median price and
+passes quorum. Provides a compact summary of the multi-feed resolution before
+round settlement proceeds.
+
+| Position | Field               | Type   | Description                                               |
+|----------|---------------------|--------|-----------------------------------------------------------|
+| 0        | `round_id`          | `u64`  | Round that was resolved                                   |
+| 1        | `observation_count` | `u32`  | Total number of feed observations in the payload           |
+| 2        | `survivor_count`    | `u32`  | Observations that passed outlier rejection                |
+| 3        | `median_price`      | `u128` | Computed median settlement price (4 decimal places)       |
+| 4        | `quorum_threshold`  | `u32`  | Configured quorum threshold that was satisfied            |
+
+---
+
+## `("oracle", "nofed")` — Multi-feed quorum failure (Issue #262)
+
+Emitted when `resolve_round_multi` fails because too few observations survived
+outlier rejection to meet the configured quorum threshold.
+
+| Position | Field               | Type   | Description                                               |
+|----------|---------------------|--------|-----------------------------------------------------------|
+| 0        | `round_id`          | `u64`  | Round that failed settlement                              |
+| 1        | `median_price`      | `u128` | Computed median price (4 decimal places)                  |
+| 2        | `survivor_count`    | `u32`  | Observations that passed outlier rejection                |
+| 3        | `quorum_threshold`  | `u32`  | Configured quorum threshold that was NOT met              |
+
+---
+
+## `("oracle", "quorum")` — Quorum config updated (Issue #262)
+
+Emitted when the admin sets or clears the multi-feed oracle quorum
+configuration. Emitted both via the direct setter and via timelocked config
+application.
+
+| Position | Field                  | Type   | Description                                               |
+|----------|------------------------|--------|-----------------------------------------------------------|
+| 0        | `min_observations`     | `u32`  | Minimum observations per multi-feed payload (0 if cleared)|
+| 1        | `quorum_threshold`     | `u32`  | Minimum surviving observations for quorum (0 if cleared)  |
+| 2        | `outlier_threshold_bps`| `u32`  | Max deviation from median before outlier rejection        |
 
 ---
 

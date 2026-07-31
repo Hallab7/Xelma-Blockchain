@@ -168,6 +168,9 @@ pub enum DataKey {
     /// Frozen snapshot of a season's final rankings, written when the season
     /// is reset. Seasons are never deleted — this is a permanent archive.
     SeasonArchive(u32),
+    /// Admin-configured multi-feed oracle quorum parameters.
+    /// When set, `resolve_round_multi` is enabled.
+    OracleQuorum,
     /// Announced next schema version for migration preview (v-next template).
     /// When set, operators can inspect this value before executing a real migration.
     /// Absent means no next migration has been announced.
@@ -552,6 +555,52 @@ pub struct SimulationResult {
     pub precision_total_stake: i128,
     pub fee_amount: i128,
     pub outcomes: Vec<UserRoundOutcome>,
+}
+
+/// Multi-feed oracle resolution payload (N observations, quorum + median).
+///
+/// Unlike the legacy single-oracle `OraclePayload`, this carries N independent
+/// feed observations as parallel arrays. The contract computes the median,
+/// rejects outliers, and requires a configurable quorum of feeds to agree
+/// within the outlier threshold before settlement proceeds.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MultiFeedPayload {
+    /// Prices from each feed, scaled to 4 decimal places (e.g. 2297 = $0.2297).
+    /// Length must match `sources` and be at least `min_observations`.
+    pub prices: Vec<u128>,
+    /// Feed source identifiers (0-based index, max N-1). Must be unique.
+    /// Length must match `prices`.
+    pub sources: Vec<u32>,
+    /// Round identifier that must match `Round.start_ledger`
+    pub round_id: u32,
+    /// Per-round replay-protection nonce.
+    pub nonce: u64,
+    /// SHA-256 hash of the network passphrase this payload targets.
+    pub network_id: BytesN<32>,
+    /// Contract address this payload is intended for.
+    pub contract_addr: Address,
+    /// Unix epoch seconds when the observations were collected.
+    pub timestamp: u64,
+}
+
+/// Admin-configurable quorum and outlier rejection parameters for multi-feed
+/// oracle settlement. Stored under `DataKey::OracleQuorum`.
+///
+/// When set, `resolve_round_multi` becomes the preferred settlement path.
+/// The legacy single-oracle `resolve_round` path remains available
+/// independently of this configuration.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OracleQuorumConfig {
+    /// Minimum number of unique feed observations required in a multi-feed payload.
+    pub min_observations: u32,
+    /// Minimum number of observations that must survive outlier rejection to
+    /// form a valid quorum and proceed to settlement.
+    pub quorum_threshold: u32,
+    /// Maximum deviation from the median (in basis points, 1 bp = 0.01%)
+    /// before an observation is rejected as an outlier.
+    pub outlier_threshold_bps: u32,
 }
 
 /// Admin-configured blueprint for `create_next_from_template`.
