@@ -302,6 +302,42 @@ export interface PrecisionPrediction {
   user: string;
 }
 
+/**
+ * Cursor-based page of precision predictions.
+ * Pass next_cursor as the cursor argument to the next call to fetch the subsequent page.
+ */
+export interface PrecisionPredictionsPage {
+  items: Array<PrecisionPrediction>;
+  next_cursor: Option<string>;
+}
+
+/**
+ * Single entry in a cursor-based Up/Down positions page.
+ */
+/**
+ * Cursor-based page of Up/Down positions.
+ */
+export interface UpdownPositionsPage {
+  items: Array<[string, UserPosition]>;
+  next_cursor: Option<string>;
+}
+
+/**
+ * Entry in the global leaderboard.
+ */
+export interface LeaderboardEntry {
+  user: string;
+  stats: UserStats;
+}
+
+/**
+ * Cursor-based page of leaderboard entries.
+ */
+export interface LeaderboardPage {
+  items: Array<LeaderboardEntry>;
+  next_cursor: Option<string>;
+}
+
 
 /**
  * Compact historical round summary persisted after resolve or cancel.

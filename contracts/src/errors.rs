@@ -56,6 +56,9 @@ pub enum ContractError {
     InvalidCommitment = 63,
     InvalidSalt = 64,
     NoRoundTemplate = 65,
+    /// Pending winnings entry exists but has not yet reached the configured
+    /// expiry threshold — caller must wait before reclaiming.
+    PendingWinningsNotExpired = 66,
     /// Epoch mint budget has been fully consumed
     EpochBudgetExceeded = 66,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
@@ -64,4 +67,18 @@ pub enum ContractError {
     InvalidPayoutPolicy = 68,
     /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
     BelowMinBet = 69,
+    /// Multi-feed resolution: fewer observations survived outlier rejection
+    /// than the configured quorum threshold.
+    InsufficientOracleQuorum = 71,
+    /// Multi-feed resolution: payload contains fewer observations than the
+    /// configured minimum.
+    TooFewObservations = 72,
+    /// Multi-feed resolution: outlier observations would dominate the result
+    /// (too many rejected, cannot form quorum).
+    OracleOutlierRejected = 73,
+    /// Multi-feed payload contains duplicate source identifiers.
+    DuplicateOracleSource = 74,
+    /// Multi-feed payload has observations that are not sorted or sources
+    /// are out of expected range.
+    InvalidObservationOrder = 75
 }
