@@ -9,6 +9,9 @@ use crate::config::{
 };
 use crate::errors::ContractError;
 use crate::types::{
+    ArchivedRoundSummary, BetSide, DataKey, PrecisionCommitment, PrecisionPrediction,
+    PendingWinningsUpdatedAtKey, Round, RoundMode, RoundPhase, RoundPoolStats, RoundTemplate,
+    SeasonArchive, SimulationResult, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
     ArchivedRoundSummary, BetSide, DataKeyCore, DataKeyScoped, PrecisionCommitment, PrecisionPrediction, Round,
     RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UserOutcomeType, UserPosition,
     UserRoundOutcome, UserStats,
@@ -180,11 +183,23 @@ pub fn get_recent_archived_rounds(env: Env, limit: u32) -> Vec<ArchivedRoundSumm
 }
 
 /// Returns a compact per-user outcome record for a specific archived round.
+///
+/// Returns `None` if the round does not exist or has been pruned from the
+/// on-chain archive, even if a `UserRoundOutcome` record still exists in
+/// storage. This ensures consistent missing-id semantics: any query for a
+/// pruned round_id returns `None` regardless of which query is used.
 pub fn get_user_archived_participation(
     env: Env,
     user: Address,
     round_id: u64,
 ) -> Option<UserRoundOutcome> {
+    if !env
+        .storage()
+        .persistent()
+        .has(&DataKeyScoped::ArchivedRound(round_id))
+    {
+        return None;
+    }
     let key = DataKeyScoped::UserRoundOutcome(round_id, user);
     env.storage().persistent().get(&key)
 }
@@ -203,8 +218,11 @@ pub fn get_user_stats(env: Env, user: Address) -> UserStats {
 
 /// Returns user's unclaimed pending winnings balance
 pub fn get_pending_winnings(env: Env, user: Address) -> i128 {
+    let key = DataKey::PendingWinnings(user.clone());
     let key = DataKeyScoped::PendingWinnings(user);
     _extend_persistent_ttl(&env, &key);
+    let updated_key = PendingWinningsUpdatedAtKey(user);
+    _extend_persistent_ttl(&env, &updated_key);
     env.storage().persistent().get(&key).unwrap_or(0)
 }
 

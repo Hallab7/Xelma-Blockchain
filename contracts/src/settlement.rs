@@ -13,6 +13,8 @@ use crate::settlement_math::{
 use crate::config::{
     _apply_protocol_fee_precision, _apply_protocol_fee_updown, _read_fee_model,
 };
+use crate::types::PendingWinningsUpdatedAtKey;
+use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKey, DataKeyCore, DataKeyScoped,
@@ -77,7 +79,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
                             0,
                             pos.amount,
                             pos.amount,
-                            UserOutcomeType::Cancel,
+                            UserOutcomeType::Void,
                         );
                         env.storage().persistent().remove(&pos_key);
                     }
@@ -117,7 +119,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
                         0,
                         refund_amount,
                         refund_amount,
-                        UserOutcomeType::Cancel,
+                        UserOutcomeType::Void,
                     );
                     env.storage().persistent().remove(&pred_key);
                     env.storage().persistent().remove(&commit_key);
@@ -180,6 +182,9 @@ pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
     let new_balance = payout_add(current_balance, pending)?;
 
     env.storage().persistent().remove(&key);
+    env.storage()
+        .persistent()
+        .remove(&PendingWinningsUpdatedAtKey(user.clone()));
     _set_balance(&env, user.clone(), new_balance);
 
     #[allow(deprecated)]
@@ -1753,19 +1758,25 @@ pub fn _archive_round(
                 .persistent()
                 .remove(&DataKeyScoped::ArchivedRound(oldest));
 
+            // Clean up associated markers so the prune is complete:
+            // cancelled-round flag, if present.
+            if env
+                .storage()
+                .persistent()
+                .has(&DataKeyScoped::CancelledRound(oldest))
+            {
+                env.storage()
+                    .persistent()
+                    .remove(&DataKeyScoped::CancelledRound(oldest));
+            }
+
             #[allow(deprecated)]
             env.events().publish(
                 (symbol_short!("archive"), symbol_short!("pruned")),
                 (oldest, retention_limit),
             );
         }
-        let mut trimmed = Vec::new(env);
-        for i in 1..recent.len() {
-            if let Some(id) = recent.get(i) {
-                trimmed.push_back(id);
-            }
-        }
-        recent = trimmed;
+        recent.remove(0);
     }
 
     env.storage()
@@ -1801,12 +1812,7 @@ pub fn _persist_user_outcome(
     env.storage().persistent().set(&key, &record);
     _extend_persistent_ttl(env, &key);
 
-    let outcome_type_u32 = match outcome {
-        UserOutcomeType::Win => 1u32,
-        UserOutcomeType::Loss => 0u32,
-        UserOutcomeType::Refund => 2u32,
-        UserOutcomeType::Cancel => 3u32,
-    };
+    let outcome_type_u32 = outcome.clone() as u32;
     #[allow(deprecated)]
     env.events().publish(
         (symbol_short!("payout"), symbol_short!("outcome")),

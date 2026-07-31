@@ -113,7 +113,7 @@ result of a round without replaying contract storage reads.
 | 1        | `mode`         | `u32`     | Round mode: `0` = UpDown, `1` = Precision                 |
 | 2        | `user`         | `Address` | Participant address                                       |
 | 3        | `gross_payout` | `i128`    | Amount credited to pending winnings, in stroops           |
-| 4        | `outcome_type` | `u32`     | `0` = loss, `1` = win, `2` = refund                       |
+| 4        | `outcome_type` | `u32`     | `0` = win, `1` = loss, `2` = refund, `3` = void           |
 
 `gross_payout` is `0` for losses. For refunds, it equals the participant's refunded stake.
 For wins, it equals the full pending payout credited by the resolver, including returned
