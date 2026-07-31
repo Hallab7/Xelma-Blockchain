@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: MIT
 use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
 use crate::common::{
-    _current_epoch_id, _emit_action_rejected, _extend_persistent_ttl, _set_balance,
-    assert_no_active_round, balance, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS,
-    MAX_START_PRICE, MIN_START_PRICE,
-    _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance,
-    assert_no_active_round, balance, BPS_DENOMINATOR, DEFAULT_BET_WINDOW_LEDGERS,
-    DEFAULT_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_START_PRICE,
+    _accumulate_pending, _current_epoch_id, _emit_action_rejected, _enforce_min_bet,
+    _extend_persistent_ttl, _set_balance, assert_no_active_round, balance, BPS_DENOMINATOR,
+    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_START_PRICE,
 };
 use crate::config::{
     _collect_protocol_fee, get_early_cashout_bps, get_max_precision_participants,
@@ -14,10 +11,8 @@ use crate::config::{
 use crate::errors::ContractError;
 use crate::settlement::_persist_user_outcome;
 use crate::types::{
-    BetSide, DataKeyCore, DataKeyScoped, PrecisionCommitment, PrecisionPrediction, Round, RoundMode, RoundTemplate,
-    UserPosition,
-    BetSide, DataKey, PrecisionCommitment, PrecisionPrediction, Round, RoundMode, RoundTemplate,
-    UserOutcomeType, UserPosition,
+    BetSide, DataKeyCore, DataKeyScoped, PrecisionCommitment, PrecisionPrediction, Round,
+    RoundMode, RoundTemplate, UserOutcomeType, UserPosition,
 };
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec};
@@ -227,6 +222,7 @@ pub fn place_bet(
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
     }
+    _enforce_min_bet(&env, amount)?;
 
     // Enforce max stake cap
     if let Some(max_stake) = env
@@ -273,7 +269,7 @@ pub fn place_bet(
         return Err(ContractError::RoundEnded);
     }
     if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
-        return Err(ContractError::BettingClosed);
+        return Err(ContractError::RoundEnded);
     }
 
     let user_balance = balance(env.clone(), user.clone());
@@ -357,6 +353,7 @@ pub fn place_precision_prediction(
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
     }
+    _enforce_min_bet(&env, amount)?;
 
     // Enforce max stake cap
     if let Some(max_stake) = env
@@ -407,7 +404,7 @@ pub fn place_precision_prediction(
         return Err(ContractError::RoundEnded);
     }
     if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
-        return Err(ContractError::BettingClosed);
+        return Err(ContractError::RoundEnded);
     }
 
     let pred_key = DataKeyScoped::PrecisionPosition(round.round_id, user.clone());
@@ -488,6 +485,7 @@ pub fn commit_prediction(
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
     }
+    _enforce_min_bet(&env, amount)?;
 
     // Enforce max stake cap
     if let Some(max_stake) = env
@@ -534,7 +532,7 @@ pub fn commit_prediction(
         return Err(ContractError::RoundEnded);
     }
     if close_buffer_ledgers > 0 && current_ledger >= close_ledger {
-        return Err(ContractError::BettingClosed);
+        return Err(ContractError::RoundEnded);
     }
 
     let user_balance = balance(env.clone(), user.clone());
@@ -695,33 +693,33 @@ pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
 
     // Check early cash-out is enabled
     let penalty_bps = get_early_cashout_bps(env.clone())
-        .ok_or(ContractError::EarlyCashoutDisabled)?;
+        .ok_or(ContractError::RoundEnded)?;
 
     // Single read of the active round
     let mut round: Round = env
         .storage()
         .persistent()
-        .get(&DataKey::ActiveRound)
+        .get(&DataKeyCore::ActiveRound)
         .ok_or(ContractError::NoActiveRound)?;
 
     // Only UpDown rounds supported
     if round.mode != RoundMode::UpDown {
-        return Err(ContractError::EarlyCashoutNotUpDown);
+        return Err(ContractError::RoundEnded);
     }
 
     // Must be in Running phase (betting closed, round not yet ended)
     let current_ledger = env.ledger().sequence();
     if current_ledger < round.bet_end_ledger || current_ledger >= round.end_ledger {
-        return Err(ContractError::EarlyCashoutPhaseInvalid);
+        return Err(ContractError::RoundEnded);
     }
 
     // Retrieve user's position
-    let pos_key = DataKey::Position(round.round_id, user.clone());
+    let pos_key = DataKeyScoped::Position(round.round_id, user.clone());
     let position: UserPosition = env
         .storage()
         .persistent()
         .get(&pos_key)
-        .ok_or(ContractError::PositionNotFound)?;
+        .ok_or(ContractError::CommitmentNotFound)?;
 
     let stake = position.amount;
     if stake <= 0 {
@@ -758,7 +756,7 @@ pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
     }
     env.storage()
         .persistent()
-        .set(&DataKey::ActiveRound, &round);
+        .set(&DataKeyCore::ActiveRound, &round);
 
     // Credit cashout to user's pending winnings
     if cashout > 0 {
@@ -791,7 +789,7 @@ pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
     env.storage().persistent().remove(&pos_key);
 
     // Remove user from participant list
-    let participants_key = DataKey::RoundParticipants(round.round_id);
+    let participants_key = DataKeyScoped::RoundParticipants(round.round_id);
     let participants: Vec<Address> = env
         .storage()
         .persistent()
