@@ -22,10 +22,10 @@ pub mod common;
 mod config;
 mod contract;
 mod errors;
-mod governance;
 mod leaderboard;
 mod queries;
 mod settlement;
+mod storage;
 mod settlement_math;
 mod types;
 

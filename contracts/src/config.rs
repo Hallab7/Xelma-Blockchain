@@ -4,14 +4,17 @@ use crate::common::{
     _emit_action_rejected, _emit_config_updated, _extend_persistent_ttl, _set_balance, balance,
     payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS, DEFAULT_ARCHIVE_RETENTION,
     DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
-    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION,
-    MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
-    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PRECISION_PARTICIPANTS_LIMIT,
-    MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_ARCHIVE_RETENTION,
-    MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD, MIN_START_PRICE,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_PENDING_WINNINGS_EXPIRY, DEFAULT_RUN_WINDOW_LEDGERS,
+    MAX_ARCHIVE_RETENTION, MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
+    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PENDING_WINNINGS_EXPIRY,
+    MAX_PRECISION_PARTICIPANTS_LIMIT, MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS,
+    MAX_START_PRICE, MIN_ARCHIVE_RETENTION, MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD,
+    MIN_PENDING_WINNINGS_EXPIRY, MIN_START_PRICE,
 };
 use crate::errors::ContractError;
 use crate::types::{
+    ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, RoundTemplate,
+    PENDING_WINNINGS_EXPIRY_KEY,
     ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingConfigChange,
     PrecisionPayoutPolicy, RoundTemplate,
 };
@@ -780,6 +783,39 @@ pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
 /// Same validation `create_round` performs on `(start_price, mode)`, applied
 /// up front at template-set time so a stored template can never later fail
 /// `create_round`'s own checks for a reason unrelated to round overlap.
+pub fn schedule_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _validate_pending_winnings_expiry(ledgers)?;
+    _schedule_config_change(
+        &env,
+        ConfigChangeKind::PendingWinningsExpiry,
+        ConfigChangePayload::PendingWinningsExpiry(ledgers),
+    )
+}
+
+pub fn set_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+    schedule_pending_winnings_expiry(env, ledgers)
+}
+
+pub fn get_pending_winnings_expiry(env: Env) -> u32 {
+    _extend_persistent_ttl(&env, &PENDING_WINNINGS_EXPIRY_KEY);
+    env.storage()
+        .persistent()
+        .get(&PENDING_WINNINGS_EXPIRY_KEY)
+        .unwrap_or(DEFAULT_PENDING_WINNINGS_EXPIRY)
+}
+
+pub fn _validate_pending_winnings_expiry(ledgers: u32) -> Result<(), ContractError> {
+    if ledgers != 0 && (ledgers < MIN_PENDING_WINNINGS_EXPIRY || ledgers > MAX_PENDING_WINNINGS_EXPIRY) {
+        return Err(ContractError::InvalidDuration);
+    }
+    Ok(())
+}
+
+pub fn _validate_round_template(
+    start_price: u128,
+    mode: Option<u32>,
+) -> Result<(), ContractError> {
 pub fn _validate_round_template(start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
     if start_price < MIN_START_PRICE || start_price > MAX_START_PRICE {
         return Err(ContractError::InvalidStartPrice);
@@ -1106,6 +1142,11 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKeyCore::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
         ),
+        ConfigChangeKind::PendingWinningsExpiry => ConfigChangePayload::PendingWinningsExpiry(
+            env.storage()
+                .persistent()
+                .get(&PENDING_WINNINGS_EXPIRY_KEY)
+                .unwrap_or(DEFAULT_PENDING_WINNINGS_EXPIRY),
         ConfigChangeKind::MinBet => {
             ConfigChangePayload::MinBet(env.storage().persistent().get(&DataKeyCore::MinBet))
         }
@@ -1256,6 +1297,18 @@ pub fn _apply_config_payload(
                 env.storage().persistent().remove(&key);
             }
         }
+        (
+            ConfigChangeKind::PendingWinningsExpiry,
+            ConfigChangePayload::PendingWinningsExpiry(ledgers),
+        ) => {
+            _validate_pending_winnings_expiry(*ledgers)?;
+            env.storage().persistent().set(&PENDING_WINNINGS_EXPIRY_KEY, ledgers);
+            _extend_persistent_ttl(env, &PENDING_WINNINGS_EXPIRY_KEY);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("pending"), symbol_short!("expiry")),
+                (*ledgers,),
+            );
         (ConfigChangeKind::MinBet, ConfigChangePayload::MinBet(min)) => {
             _validate_min_bet(*min)?;
             let key = DataKeyCore::MinBet;
