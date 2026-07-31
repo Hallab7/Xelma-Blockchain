@@ -104,10 +104,15 @@ pub enum ContractError {
     InvalidSalt = 64,
     /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Pending winnings entry exists but has not yet reached the configured
+    /// expiry threshold — caller must wait before reclaiming.
+    PendingWinningsNotExpired = 66,
     /// Epoch mint budget has been fully consumed
     EpochBudgetExceeded = 66,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
-    OracleNotLive = 66,
+    OracleNotLive = 67,
     /// Invalid precision payout policy
-    InvalidPayoutPolicy = 67,
+    InvalidPayoutPolicy = 68,
+    /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
+    BelowMinBet = 69,
 }

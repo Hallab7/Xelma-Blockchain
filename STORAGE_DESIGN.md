@@ -11,9 +11,11 @@ the whole map. The new design stores each user's record under a composite
 ## Key Layout
 
 | Key | Value | Purpose |
-|---|---|---|
+|---|---|---|---|
 | `Balance(Address)` | `i128` | per-user balance (unchanged) |
 | `PendingWinnings(Address)` | `i128` | per-user pending payout (unchanged) |
+| `PendingWinningsUpdatedAt(Address)` | `u32` | **NEW** — ledger seq of last modify for expiry |
+| `PendingWinningsExpiry` | `u32` | **NEW** — configurable expiry threshold (0 = off) |
 | `UserStats(Address)` | `UserStats` | per-user wins/losses (unchanged) |
 | `ActiveRound` | `Round` | currently active round metadata |
 | `LastRoundId` | `u64` | monotonic round counter |

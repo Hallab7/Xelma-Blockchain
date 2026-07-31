@@ -6,6 +6,7 @@ use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{DataKey, HbGateConfig, HbGateKey, OraclePayload};
 use crate::types::{DataKeyCore, DataKeyScoped, OraclePayload};
+use crate::types::{DataKeyCore, DataKeyScoped, HbGateConfig, HbGateKey, OraclePayload};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -40,7 +41,7 @@ fn test_resolve_round_stale_timestamp() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::StaleOracleData)));
@@ -72,7 +73,7 @@ fn test_resolve_round_invalid_round_id() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::InvalidOracleRound)));
@@ -105,7 +106,7 @@ fn test_resolve_round_valid_payload() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     client.resolve_round(&payload);
     assert_eq!(client.get_active_round(), None);
@@ -139,7 +140,7 @@ fn test_resolve_round_future_timestamp() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::FutureOracleData)));
@@ -2029,7 +2030,7 @@ fn test_cancelled_round_cannot_be_resolved() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::NoActiveRound)));
 }
 
@@ -2070,11 +2071,6 @@ fn test_cancel_round_without_admin_auth_fails() {
     assert!(result.is_err());
 }
 
-// ─── Oracle nonce replay protection (Issue #118) ─────────────────────────────
-
-/// A nonce already consumed for a round must be rejected on re-submission.
-/// We seed the consumed-nonce marker to simulate a prior submission, then
-/// assert the resolver rejects a payload reusing that nonce for the same round.
 #[test]
 fn test_resolve_round_duplicate_nonce_rejected() {
     let env = Env::default();
@@ -2098,7 +2094,7 @@ fn test_resolve_round_duplicate_nonce_rejected() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::ConsumedOracleNonce(round.round_id, 42u64), &true);
+            .set(&DataKeyScoped::ConsumedOracleNonce(round.round_id, 42u64), &true);
     });
 
     let result = client.try_resolve_round(&OraclePayload {
@@ -2109,11 +2105,10 @@ fn test_resolve_round_duplicate_nonce_rejected() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNonceReused)));
 }
 
-/// A fresh, unique nonce resolves normally and records the consumed marker.
 #[test]
 fn test_resolve_round_unique_nonce_resolves() {
     let env = Env::default();
@@ -2141,7 +2136,7 @@ fn test_resolve_round_unique_nonce_resolves() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Round resolved and the nonce is recorded as consumed for that round.
     assert_eq!(client.get_active_round(), None);
@@ -2149,13 +2144,11 @@ fn test_resolve_round_unique_nonce_resolves() {
         let consumed: bool = env
             .storage()
             .persistent()
-            .get(&DataKey::ConsumedOracleNonce(round.round_id, 7u64))
+            .get(&DataKeyScoped::ConsumedOracleNonce(round.round_id, 7u64))
             .unwrap_or(false);
         assert!(consumed, "resolved nonce must be marked consumed");
     });
 }
-
-// ─── Oracle heartbeat and liveness tests ─────────────────────────────────────
 
 #[test]
 fn test_oracle_heartbeat_requires_oracle_auth() {
@@ -2391,8 +2384,6 @@ fn test_set_oracle_stale_threshold_validation() {
     assert_eq!(client.get_oracle_stale_threshold(), 1800u64);
 }
 
-// ─── Oracle deviation guardrails tests ───────────────────────────────────────
-
 #[test]
 fn test_oracle_deviation_rejected_when_over_threshold() {
     let env = Env::default();
@@ -2424,7 +2415,7 @@ fn test_oracle_deviation_rejected_when_over_threshold() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleDeviationExceeded)));
 }
 
@@ -2459,7 +2450,7 @@ fn test_oracle_deviation_allows_at_exact_threshold() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -2494,7 +2485,7 @@ fn test_oracle_deviation_rounding_floor_is_deterministic() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -2528,7 +2519,7 @@ fn test_oracle_deviation_override_allows_over_threshold_and_emits_event() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Verify override event emitted (check before env.as_contract which resets event scope)
     let events = env.events().all();
@@ -2545,7 +2536,7 @@ fn test_oracle_deviation_override_allows_over_threshold_and_emits_event() {
         let armed: bool = env
             .storage()
             .persistent()
-            .get(&DataKey::OracleDeviationOverrideArmed)
+            .get(&DataKeyCore::OracleDeviationOverrideArmed)
             .unwrap_or(false);
         assert!(!armed, "override must be cleared after use");
     });
@@ -2583,7 +2574,6 @@ fn test_oracle_liveness_custom_threshold() {
     assert!(!client.is_oracle_live());
 }
 
-/// Boundary nonces (0 and u64::MAX) are rejected on reuse for the same round.
 #[test]
 fn test_resolve_round_nonce_boundary_values() {
     let env = Env::default();
@@ -2607,9 +2597,9 @@ fn test_resolve_round_nonce_boundary_values() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::ConsumedOracleNonce(round.round_id, 0u64), &true);
+            .set(&DataKeyScoped::ConsumedOracleNonce(round.round_id, 0u64), &true);
         env.storage().persistent().set(
-            &DataKey::ConsumedOracleNonce(round.round_id, u64::MAX),
+            &DataKeyScoped::ConsumedOracleNonce(round.round_id, u64::MAX),
             &true,
         );
     });
@@ -2622,7 +2612,7 @@ fn test_resolve_round_nonce_boundary_values() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(zero, Err(Ok(ContractError::OracleNonceReused)));
 
     let max = client.try_resolve_round(&OraclePayload {
@@ -2633,11 +2623,9 @@ fn test_resolve_round_nonce_boundary_values() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(max, Err(Ok(ContractError::OracleNonceReused)));
 }
-
-// ─── Oracle domain-context validation tests (Issue #143) ────────────────────
 
 #[test]
 fn test_resolve_round_wrong_network_id_rejected() {
@@ -2668,7 +2656,7 @@ fn test_resolve_round_wrong_network_id_rejected() {
         network_id: wrong_network,
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
 }
 
@@ -2701,7 +2689,7 @@ fn test_resolve_round_wrong_contract_addr_rejected() {
         network_id: env.ledger().network_id(),
         contract_addr: wrong_contract,
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
 }
 
@@ -2733,7 +2721,7 @@ fn test_resolve_round_valid_domain_context_resolves() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -2768,11 +2756,9 @@ fn test_resolve_round_both_network_and_contract_wrong() {
         network_id: wrong_network,
         contract_addr: wrong_contract,
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
 }
-
-// ─── Protocol health endpoint tests ──────────────────────────────────────────
 
 #[test]
 fn test_protocol_health_no_heartbeat_unknown_oracle() {
@@ -2953,7 +2939,6 @@ fn test_protocol_health_round_running_phase() {
     assert_eq!(health.active_round_phase, 2); // running
     assert_eq!(health.status_code, 0); // HEALTHY
 }
-// ── Oracle confidence score tests ────────────────────────────────────────────
 
 #[test]
 fn test_confidence_below_threshold_rejected() {
@@ -2981,7 +2966,7 @@ fn test_confidence_below_threshold_rejected() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: Some(5000u32),
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 }
 
@@ -3011,7 +2996,7 @@ fn test_confidence_above_threshold_accepted() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: Some(9000u32),
-    });
+        attestation: None,    });
 }
 
 #[test]
@@ -3042,7 +3027,7 @@ fn test_missing_confidence_accepted_when_not_strict() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 }
 
 #[test]
@@ -3072,28 +3057,8 @@ fn test_missing_confidence_rejected_in_strict_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
-}
-
-// ── Oracle heartbeat health gate tests (Issue #264) ──────────────────────────
-
-/// Helper: create a round with oracle heartbeat, advance to resolvable state.
-fn _setup_heartbeat_gate_test(
-    env: &Env,
-    client: &VirtualTokenContractClient,
-    heartbeat_timestamp: u64,
-    heartbeat_status: u32,
-) {
-    env.ledger().with_mut(|li| {
-        li.timestamp = heartbeat_timestamp;
-    });
-    client.update_oracle_heartbeat(&heartbeat_status);
-
-    env.ledger().with_mut(|li| {
-        li.sequence_number = 12; // past end_ledger
-        li.timestamp = heartbeat_timestamp + 100; // within threshold
-    });
 }
 
 #[test]
@@ -3130,7 +3095,7 @@ fn test_heartbeat_gate_strict_off_allows_settlement_even_when_stale() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -3168,7 +3133,7 @@ fn test_heartbeat_gate_strict_on_blocks_when_stale_past_grace() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -3206,7 +3171,7 @@ fn test_heartbeat_gate_strict_on_allows_when_live() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -3244,7 +3209,7 @@ fn test_heartbeat_gate_blocks_offline_status_in_strict_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -3276,7 +3241,7 @@ fn test_heartbeat_gate_blocks_no_heartbeat_in_strict_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -3310,7 +3275,7 @@ fn test_heartbeat_gate_override_bypasses_block_and_emits_event() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Verify override event emitted
     let events = env.events().all();
@@ -3371,7 +3336,7 @@ fn test_heartbeat_gate_override_is_one_shot() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Second round: no heartbeat, no override — should block
     env.ledger().with_mut(|li| {
@@ -3393,7 +3358,7 @@ fn test_heartbeat_gate_override_is_one_shot() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -3435,7 +3400,7 @@ fn test_heartbeat_gate_grace_period_allows_stale_within_grace() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -3475,7 +3440,7 @@ fn test_heartbeat_gate_grace_period_blocks_after_grace_expires() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -3514,7 +3479,7 @@ fn test_heartbeat_gate_degraded_status_allowed_when_current() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(client.get_active_round(), None);
 }
 
@@ -3552,7 +3517,7 @@ fn test_heartbeat_gate_degraded_stale_past_grace_blocked() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
 
@@ -3584,7 +3549,7 @@ fn test_heartbeat_gate_hblocked_event_emitted() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
 }
@@ -3701,5 +3666,6 @@ fn test_no_confidence_check_when_threshold_unset() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: Some(0u32),
-    });
+        attestation: None,    });
 }
+

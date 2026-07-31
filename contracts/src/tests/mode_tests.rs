@@ -468,7 +468,7 @@ fn test_predict_price_valid_scales() {
                 network_id: env.ledger().network_id(),
                 contract_addr: contract_id.clone(),
                 confidence: None,
-            });
+                attestation: None,            });
         }
 
         // Create new Precision round for each test case
@@ -641,7 +641,7 @@ fn test_all_events_for_updown_round() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let resolved_event = events.iter().find(|e| {
@@ -762,7 +762,7 @@ fn test_all_events_for_precision_round() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let resolved_event = events.iter().find(|e| {
