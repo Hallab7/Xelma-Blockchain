@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Type definitions for the XLM Price Prediction Market.
 
-use soroban_sdk::{contracttype, Address, BytesN, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, IntoVal, Symbol, Val, Vec};
 
 /// Round mode for prediction type
 #[contracttype]
@@ -51,6 +51,9 @@ pub enum RoundPhase {
 ///
 /// Legacy single-key maps (`UpDownPositions`, `PrecisionPositions`) are kept for
 /// backward-compatible reads during a migration window; they are no longer written.
+// NOTE: `#[contracttype]` is intentionally omitted. The enum has 50+ variants
+// which exceeds the Soroban SDK v23 derive macro's XDR length limit for
+// tagged enums. Instead we manually implement `IntoVal<Env, Val>` below.
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -165,6 +168,13 @@ pub enum DataKey {
     /// Frozen snapshot of a season's final rankings, written when the season
     /// is reset. Seasons are never deleted — this is a permanent archive.
     SeasonArchive(u32),
+    /// Admin-configured multi-feed oracle quorum parameters.
+    /// When set, `resolve_round_multi` is enabled.
+    OracleQuorum,
+    /// Announced next schema version for migration preview (v-next template).
+    /// When set, operators can inspect this value before executing a real migration.
+    /// Absent means no next migration has been announced.
+    NextSchemaVersion,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
@@ -187,8 +197,6 @@ pub enum ConfigChangeKind {
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
     EpochMintBudget = 12,
-    PrecisionPayoutPolicy = 13,
-    EarlyCashoutBps = 14,
 }
 
 /// Payload for a scheduled critical config change.
@@ -208,8 +216,6 @@ pub enum ConfigChangePayload {
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
     EpochMintBudget(i128),
-    PrecisionPayoutPolicy(u32),
-    EarlyCashoutBps(Option<u32>),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.
@@ -551,12 +557,96 @@ pub struct SimulationResult {
     pub outcomes: Vec<UserRoundOutcome>,
 }
 
+/// Multi-feed oracle resolution payload (N observations, quorum + median).
+///
+/// Unlike the legacy single-oracle `OraclePayload`, this carries N independent
+/// feed observations as parallel arrays. The contract computes the median,
+/// rejects outliers, and requires a configurable quorum of feeds to agree
+/// within the outlier threshold before settlement proceeds.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MultiFeedPayload {
+    /// Prices from each feed, scaled to 4 decimal places (e.g. 2297 = $0.2297).
+    /// Length must match `sources` and be at least `min_observations`.
+    pub prices: Vec<u128>,
+    /// Feed source identifiers (0-based index, max N-1). Must be unique.
+    /// Length must match `prices`.
+    pub sources: Vec<u32>,
+    /// Round identifier that must match `Round.start_ledger`
+    pub round_id: u32,
+    /// Per-round replay-protection nonce.
+    pub nonce: u64,
+    /// SHA-256 hash of the network passphrase this payload targets.
+    pub network_id: BytesN<32>,
+    /// Contract address this payload is intended for.
+    pub contract_addr: Address,
+    /// Unix epoch seconds when the observations were collected.
+    pub timestamp: u64,
+}
+
+/// Admin-configurable quorum and outlier rejection parameters for multi-feed
+/// oracle settlement. Stored under `DataKey::OracleQuorum`.
+///
+/// When set, `resolve_round_multi` becomes the preferred settlement path.
+/// The legacy single-oracle `resolve_round` path remains available
+/// independently of this configuration.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OracleQuorumConfig {
+    /// Minimum number of unique feed observations required in a multi-feed payload.
+    pub min_observations: u32,
+    /// Minimum number of observations that must survive outlier rejection to
+    /// form a valid quorum and proceed to settlement.
+    pub quorum_threshold: u32,
+    /// Maximum deviation from the median (in basis points, 1 bp = 0.01%)
+    /// before an observation is rejected as an outlier.
+    pub outlier_threshold_bps: u32,
+}
+
 /// Admin-configured blueprint for `create_next_from_template`.
 ///
 /// Mirrors the arguments accepted by `create_round` (`start_price`, `mode`)
 /// so a keeper can spin up the next round after a settle/cancel without an
 /// operator re-specifying parameters each time. Validated with the exact
 /// same rules `create_round` applies at creation time.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoundTemplate {
+    pub start_price: u128,
+    pub mode: Option<u32>,
+}
+
+/// A single entry in the lifetime (all-time) leaderboard.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeaderboardEntry {
+    pub user: Address,
+    pub stats: UserStats,
+}
+
+/// A single entry in a season-scoped leaderboard, live or archived.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeasonLeaderboardEntry {
+    pub user: Address,
+    pub wins: u32,
+    pub best_streak: u32,
+}
+
+/// Frozen snapshot of a season's final bounded rankings, written by
+/// `reset_leaderboard_season`. `participant_count` is the number of distinct
+/// addresses that appeared in either bounded index at reset time (a lower
+/// bound on total season participants beyond the tracked top
+/// `LEADERBOARD_LIMIT`, mirroring the same bound the live indexes enforce).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeasonArchive {
+    pub season_id: u32,
+    pub ended_at_ledger: u32,
+    pub wins: Vec<SeasonLeaderboardEhttps://github.com/TevaLabs/Xelma-Blockchain/pull/333/conflict?name=contracts%252Fsrc%252Ftypes.rs&ancestor_oid=735f63923173255593195f7c70d57cb774f345ed&base_oid=f0df6a8fb8daaf719df411d26dec8789f47d8c30&head_oid=e732bc0716e9c173509d608e6e526f796481a2e8ntry>,
+    pub streak: Vec<SeasonLeaderboardEntry>,
+    pub participant_count: u32,
+}
 // SPDX-License-Identifier: MIT
 //! Type definitions for the XLM Price Prediction Market.
 
@@ -730,6 +820,110 @@ pub enum DataKeyScoped {
     SeasonArchive(u32),
 }
 
+impl IntoVal<Env, Val> for DataKey {
+    fn into_val(&self, env: &Env) -> Val {
+        use Symbol as S;
+        match self {
+            DataKey::Balance(a) => (S::new(env, "Balance"), a.clone()).into_val(env),
+            DataKey::Admin => S::new(env, "Admin").into_val(env),
+            DataKey::Oracle => S::new(env, "Oracle").into_val(env),
+            DataKey::SchemaVersion => S::new(env, "SchemaVersion").into_val(env),
+            DataKey::ActiveRound => S::new(env, "ActiveRound").into_val(env),
+            DataKey::Positions => S::new(env, "Positions").into_val(env),
+            DataKey::UpDownPositions => S::new(env, "UpDownPositions").into_val(env),
+            DataKey::PrecisionPositions => S::new(env, "PrecisionPositions").into_val(env),
+            DataKey::PendingWinnings(a) => {
+                (S::new(env, "PendingWinnings"), a.clone()).into_val(env)
+            }
+            DataKey::UserStats(a) => (S::new(env, "UserStats"), a.clone()).into_val(env),
+            DataKey::Paused => S::new(env, "Paused").into_val(env),
+            DataKey::BetWindowLedgers => S::new(env, "BetWindowLedgers").into_val(env),
+            DataKey::RunWindowLedgers => S::new(env, "RunWindowLedgers").into_val(env),
+            DataKey::CloseBufferLedgers => S::new(env, "CloseBufferLedgers").into_val(env),
+            DataKey::LastRoundId => S::new(env, "LastRoundId").into_val(env),
+            DataKey::Position(id, a) => {
+                (S::new(env, "Position"), id, a.clone()).into_val(env)
+            }
+            DataKey::PrecisionPosition(id, a) => {
+                (S::new(env, "PrecisionPosition"), id, a.clone()).into_val(env)
+            }
+            DataKey::PrecisionCommitment(id, a) => {
+                (S::new(env, "PrecisionCommitment"), id, a.clone()).into_val(env)
+            }
+            DataKey::RoundParticipants(id) => {
+                (S::new(env, "RoundParticipants"), id).into_val(env)
+            }
+            DataKey::MaxStake => S::new(env, "MaxStake").into_val(env),
+            DataKey::MaxUserRoundExposure => S::new(env, "MaxUserRoundExposure").into_val(env),
+            DataKey::MaxPendingWinnings => S::new(env, "MaxPendingWinnings").into_val(env),
+            DataKey::CancelledRound(id) => (S::new(env, "CancelledRound"), id).into_val(env),
+            DataKey::ConsumedOracleNonce(id, nonce) => {
+                (S::new(env, "ConsumedOracleNonce"), id, nonce).into_val(env)
+            }
+            DataKey::MinParticipants => S::new(env, "MinParticipants").into_val(env),
+            DataKey::OracleHeartbeat => S::new(env, "OracleHeartbeat").into_val(env),
+            DataKey::OracleStaleThreshold => S::new(env, "OracleStaleThreshold").into_val(env),
+            DataKey::MaxPrecisionParticipants => {
+                S::new(env, "MaxPrecisionParticipants").into_val(env)
+            }
+            DataKey::OracleMaxDeviationBps => S::new(env, "OracleMaxDeviationBps").into_val(env),
+            DataKey::OracleDeviationOverrideArmed => {
+                S::new(env, "OracleDeviationOverrideArmed").into_val(env)
+            }
+            DataKey::OracleMinConfidenceBps => {
+                S::new(env, "OracleMinConfidenceBps").into_val(env)
+            }
+            DataKey::OracleStrictMode => S::new(env, "OracleStrictMode").into_val(env),
+            DataKey::ArchivedRound(id) => (S::new(env, "ArchivedRound"), id).into_val(env),
+            DataKey::RecentArchivedRoundIds => {
+                S::new(env, "RecentArchivedRoundIds").into_val(env)
+            }
+            DataKey::UserRoundOutcome(id, a) => {
+                (S::new(env, "UserRoundOutcome"), id, a.clone()).into_val(env)
+            }
+            DataKey::MigratedToV3 => S::new(env, "MigratedToV3").into_val(env),
+            DataKey::PendingConfigChange(k) => {
+                (S::new(env, "PendingConfigChange"), k.clone()).into_val(env)
+            }
+            DataKey::ProtocolFeeBps => S::new(env, "ProtocolFeeBps").into_val(env),
+            DataKey::ProtocolFeeTreasury => S::new(env, "ProtocolFeeTreasury").into_val(env),
+            DataKey::LedgerMintCounter(id) => {
+                (S::new(env, "LedgerMintCounter"), id).into_val(env)
+            }
+            DataKey::MintLimitConfig => S::new(env, "MintLimitConfig").into_val(env),
+            DataKey::OracleRotationProposal => S::new(env, "OracleRotationProposal").into_val(env),
+            DataKey::ArchiveRetention => S::new(env, "ArchiveRetention").into_val(env),
+            DataKey::RoundTemplate => S::new(env, "RoundTemplate").into_val(env),
+            DataKey::LeaderboardWins => S::new(env, "LeaderboardWins").into_val(env),
+            DataKey::LeaderboardStreak => S::new(env, "LeaderboardStreak").into_val(env),
+            DataKey::SeasonId => S::new(env, "SeasonId").into_val(env),
+            DataKey::SeasonUserStats(sid, a) => {
+                (S::new(env, "SeasonUserStats"), sid, a.clone()).into_val(env)
+            }
+            DataKey::SeasonLeaderboardWins => S::new(env, "SeasonLeaderboardWins").into_val(env),
+            DataKey::SeasonLeaderboardStreak => {
+                S::new(env, "SeasonLeaderboardStreak").into_val(env)
+            }
+            DataKey::SeasonArchive(id) => (S::new(env, "SeasonArchive"), id).into_val(env),
+        }
+    }
+}
+
+/// Configurable pending-winnings expiry in ledgers.
+/// When set and non-zero, unclaimed winnings older than this many ledgers
+/// may be administratively reclaimed via `reclaim_expired_pending_winnings`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PendingWinningsExpiryKey(pub ());
+
+pub const PENDING_WINNINGS_EXPIRY_KEY: PendingWinningsExpiryKey = PendingWinningsExpiryKey(());
+
+/// Ledger sequence when a user's pending winnings entry was last modified.
+/// Written by `_accumulate_pending`, cleared by `claim_winnings`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PendingWinningsUpdatedAtKey(pub Address);
+
 /// Identifies which critical risk setting is pending timelocked activation.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -749,9 +943,8 @@ pub enum ConfigChangeKind {
     MintLimit = 9,
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
-    EpochMintBudget = 12,
-    PrecisionPayoutPolicy = 13,
-    EarlyCashoutBps = 14,
+    PendingWinningsExpiry = 12,
+    PrecisionPayoutPolicy = 12,
 }
 
 /// Payload for a scheduled critical config change.
@@ -770,9 +963,8 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
-    EpochMintBudget(i128),
+    PendingWinningsExpiry(u32),
     PrecisionPayoutPolicy(u32),
-    EarlyCashoutBps(Option<u32>),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.
@@ -1103,7 +1295,7 @@ pub enum UserOutcomeType {
     Win = 0,
     Loss = 1,
     Refund = 2,
-    Cancel = 3,
+    Void = 3,
 }
 
 #[contracttype]

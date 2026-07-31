@@ -383,7 +383,7 @@ fn test_event_coverage_resolve_round() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let last_event = events.last().unwrap();
@@ -447,7 +447,7 @@ fn test_event_coverage_claim_winnings() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     client.claim_winnings(&user);
 
@@ -561,7 +561,7 @@ fn test_action_rejected_resolve_round_oracle_nonce_reused() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let round = client.get_active_round().unwrap();
 
@@ -603,7 +603,7 @@ fn test_action_rejected_resolve_round_invalid_round_id() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::InvalidOracleRound)));
@@ -743,7 +743,7 @@ fn test_action_rejected_resolve_round_future_timestamp() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::FutureOracleData)));
@@ -772,7 +772,7 @@ fn test_action_rejected_resolve_round_stale_data() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::StaleOracleData)));
@@ -800,7 +800,7 @@ fn test_action_rejected_resolve_round_wrong_network() {
         network_id: BytesN::from_array(&env, &[1; 32]), // wrong network
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::OracleNetworkMismatch)));
@@ -830,7 +830,7 @@ fn test_action_rejected_resolve_round_not_ended() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    };
+        attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::RoundNotEnded)));
@@ -863,7 +863,7 @@ fn test_event_coverage_round_summary() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let summary_event = events
@@ -916,7 +916,7 @@ fn test_event_coverage_round_summary() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let summary_event = events

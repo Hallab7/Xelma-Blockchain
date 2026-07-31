@@ -147,6 +147,12 @@ fn differential_invariant_harness() {
                         round_id: active.round_id,
                         price,
                         timestamp: env.ledger().timestamp(),
+                        round_id: 0,
+                        nonce: 1u64,
+                        network_id: env.ledger().network_id(),
+                        contract_addr: contract_id.clone(),
+                        confidence: None,
+                        attestation: None,
                     });
                     if res.is_ok() {
                         model.resolve_round(*price_up);

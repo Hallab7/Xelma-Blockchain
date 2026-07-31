@@ -4,17 +4,19 @@ use crate::common::{
     _emit_action_rejected, _emit_config_updated, _extend_persistent_ttl, _set_balance, balance,
     payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS, DEFAULT_ARCHIVE_RETENTION,
     DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
-    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION,
-    MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
-    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PRECISION_PARTICIPANTS_LIMIT,
-    MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_ARCHIVE_RETENTION,
-    MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD, MIN_START_PRICE,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_PENDING_WINNINGS_EXPIRY, DEFAULT_RUN_WINDOW_LEDGERS,
+    MAX_ARCHIVE_RETENTION, MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
+    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PENDING_WINNINGS_EXPIRY,
+    MAX_PRECISION_PARTICIPANTS_LIMIT, MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS,
+    MAX_START_PRICE, MIN_ARCHIVE_RETENTION, MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD,
+    MIN_PENDING_WINNINGS_EXPIRY, MIN_START_PRICE,
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingConfigChange, RoundTemplate,
-    ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, PrecisionPayoutPolicy,
-    RoundTemplate,
+    ConfigChangeKind, ConfigChangePayload, DataKey, PendingConfigChange, RoundTemplate,
+    PENDING_WINNINGS_EXPIRY_KEY,
+    ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingConfigChange,
+    PrecisionPayoutPolicy, RoundTemplate,
 };
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
@@ -28,6 +30,29 @@ pub fn set_max_stake(env: Env, max_amount: Option<i128>) -> Result<(), ContractE
 
 pub fn get_max_stake(env: Env) -> Option<i128> {
     let key = DataKeyCore::MaxStake;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
+/// Schedules a timelocked minimum-bet (dust protection) update (Issue #269).
+pub fn set_min_bet(env: Env, min_amount: Option<i128>) -> Result<(), ContractError> {
+    schedule_min_bet(env, min_amount)
+}
+
+pub fn schedule_min_bet(env: Env, min_amount: Option<i128>) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _validate_min_bet(min_amount)?;
+    _schedule_config_change(
+        &env,
+        ConfigChangeKind::MinBet,
+        ConfigChangePayload::MinBet(min_amount),
+    )
+}
+
+/// Returns the configured minimum bet, if enabled. `None` disables the check
+/// entirely, preserving pre-#269 behaviour (any positive amount accepted).
+pub fn get_min_bet(env: Env) -> Option<i128> {
+    let key = DataKeyCore::MinBet;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -136,6 +161,43 @@ pub fn get_protocol_fee_treasury(env: Env) -> i128 {
     let key = DataKeyCore::ProtocolFeeTreasury;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+// ─── Fee incidence model (Issue #268) ────────────────────────────────────────
+
+/// Sets the fee incidence model directly (admin only, no timelock).
+///
+/// The model determines whether the protocol fee is calculated on the total pot
+/// (`FeeOnPot`, default) or only on net winnings / profit (`FeeOnWinnings`).
+pub fn set_fee_model(env: Env, model: FeeModel) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("fee_mod"), e);
+    })?;
+
+    let key = DataKey::FeeModel;
+    let old_model = _read_fee_model(&env);
+    env.storage().persistent().set(&key, &model);
+    _extend_persistent_ttl(&env, &key);
+
+    _emit_config_updated(
+        &env,
+        ConfigChangeKind::FeeModel,
+        ConfigChangePayload::FeeModel(old_model),
+        ConfigChangePayload::FeeModel(model),
+    );
+    Ok(())
+}
+
+/// Returns the configured fee incidence model, defaulting to `FeeOnPot`.
+pub fn get_fee_model(env: Env) -> FeeModel {
+    _read_fee_model(&env)
 }
 
 pub fn withdraw_protocol_fee(
@@ -399,7 +461,7 @@ pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), Contract
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -416,7 +478,7 @@ pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), Contract
         return Err(ContractError::InvalidPayoutPolicy);
     }
 
-    let key = DataKey::PrecisionPayoutPolicy;
+    let key = DataKeyCore::PrecisionPayoutPolicy;
     let old_policy: u32 = env.storage().persistent().get(&key).unwrap_or(0); // Default to 0 = Equal
     env.storage().persistent().set(&key, &policy);
     _extend_persistent_ttl(&env, &key);
@@ -430,13 +492,13 @@ pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), Contract
 }
 
 pub fn get_precision_payout_policy(env: Env) -> u32 {
-    let key = DataKey::PrecisionPayoutPolicy;
+    let key = DataKeyCore::PrecisionPayoutPolicy;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key).unwrap_or(0) // Default to 0 = Equal
 }
 
 pub fn _read_precision_payout_policy(env: &Env) -> PrecisionPayoutPolicy {
-    let key = DataKey::PrecisionPayoutPolicy;
+    let key = DataKeyCore::PrecisionPayoutPolicy;
     _extend_persistent_ttl(env, &key);
     let policy_val: u32 = env.storage().persistent().get(&key).unwrap_or(0);
     if policy_val == 1 {
@@ -487,7 +549,7 @@ pub fn set_epoch_mint_budget(env: Env, budget: i128) -> Result<(), ContractError
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -673,7 +735,7 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
@@ -692,8 +754,7 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
         }
     }
 
-    let key = DataKey::EarlyCashoutBps;
-    let old_bps: Option<u32> = env.storage().persistent().get(&key);
+    let key = DataKeyCore::EarlyCashoutBps;
     if let Some(v) = bps {
         env.storage().persistent().set(&key, &v);
         _extend_persistent_ttl(&env, &key);
@@ -717,7 +778,7 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
 
 /// Returns the configured early cash-out penalty bps, if enabled.
 pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
-    let key = DataKey::EarlyCashoutBps;
+    let key = DataKeyCore::EarlyCashoutBps;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -725,6 +786,39 @@ pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
 /// Same validation `create_round` performs on `(start_price, mode)`, applied
 /// up front at template-set time so a stored template can never later fail
 /// `create_round`'s own checks for a reason unrelated to round overlap.
+pub fn schedule_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _validate_pending_winnings_expiry(ledgers)?;
+    _schedule_config_change(
+        &env,
+        ConfigChangeKind::PendingWinningsExpiry,
+        ConfigChangePayload::PendingWinningsExpiry(ledgers),
+    )
+}
+
+pub fn set_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+    schedule_pending_winnings_expiry(env, ledgers)
+}
+
+pub fn get_pending_winnings_expiry(env: Env) -> u32 {
+    _extend_persistent_ttl(&env, &PENDING_WINNINGS_EXPIRY_KEY);
+    env.storage()
+        .persistent()
+        .get(&PENDING_WINNINGS_EXPIRY_KEY)
+        .unwrap_or(DEFAULT_PENDING_WINNINGS_EXPIRY)
+}
+
+pub fn _validate_pending_winnings_expiry(ledgers: u32) -> Result<(), ContractError> {
+    if ledgers != 0 && (ledgers < MIN_PENDING_WINNINGS_EXPIRY || ledgers > MAX_PENDING_WINNINGS_EXPIRY) {
+        return Err(ContractError::InvalidDuration);
+    }
+    Ok(())
+}
+
+pub fn _validate_round_template(
+    start_price: u128,
+    mode: Option<u32>,
+) -> Result<(), ContractError> {
 pub fn _validate_round_template(start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
     if start_price < MIN_START_PRICE || start_price > MAX_START_PRICE {
         return Err(ContractError::InvalidStartPrice);
@@ -768,6 +862,15 @@ pub fn _validate_max_stake(max_amount: Option<i128>) -> Result<(), ContractError
     Ok(())
 }
 
+pub fn _validate_min_bet(min_amount: Option<i128>) -> Result<(), ContractError> {
+    if let Some(v) = min_amount {
+        if v < MIN_CAP_VALUE {
+            return Err(ContractError::InvalidBetAmount);
+        }
+    }
+    Ok(())
+}
+
 pub fn _validate_oracle_stale_threshold(seconds: u64) -> Result<(), ContractError> {
     if !(MIN_ORACLE_STALE_THRESHOLD..=MAX_ORACLE_STALE_THRESHOLD).contains(&seconds) {
         return Err(ContractError::InvalidDuration);
@@ -793,6 +896,18 @@ pub fn _validate_protocol_fee_bps(bps: Option<u32>) -> Result<(), ContractError>
     Ok(())
 }
 
+/// Default fee incidence model: fee-on-pot for backward compatibility.
+pub const DEFAULT_FEE_MODEL: FeeModel = FeeModel::FeeOnPot;
+
+pub fn _read_fee_model(env: &Env) -> FeeModel {
+    let key = DataKey::FeeModel;
+    let v: Option<FeeModel> = env.storage().persistent().get(&key);
+    if v.is_some() {
+        _extend_persistent_ttl(env, &key);
+    }
+    v.unwrap_or(DEFAULT_FEE_MODEL)
+}
+
 pub fn _read_protocol_fee_bps(env: &Env) -> Option<u32> {
     let key = DataKeyCore::ProtocolFeeBps;
     let v: Option<u32> = env.storage().persistent().get(&key);
@@ -807,6 +922,7 @@ pub fn _collect_protocol_fee(
     round_id: u64,
     fee_amount: i128,
     bps_active: Option<u32>,
+    model: FeeModel,
 ) -> Result<(), ContractError> {
     if fee_amount <= 0 {
         return Ok(());
@@ -820,11 +936,12 @@ pub fn _collect_protocol_fee(
     _extend_persistent_ttl(env, &treasury_key);
 
     let bps_value: u32 = bps_active.unwrap_or(0);
+    let model_value: u32 = model as u32;
 
     #[allow(deprecated)]
     env.events().publish(
         (symbol_short!("protocol"), symbol_short!("fee_coll")),
-        (round_id, fee_amount, new_treasury, bps_value),
+        (round_id, fee_amount, new_treasury, bps_value, model_value),
     );
 
     Ok(())
@@ -832,6 +949,7 @@ pub fn _collect_protocol_fee(
 
 pub fn calculate_protocol_fee_updown(
     bps: Option<u32>,
+    model: FeeModel,
     winning_pool: i128,
     losing_pool: i128,
 ) -> Result<(i128, i128, i128), ContractError> {
@@ -839,25 +957,53 @@ pub fn calculate_protocol_fee_updown(
         return Ok((winning_pool, losing_pool, 0));
     }
     let bps_value = bps.unwrap();
-    let total_pot = payout_add(winning_pool, losing_pool)?;
-    let fee_amount = total_pot
-        .checked_mul(bps_value as i128)
-        .ok_or(ContractError::Overflow)?
-        / BPS_DENOMINATOR;
+
+    let fee_amount = match model {
+        FeeModel::FeeOnPot => {
+            let total_pot = payout_add(winning_pool, losing_pool)?;
+            total_pot
+                .checked_mul(bps_value as i128)
+                .ok_or(ContractError::Overflow)?
+                / BPS_DENOMINATOR
+        }
+        FeeModel::FeeOnWinnings => {
+            // Fee only on the profit (losing_pool); winners retain their principal.
+            // Since bps ≤ 1000 (10%), fee can never exceed losing_pool.
+            losing_pool
+                .checked_mul(bps_value as i128)
+                .ok_or(ContractError::Overflow)?
+                / BPS_DENOMINATOR
+        }
+    };
+
     if fee_amount == 0 {
         return Ok((winning_pool, losing_pool, 0));
     }
-    let fee_from_losing = fee_amount.min(losing_pool);
-    let fee_from_winning = fee_amount
-        .checked_sub(fee_from_losing)
-        .ok_or(ContractError::Overflow)?;
-    let dist_winning = winning_pool
-        .checked_sub(fee_from_winning)
-        .ok_or(ContractError::Overflow)?;
-    let dist_losing = losing_pool
-        .checked_sub(fee_from_losing)
-        .ok_or(ContractError::Overflow)?;
-    Ok((dist_winning, dist_losing, fee_amount))
+
+    match model {
+        FeeModel::FeeOnPot => {
+            // Fee is split across both pools: losing pool first, then winning pool (spillover).
+            let fee_from_losing = fee_amount.min(losing_pool);
+            let fee_from_winning = fee_amount
+                .checked_sub(fee_from_losing)
+                .ok_or(ContractError::Overflow)?;
+            let dist_winning = winning_pool
+                .checked_sub(fee_from_winning)
+                .ok_or(ContractError::Overflow)?;
+            let dist_losing = losing_pool
+                .checked_sub(fee_from_losing)
+                .ok_or(ContractError::Overflow)?;
+            Ok((dist_winning, dist_losing, fee_amount))
+        }
+        FeeModel::FeeOnWinnings => {
+            // Fee is deducted entirely from the losing pool (the profit).
+            // Winners always get their full principal back.
+            let dist_losing = losing_pool
+                .checked_sub(fee_amount)
+                .ok_or(ContractError::Overflow)?;
+            Ok((winning_pool, dist_losing, fee_amount))
+        }
+    }
 }
 
 pub fn _apply_protocol_fee_updown(
@@ -867,26 +1013,47 @@ pub fn _apply_protocol_fee_updown(
     losing_pool: i128,
 ) -> Result<(i128, i128, i128), ContractError> {
     let bps = _read_protocol_fee_bps(env);
+    let model = _read_fee_model(env);
     let (dist_winning, dist_losing, fee_amount) =
-        calculate_protocol_fee_updown(bps, winning_pool, losing_pool)?;
+        calculate_protocol_fee_updown(bps, model, winning_pool, losing_pool)?;
     if fee_amount > 0 {
-        _collect_protocol_fee(env, round_id, fee_amount, bps)?;
+        _collect_protocol_fee(env, round_id, fee_amount, bps, model)?;
     }
     Ok((dist_winning, dist_losing, fee_amount))
 }
 
 pub fn calculate_protocol_fee_precision(
     bps: Option<u32>,
+    model: FeeModel,
     total_pot: i128,
+    winner_stakes: i128,
 ) -> Result<(i128, i128), ContractError> {
     if bps.is_none() || total_pot <= 0 {
         return Ok((total_pot, 0));
     }
     let bps_value = bps.unwrap();
-    let fee_amount = total_pot
+
+    let taxable_base = match model {
+        FeeModel::FeeOnPot => total_pot,
+        FeeModel::FeeOnWinnings => {
+            // Fee only on profits = total_pot minus winners' own stakes.
+            let profit = total_pot
+                .checked_sub(winner_stakes)
+                .ok_or(ContractError::Overflow)?;
+            if profit <= 0 {
+                return Ok((total_pot, 0));
+            }
+            profit
+        }
+    };
+
+    let fee_amount = taxable_base
         .checked_mul(bps_value as i128)
         .ok_or(ContractError::Overflow)?
         / BPS_DENOMINATOR;
+    if fee_amount == 0 {
+        return Ok((total_pot, 0));
+    }
     let distributable = total_pot
         .checked_sub(fee_amount)
         .ok_or(ContractError::Overflow)?;
@@ -897,11 +1064,14 @@ pub fn _apply_protocol_fee_precision(
     env: &Env,
     round_id: u64,
     total_pot: i128,
+    winner_stakes: i128,
 ) -> Result<(i128, i128), ContractError> {
     let bps = _read_protocol_fee_bps(env);
-    let (distributable, fee_amount) = calculate_protocol_fee_precision(bps, total_pot)?;
+    let model = _read_fee_model(env);
+    let (distributable, fee_amount) =
+        calculate_protocol_fee_precision(bps, model, total_pot, winner_stakes)?;
     if fee_amount > 0 {
-        _collect_protocol_fee(env, round_id, fee_amount, bps)?;
+        _collect_protocol_fee(env, round_id, fee_amount, bps, model)?;
     }
     Ok((distributable, fee_amount))
 }
@@ -975,6 +1145,14 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKeyCore::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
         ),
+        ConfigChangeKind::PendingWinningsExpiry => ConfigChangePayload::PendingWinningsExpiry(
+            env.storage()
+                .persistent()
+                .get(&PENDING_WINNINGS_EXPIRY_KEY)
+                .unwrap_or(DEFAULT_PENDING_WINNINGS_EXPIRY),
+        ConfigChangeKind::MinBet => {
+            ConfigChangePayload::MinBet(env.storage().persistent().get(&DataKeyCore::MinBet))
+        }
         ConfigChangeKind::EpochMintBudget => ConfigChangePayload::EpochMintBudget(
             env.storage()
                 .instance()
@@ -984,7 +1162,7 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
         ConfigChangeKind::PrecisionPayoutPolicy => ConfigChangePayload::PrecisionPayoutPolicy(
             env.storage()
                 .persistent()
-                .get(&DataKey::PrecisionPayoutPolicy)
+                .get(&DataKeyCore::PrecisionPayoutPolicy)
                 .unwrap_or(0),
         ),
         ConfigChangeKind::EarlyCashoutBps => ConfigChangePayload::EarlyCashoutBps(
@@ -1125,6 +1303,28 @@ pub fn _apply_config_payload(
                 env.storage().persistent().remove(&key);
             }
         }
+        (
+            ConfigChangeKind::PendingWinningsExpiry,
+            ConfigChangePayload::PendingWinningsExpiry(ledgers),
+        ) => {
+            _validate_pending_winnings_expiry(*ledgers)?;
+            env.storage().persistent().set(&PENDING_WINNINGS_EXPIRY_KEY, ledgers);
+            _extend_persistent_ttl(env, &PENDING_WINNINGS_EXPIRY_KEY);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("pending"), symbol_short!("expiry")),
+                (*ledgers,),
+            );
+        (ConfigChangeKind::MinBet, ConfigChangePayload::MinBet(min)) => {
+            _validate_min_bet(*min)?;
+            let key = DataKeyCore::MinBet;
+            if let Some(v) = min {
+                env.storage().persistent().set(&key, v);
+                _extend_persistent_ttl(env, &key);
+            } else {
+                env.storage().persistent().remove(&key);
+            }
+        }
         (ConfigChangeKind::ProtocolFeeBps, ConfigChangePayload::ProtocolFeeBps(bps)) => {
             _validate_protocol_fee_bps(*bps)?;
             let key = DataKeyCore::ProtocolFeeBps;
@@ -1147,7 +1347,7 @@ pub fn _apply_config_payload(
             if *policy > 1 {
                 return Err(ContractError::InvalidPayoutPolicy);
             }
-            let key = DataKey::PrecisionPayoutPolicy;
+            let key = DataKeyCore::PrecisionPayoutPolicy;
             env.storage().persistent().set(&key, policy);
             _extend_persistent_ttl(env, &key);
         }
