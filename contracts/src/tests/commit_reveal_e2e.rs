@@ -241,7 +241,7 @@ fn test_commit_reveal_e2e_full_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_active_round(), None);
 
@@ -537,7 +537,7 @@ fn test_commit_reveal_e2e_reveal_without_commit_returns_not_found() {
 /// has committed, they cannot bypass the hash by calling
 /// `place_precision_prediction` (and vice-versa). This enforces the
 /// contract invariant that the indexed position keys
-/// `DataKey::PrecisionPosition` / `DataKey::PrecisionCommitment` cannot both be
+/// `DataKeyScoped::PrecisionPosition` / `DataKeyScoped::PrecisionCommitment` cannot both be
 /// populated for the same `(round_id, user)`.
 #[test]
 fn test_commit_reveal_e2e_commit_then_direct_prediction_is_rejected() {
@@ -630,7 +630,7 @@ fn test_commit_reveal_e2e_two_way_tie_splits_pot_evenly() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let total_pot = bet_a + bet_b;
     let payout_a = client.get_pending_winnings(&user_a);
@@ -760,7 +760,7 @@ fn test_commit_reveal_e2e_all_unrevealed_refunds_conservatively() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_pending_winnings(&alice), ALICE_BET);
     assert_eq!(client.get_pending_winnings(&bob), BOB_BET);
@@ -821,7 +821,7 @@ fn test_commit_reveal_e2e_mixed_reveal_forfeits_unrevealed_to_pot() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let total_pot = ALICE_BET + BOB_BET;
     assert_eq!(client.get_pending_winnings(&alice), total_pot);

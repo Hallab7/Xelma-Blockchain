@@ -44,7 +44,7 @@ fn test_simulate_updown() {
     let mut p1_outcome = sim_up.outcomes.get(0).unwrap();
     let mut p2_outcome = sim_up.outcomes.get(1).unwrap();
     if p1_outcome.user == p2 {
-        std::mem::swap(&mut p1_outcome, &mut p2_outcome);
+        core::mem::swap(&mut p1_outcome, &mut p2_outcome);
     }
 
     assert_eq!(p1_outcome.outcome, UserOutcomeType::Win);

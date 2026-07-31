@@ -2,7 +2,7 @@
 //! Tests for boundary conditions and unusual scenarios.
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
-use crate::types::{BetSide, DataKey, OraclePayload, Round, UserPosition};
+use crate::types::{BetSide, DataKeyCore, DataKeyScoped, OraclePayload, Round, UserPosition};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -42,7 +42,7 @@ fn test_round_with_no_participants() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Should clear round without errors
     assert_eq!(client.get_active_round(), None);
@@ -87,7 +87,7 @@ fn test_round_with_only_one_side() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Winners should only get their bets back (no losing pool to split)
     assert_eq!(client.get_pending_winnings(&alice), 100_0000000);
@@ -124,18 +124,18 @@ fn test_accumulate_pending_winnings() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     // Advance ledger to allow resolution
@@ -151,7 +151,7 @@ fn test_accumulate_pending_winnings() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let first_pending = client.get_pending_winnings(&alice);
     assert!(first_pending > 0);
@@ -173,7 +173,7 @@ fn test_accumulate_pending_winnings() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Should have accumulated pending from both rounds
     let total_pending = client.get_pending_winnings(&alice);
@@ -205,10 +205,10 @@ fn test_claim_winnings_checked_overflow() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(alice.clone()), &i128::MAX);
+            .set(&DataKeyScoped::Balance(alice.clone()), &i128::MAX);
         env.storage()
             .persistent()
-            .set(&DataKey::PendingWinnings(alice.clone()), &1_i128);
+            .set(&DataKeyScoped::PendingWinnings(alice.clone()), &1_i128);
     });
 
     // claim_winnings should fail with Overflow because balance + pending > i128::MAX
@@ -242,7 +242,7 @@ fn test_stats_checked_overflow() {
         };
         env.storage()
             .persistent()
-            .set(&DataKey::UserStats(alice.clone()), &stats);
+            .set(&DataKeyScoped::UserStats(alice.clone()), &stats);
     });
 
     // Create a round, bet, and resolve so _update_stats_win is triggered
@@ -267,7 +267,7 @@ fn test_stats_checked_overflow() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert!(result.is_err());
 }
 
@@ -307,7 +307,7 @@ fn test_one_sided_pool_emits_event_and_refunds() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Capture events immediately — each subsequent contract call resets the log.
     let events = env.events().all();
@@ -358,7 +358,7 @@ fn test_one_sided_pool_down_side_emits_event_and_refunds() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Capture events before subsequent contract calls reset the log.
     let events = env.events().all();
@@ -409,7 +409,7 @@ fn test_two_sided_pool_does_not_emit_onesided_event() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let one_sided_count = events

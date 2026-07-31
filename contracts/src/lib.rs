@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #![no_std]
+extern crate alloc;
 //! # XLM Price Prediction Market
 //!
 //! Secure Soroban-based prediction market for XLM price movements.
@@ -21,8 +22,11 @@ pub mod common;
 mod config;
 mod contract;
 mod errors;
+mod leaderboard;
 mod queries;
 mod settlement;
+mod storage;
+mod settlement_math;
 mod types;
 
 #[cfg(test)]
@@ -31,7 +35,8 @@ mod tests;
 pub use contract::VirtualTokenContract;
 pub use errors::ContractError;
 pub use types::{
-    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKey,
-    OracleRotationProposal, PendingConfigChange, PrecisionCommitment, PrecisionPrediction,
-    ProtocolHealthStatus, Round, RoundArchiveStatus, UserPosition, UserStats,
+    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped,
+    LeaderboardEntry, OracleRotationProposal, PendingConfigChange, PrecisionCommitment,
+    PrecisionPrediction, ProtocolHealthStatus, Round, RoundArchiveStatus, RoundTemplate,
+    SeasonArchive, SeasonLeaderboardEntry, UserPosition, UserStats,
 };
