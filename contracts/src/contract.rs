@@ -8,11 +8,12 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Ma
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore,
-    DataKeyScoped, DeviationReferenceMode, LeaderboardEntry, OracleHeartbeatRecord, OraclePayload,
-    OracleRotationProposal, PendingConfigChange, PolicyAction, PrecisionPrediction, PriceSample,
-    ProtocolHealthStatus, ProtocolStatus, Round, RoundArchiveStatus, RoundPhase, RoundPoolStats,
-    RoundStatus, RoundTemplate, RuntimeMode, SeasonArchive, SeasonLeaderboardEntry,
-    SimulationResult, UserPosition, UserRoundOutcome, UserStats,
+    DataKeyScoped, DeviationReferenceMode, LeaderboardEntry, MultiFeedPayload, OracleHeartbeatRecord,
+    OraclePayload, OracleQuorumConfig, OracleRotationProposal, PendingConfigChange,
+    PolicyAction, PrecisionPrediction, PriceSample, ProtocolHealthStatus, ProtocolStatus, Round,
+    RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
+    SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition,
+    UserRoundOutcome, UserStats,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -774,8 +775,43 @@ impl VirtualTokenContract {
         config::get_archive_retention(env)
     }
 
+    pub fn set_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+        config::set_pending_winnings_expiry(env, ledgers)
+    }
+
+    pub fn schedule_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+        config::schedule_pending_winnings_expiry(env, ledgers)
+    }
+
+    pub fn get_pending_winnings_expiry(env: Env) -> u32 {
+        config::get_pending_winnings_expiry(env)
+    }
+
+    pub fn reclaim_expired_pending_winnings(
+        env: Env,
+        user: Address,
+    ) -> Result<i128, ContractError> {
+        admin::reclaim_expired_pending_winnings(env, user)
+    }
+
     pub fn set_close_buffer_ledgers(env: Env, buffer_ledgers: u32) -> Result<(), ContractError> {
         config::set_close_buffer_ledgers(env, buffer_ledgers)
+    }
+
+    /// Sets the multi-feed oracle quorum configuration (admin only).
+    ///
+    /// When `Some(config)`, `resolve_round_multi` is enabled. When `None`,
+    /// multi-feed resolution is disabled. The legacy path is unaffected.
+    pub fn set_oracle_quorum_config(
+        env: Env,
+        config: Option<OracleQuorumConfig>,
+    ) -> Result<(), ContractError> {
+        admin::set_oracle_quorum_config(env, config)
+    }
+
+    /// Returns the configured multi-feed oracle quorum config, if any.
+    pub fn get_oracle_quorum_config(env: Env) -> Option<OracleQuorumConfig> {
+        admin::get_oracle_quorum_config(env)
     }
 
     pub fn get_close_buffer_ledgers(env: Env) -> u32 {
@@ -881,6 +917,19 @@ impl VirtualTokenContract {
 
     pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractError> {
         settlement::resolve_round(env, payload)
+    }
+
+    /// Resolves the active round using a multi-feed oracle payload with
+    /// median settlement and quorum-based outlier rejection.
+    ///
+    /// Requires `OracleQuorumConfig` to be configured by the admin before
+    /// this path is available. The legacy single-oracle `resolve_round`
+    /// remains available independently.
+    pub fn resolve_round_multi(
+        env: Env,
+        payload: MultiFeedPayload,
+    ) -> Result<(), ContractError> {
+        settlement::resolve_round_multi(env, payload)
     }
 
     pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
@@ -1020,15 +1069,24 @@ impl VirtualTokenContract {
 
     // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────
 
-    /// Paginated lifetime wins leaderboard (all-time, independent of seasons).
-    pub fn get_leaderboard_by_wins(env: Env, offset: u32, limit: u32) -> Vec<LeaderboardEntry> {
-        leaderboard::get_leaderboard_by_wins(env, offset, limit)
+    /// Cursor-based page of the global leaderboard ordered by total wins descending.
+    pub fn get_leaderboard_by_wins(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> (Vec<LeaderboardEntry>, Option<Address>) {
+        queries::get_leaderboard_by_wins(env, cursor, limit)
     }
 
-    /// Paginated lifetime best-streak leaderboard (all-time, independent of seasons).
-    pub fn get_leaderboard_by_streak(env: Env, offset: u32, limit: u32) -> Vec<LeaderboardEntry> {
-        leaderboard::get_leaderboard_by_streak(env, offset, limit)
+    /// Cursor-based page of the global leaderboard ordered by best streak descending.
+    pub fn get_leaderboard_by_streak(
+        env: Env,
+        cursor: Option<Address>,
+        limit: u32,
+    ) -> (Vec<LeaderboardEntry>, Option<Address>) {
+        queries::get_leaderboard_by_streak(env, cursor, limit)
     }
+    // ─── Leaderboards (lifetime + seasons) ──────────────────────────────────
 
     /// Returns the id of the currently-active leaderboard season (default 1).
     pub fn get_current_season_id(env: Env) -> u32 {

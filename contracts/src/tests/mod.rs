@@ -27,6 +27,7 @@ mod mode_tests;
 mod one_sided_settlement;
 mod overflow_tests;
 mod pause;
+mod pending_winnings_expiry;
 mod policy_gate;
 mod property_invariants;
 mod reference_model;
