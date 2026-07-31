@@ -183,11 +183,23 @@ pub fn get_recent_archived_rounds(env: Env, limit: u32) -> Vec<ArchivedRoundSumm
 }
 
 /// Returns a compact per-user outcome record for a specific archived round.
+///
+/// Returns `None` if the round does not exist or has been pruned from the
+/// on-chain archive, even if a `UserRoundOutcome` record still exists in
+/// storage. This ensures consistent missing-id semantics: any query for a
+/// pruned round_id returns `None` regardless of which query is used.
 pub fn get_user_archived_participation(
     env: Env,
     user: Address,
     round_id: u64,
 ) -> Option<UserRoundOutcome> {
+    if !env
+        .storage()
+        .persistent()
+        .has(&DataKeyScoped::ArchivedRound(round_id))
+    {
+        return None;
+    }
     let key = DataKeyScoped::UserRoundOutcome(round_id, user);
     env.storage().persistent().get(&key)
 }
