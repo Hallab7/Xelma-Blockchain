@@ -23,6 +23,7 @@ use crate::types::{
     PrecisionPrediction, PriceSample, Round, RoundArchiveStatus, RoundMode, TwapSamplesKey,
     UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
+use crate::storage::clear_round_storage;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{symbol_short, Address, Bytes, Env, Map, Vec};
 
@@ -81,7 +82,6 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
                             pos.amount,
                             UserOutcomeType::Void,
                         );
-                        env.storage().persistent().remove(&pos_key);
                     }
                 }
             }
@@ -121,12 +121,13 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
                         refund_amount,
                         UserOutcomeType::Void,
                     );
-                    env.storage().persistent().remove(&pred_key);
-                    env.storage().persistent().remove(&commit_key);
                 }
             }
         }
     }
+
+    // Canonical cleanup: removes ALL position keys + shared keys + legacy keys
+    clear_round_storage(&env, round_id, &participants);
 
     // Clean up participant list and mark round as cancelled
     let participant_count = participants.len();
