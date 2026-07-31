@@ -11,6 +11,7 @@
 1. [Oracle Role & Responsibilities](#1-oracle-role--responsibilities)
 2. [OraclePayload Field Reference](#2-oraclepayload-field-reference)
 3. [Payload Templates](#3-payload-templates)
+   - [3.6 Payload Simulator CLI](#36-payload-simulator-cli-scriptsoracle_payload_simpy)
 4. [Heartbeat & Liveness](#4-heartbeat--liveness)
 5. [Resolution Flow (Step by Step)](#5-resolution-flow-step-by-step)
 6. [Troubleshooting Matrix](#6-troubleshooting-matrix)
@@ -170,6 +171,61 @@ function networkIdFor(networkPassphrase: string): Buffer {
 }
 // Testnet: networkIdFor("Test SDF Network ; September 2015")
 ```
+
+### 3.6 Payload Simulator CLI (`scripts/oracle_payload_sim.py`)
+
+A CLI tool to build, validate, and preview `OraclePayload`s *before* submitting a
+real on-chain transaction. Catches common mistakes — wrong `network_id`, stale
+timestamps, deviation overruns, malformed addresses — without consuming gas or
+burning nonces.
+
+**Usage:**
+
+```bash
+python3 scripts/oracle_payload_sim.py \
+  --price 12345 \
+  --round-id <start_ledger> \
+  --network-id-from-passphrase "Test SDF Network ; September 2015" \
+  --contract-addr <CONTRACT_ID>
+```
+
+**What it validates (all local, no RPC call needed):**
+
+| Check | Requires | Rejects if |
+|-------|----------|------------|
+| Price > 0 | `--price` | Zero or negative |
+| Timestamp freshness | `--timestamp` (default: now) | Future or >300 s old |
+| round_id range | `--round-id` | Outside u32 |
+| nonce range | `--nonce` (default: 1) | Outside u64 |
+| network_id format | `--network-id` or `--network-id-from-passphrase` | Not 64 hex chars |
+| contract_addr format | `--contract-addr` | Not a valid C… address |
+| Confidence range | `--confidence` | Outside 0–10000 bps |
+| Deviation guardrails | `--start-price` + `--max-deviation-bps` | Exceeds threshold |
+| Confidence floor | `--confidence` + `--min-confidence-bps` | Below minimum |
+
+**Example — full validation with deviation guardrails:**
+
+```bash
+python3 scripts/oracle_payload_sim.py \
+  --price 15500 \
+  --round-id 100 \
+  --network-id-from-passphrase "Test SDF Network ; September 2015" \
+  --contract-addr CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABLF4 \
+  --start-price 15000 \
+  --max-deviation-bps 5000 \
+  --stellar-cli \
+  --contract-id CCJZ5NJGZKP5I5TRLXU3M6YIQKU7D24B5E6Z6F6J4X5Y6Z7J6K5L4M3N \
+  --oracle-key my-oracle-key
+```
+
+**Output** includes a copy-paste `stellar contract invoke` command at the bottom,
+so the operator can paste it directly into their terminal.
+
+**Exit codes:** `0` = all checks passed, `2` = one or more validation failures.
+
+**No secrets:** The tool never requires a secret key — it is purely a pre-flight
+check. The `--oracle-key` flag is only used for the copy-paste CLI command
+template, not for signing.
 
 ---
 
@@ -468,3 +524,4 @@ Operators and monitoring dashboards should:
 | [contract.rs](../contracts/src/contract.rs) | `resolve_round` implementation (line 1488) |
 | [errors.rs](../contracts/src/errors.rs) | All 50 `ContractError` variants |
 | [types.rs](../contracts/src/types.rs) | `OraclePayload` struct definition |
+| [oracle_payload_sim.py](../scripts/oracle_payload_sim.py) | Pre-flight payload validation CLI |

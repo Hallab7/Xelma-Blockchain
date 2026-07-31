@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: MIT
 use crate::errors::ContractError;
+use crate::types::{
+    ConfigChangeKind, ConfigChangePayload, DataKey, PendingWinningsUpdatedAtKey, Round, RoundPhase,
+};
+use soroban_sdk::{symbol_short, Address, Env, IntoVal, Symbol, Val, Vec};
+
+pub const DEFAULT_PENDING_WINNINGS_EXPIRY: u32 = 0; // 0 = disabled
+pub const MIN_PENDING_WINNINGS_EXPIRY: u32 = 128;   // ~10 min at 5s ledgers
+pub const MAX_PENDING_WINNINGS_EXPIRY: u32 = 1_000_000; // ~58 days
 use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, Round, RoundPhase};
 use soroban_sdk::{symbol_short, Address, Env, IntoVal, Symbol, Val, Vec};
 
@@ -48,8 +56,15 @@ pub const MAX_ARCHIVE_RETENTION: u32 = 10_000;
 pub const CONFIG_TIMELOCK_LEDGERS: u32 = 1440;
 pub const EPOCH_LEDGERS: u32 = 1440; // ~2 hours at 5s/ledger
 
+// ─── Oracle TWAP / reference deviation guardrails (Issue #266) ──────────────
+/// Minimum number of trailing samples required to enable `Twap` reference mode.
+pub const MIN_TWAP_WINDOW_SAMPLES: u32 = 2;
+/// Maximum trailing samples configurable — bounds the ring buffer's storage cost.
+pub const MAX_TWAP_WINDOW_SAMPLES: u32 = 64;
+
 /// Bumps/extends the TTL of the given persistent storage key if its remaining TTL
 /// is less than the threshold. Enforces rent policy (Issue #142).
+pub fn _extend_persistent_ttl<K: IntoVal<Env, Val>>(env: &Env, key: &K) {
 pub fn _extend_persistent_ttl<T: IntoVal<Env, Val>>(env: &Env, key: &T) {
     if env.storage().persistent().has(key) {
         env.storage()
@@ -89,6 +104,7 @@ pub fn payout_mul(a: i128, b: i128) -> Result<i128, ContractError> {
 
 /// Accumulates `amount` into a user's pending winnings, enforcing the cap if set (Issue #120).
 pub fn _accumulate_pending(env: &Env, user: Address, amount: i128) -> Result<(), ContractError> {
+    let key = DataKey::PendingWinnings(user.clone());
     let key = DataKeyScoped::PendingWinnings(user);
     let existing: i128 = env.storage().persistent().get(&key).unwrap_or(0);
     let new_pending = payout_add(existing, amount)?;
@@ -106,6 +122,13 @@ pub fn _accumulate_pending(env: &Env, user: Address, amount: i128) -> Result<(),
 
     env.storage().persistent().set(&key, &new_pending);
     _extend_persistent_ttl(env, &key);
+
+    // Track the ledger when this entry was last written for expiry checks.
+    let updated_key = PendingWinningsUpdatedAtKey(user.clone());
+    let current_ledger = env.ledger().sequence();
+    env.storage().persistent().set(&updated_key, &current_ledger);
+    _extend_persistent_ttl(env, &updated_key);
+
     Ok(())
 }
 
@@ -138,6 +161,17 @@ pub fn _derive_round_phase(ledger_sequence: u32, round: &Round) -> RoundPhase {
     } else {
         RoundPhase::Resolvable
     }
+}
+
+/// Rejects `amount` if it falls below the configured minimum bet, when set (Issue #269).
+/// `None` (unset) preserves pre-#269 behaviour: any amount `> 0` is accepted.
+pub fn _enforce_min_bet(env: &Env, amount: i128) -> Result<(), ContractError> {
+    if let Some(min_bet) = env.storage().persistent().get::<_, i128>(&DataKeyCore::MinBet) {
+        if amount < min_bet {
+            return Err(ContractError::BelowMinBet);
+        }
+    }
+    Ok(())
 }
 
 pub fn assert_no_active_round(env: &Env) -> Result<(), ContractError> {
