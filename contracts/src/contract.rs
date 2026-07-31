@@ -774,6 +774,25 @@ impl VirtualTokenContract {
         config::get_archive_retention(env)
     }
 
+    pub fn set_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+        config::set_pending_winnings_expiry(env, ledgers)
+    }
+
+    pub fn schedule_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+        config::schedule_pending_winnings_expiry(env, ledgers)
+    }
+
+    pub fn get_pending_winnings_expiry(env: Env) -> u32 {
+        config::get_pending_winnings_expiry(env)
+    }
+
+    pub fn reclaim_expired_pending_winnings(
+        env: Env,
+        user: Address,
+    ) -> Result<i128, ContractError> {
+        admin::reclaim_expired_pending_winnings(env, user)
+    }
+
     pub fn set_close_buffer_ledgers(env: Env, buffer_ledgers: u32) -> Result<(), ContractError> {
         config::set_close_buffer_ledgers(env, buffer_ledgers)
     }

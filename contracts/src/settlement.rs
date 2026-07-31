@@ -13,6 +13,8 @@ use crate::settlement_math::{
 use crate::config::{
     _apply_protocol_fee_precision, _apply_protocol_fee_updown, _read_fee_model,
 };
+use crate::types::PendingWinningsUpdatedAtKey;
+use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKeyCore, DataKeyScoped, DeviationReferenceMode,
@@ -179,6 +181,9 @@ pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
     let new_balance = payout_add(current_balance, pending)?;
 
     env.storage().persistent().remove(&key);
+    env.storage()
+        .persistent()
+        .remove(&PendingWinningsUpdatedAtKey(user.clone()));
     _set_balance(&env, user.clone(), new_balance);
 
     #[allow(deprecated)]
