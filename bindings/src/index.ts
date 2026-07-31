@@ -66,7 +66,7 @@ export type BetSide = {tag: "Up", values: void} | {tag: "Down", values: void};
  * Legacy single-key maps (`UpDownPositions`, `PrecisionPositions`) are kept for
  * backward-compatible reads during a migration window; they are no longer written.
  */
-export type DataKey = {tag: "Balance", values: readonly [string]} | {tag: "Admin", values: void} | {tag: "Oracle", values: void} | {tag: "SchemaVersion", values: void} | {tag: "ActiveRound", values: void} | {tag: "Positions", values: void} | {tag: "UpDownPositions", values: void} | {tag: "PrecisionPositions", values: void} | {tag: "PendingWinnings", values: readonly [string]} | {tag: "UserStats", values: readonly [string]} | {tag: "Paused", values: void} | {tag: "BetWindowLedgers", values: void} | {tag: "RunWindowLedgers", values: void} | {tag: "LastRoundId", values: void} | {tag: "Position", values: readonly [u64, string]} | {tag: "PrecisionPosition", values: readonly [u64, string]} | {tag: "PrecisionCommitment", values: readonly [u64, string]} | {tag: "RoundParticipants", values: readonly [u64]} | {tag: "MaxStake", values: void} | {tag: "MaxUserRoundExposure", values: void} | {tag: "MaxPendingWinnings", values: void} | {tag: "CancelledRound", values: readonly [u64]} | {tag: "ConsumedOracleNonce", values: readonly [u64, u64]} | {tag: "MinParticipants", values: void} | {tag: "OracleHeartbeat", values: void} | {tag: "OracleStaleThreshold", values: void} | {tag: "MaxPrecisionParticipants", values: void} | {tag: "OracleMaxDeviationBps", values: void} | {tag: "OracleDeviationOverrideArmed", values: void} | {tag: "ArchivedRound", values: readonly [u64]} | {tag: "RecentArchivedRoundIds", values: void} | {tag: "PendingConfigChange", values: readonly [ConfigChangeKind]};
+export type DataKey = {tag: "Balance", values: readonly [string]} | {tag: "Admin", values: void} | {tag: "Oracle", values: void} | {tag: "SchemaVersion", values: void} | {tag: "ActiveRound", values: void} | {tag: "Positions", values: void} | {tag: "UpDownPositions", values: void} | {tag: "PrecisionPositions", values: void} | {tag: "PendingWinnings", values: readonly [string]} | {tag: "UserStats", values: readonly [string]} | {tag: "Paused", values: void} | {tag: "BetWindowLedgers", values: void} | {tag: "RunWindowLedgers", values: void} | {tag: "LastRoundId", values: void} | {tag: "Position", values: readonly [u64, string]} | {tag: "PrecisionPosition", values: readonly [u64, string]} | {tag: "PrecisionCommitment", values: readonly [u64, string]} | {tag: "RoundParticipants", values: readonly [u64]} | {tag: "MaxStake", values: void} | {tag: "MaxUserRoundExposure", values: void} | {tag: "MaxPendingWinnings", values: void} | {tag: "CancelledRound", values: readonly [u64]} | {tag: "ConsumedOracleNonce", values: readonly [u64, u64]} | {tag: "MinParticipants", values: void} | {tag: "OracleHeartbeat", values: void} | {tag: "OracleStaleThreshold", values: void} | {tag: "MaxPrecisionParticipants", values: void} | {tag: "OracleMaxDeviationBps", values: void} | {tag: "OracleDeviationOverrideArmed", values: void} | {tag: "ArchivedRound", values: readonly [u64]} | {tag: "RecentArchivedRoundIds", values: void} | {tag: "PendingConfigChange", values: readonly [ConfigChangeKind]} | {tag: "ProtocolFeeBps", values: void} | {tag: "ProtocolFeeTreasury", values: void} | {tag: "FeeModel", values: void} | {tag: "CloseBufferLedgers", values: void};
 
 /**
  * Round mode for prediction type
@@ -136,12 +136,24 @@ export interface UserRoundOutcome {
   outcome: UserOutcomeType;
 }
 
+/**
+ * Protocol fee incidence model — determines what portion of the pot is taxed.
+ */
+export enum FeeModel {
+  /** Fee is calculated on the total round pot (all stakes pooled). */
+  FeeOnPot = 0,
+  /** Fee is calculated only on the net winnings (profit transferred from losers). */
+  FeeOnWinnings = 1,
+}
+
 export interface SimulationResult {
   mode: RoundMode;
   pool_up: i128;
   pool_down: i128;
   precision_total_stake: i128;
   fee_amount: i128;
+  /** Fee incidence model used: 0 = FeeOnPot, 1 = FeeOnWinnings (Issue #268). */
+  fee_model: u32;
   outcomes: Array<UserRoundOutcome>;
 }
 
@@ -226,6 +238,8 @@ export enum ConfigChangeKind {
   OracleStaleThreshold = 4,
   OracleMaxDeviationBps = 5,
   ProtocolFeeBps = 6,
+  /** Fee incidence model: 0 = FeeOnPot (default), 1 = FeeOnWinnings (Issue #268). */
+  FeeModel = 12,
   MinParticipants = 7,
   MaxPrecisionParticipants = 8,
   MintLimit = 9,
@@ -286,6 +300,42 @@ export interface PrecisionPrediction {
   amount: i128;
   predicted_price: u128;
   user: string;
+}
+
+/**
+ * Cursor-based page of precision predictions.
+ * Pass next_cursor as the cursor argument to the next call to fetch the subsequent page.
+ */
+export interface PrecisionPredictionsPage {
+  items: Array<PrecisionPrediction>;
+  next_cursor: Option<string>;
+}
+
+/**
+ * Single entry in a cursor-based Up/Down positions page.
+ */
+/**
+ * Cursor-based page of Up/Down positions.
+ */
+export interface UpdownPositionsPage {
+  items: Array<[string, UserPosition]>;
+  next_cursor: Option<string>;
+}
+
+/**
+ * Entry in the global leaderboard.
+ */
+export interface LeaderboardEntry {
+  user: string;
+  stats: UserStats;
+}
+
+/**
+ * Cursor-based page of leaderboard entries.
+ */
+export interface LeaderboardPage {
+  items: Array<LeaderboardEntry>;
+  next_cursor: Option<string>;
 }
 
 
@@ -1074,6 +1124,18 @@ export interface Client {
   get_protocol_fee_bps: (options?: MethodOptions) => Promise<AssembledTransaction<Option<u32>>>
   get_protocol_fee_treasury: (options?: MethodOptions) => Promise<AssembledTransaction<i128>>
   withdraw_protocol_fee: ({recipient, amount}: {recipient: string, amount: i128}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
+  /**
+   * Construct and simulate a set_fee_model transaction.
+   * Sets the fee incidence model (admin only).
+   * `FeeOnPot` (0): fee is calculated on the total round pot (default).
+   * `FeeOnWinnings` (1): fee is calculated only on net winnings / profit.
+   */
+  set_fee_model: ({model}: {model: FeeModel}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  /**
+   * Construct and simulate a get_fee_model transaction.
+   * Returns the configured fee incidence model, defaulting to `FeeOnPot`.
+   */
+  get_fee_model: (options?: MethodOptions) => Promise<AssembledTransaction<FeeModel>>
   set_mint_limit: ({limit}: {limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
   get_mint_limit: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
   set_epoch_mint_budget: ({budget}: {budget: i128}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>

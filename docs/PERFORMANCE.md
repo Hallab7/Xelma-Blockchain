@@ -30,6 +30,10 @@ The exact numbers depend on the Soroban SDK version and host runtime. Regenerate
 | `claim_winnings` | _regenerate_ | _regenerate_ |
 | `get_updown_positions_page` | _regenerate_ | _regenerate_ |
 | `get_precision_predictions_page` | _regenerate_ | _regenerate_ |
+| `get_precision_predictions_cursor` | _regenerate_ | _regenerate_ |
+| `get_updown_positions_cursor` | _regenerate_ | _regenerate_ |
+| `get_leaderboard_by_wins` | _regenerate_ | _regenerate_ |
+| `get_leaderboard_by_streak` | _regenerate_ | _regenerate_ |
 
 ## Regression policy
 
