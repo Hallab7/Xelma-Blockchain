@@ -112,7 +112,7 @@ fn resolve_at(
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 }
 
 /// `sha256(price.to_xdr() || salt.to_xdr())` — matches `reveal_prediction`.
@@ -565,7 +565,7 @@ fn set_ec_bps_now(env: &Env, contract_id: &Address, bps: u32) {
     env.as_contract(contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::EarlyCashoutBps, &bps);
+            .set(&DataKeyCore::EarlyCashoutBps, &bps);
     });
 }
 
