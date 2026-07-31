@@ -78,7 +78,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
                             0,
                             pos.amount,
                             pos.amount,
-                            UserOutcomeType::Cancel,
+                            UserOutcomeType::Void,
                         );
                         env.storage().persistent().remove(&pos_key);
                     }
@@ -118,7 +118,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
                         0,
                         refund_amount,
                         refund_amount,
-                        UserOutcomeType::Cancel,
+                        UserOutcomeType::Void,
                     );
                     env.storage().persistent().remove(&pred_key);
                     env.storage().persistent().remove(&commit_key);
@@ -1453,12 +1453,7 @@ pub fn _persist_user_outcome(
     env.storage().persistent().set(&key, &record);
     _extend_persistent_ttl(env, &key);
 
-    let outcome_type_u32 = match outcome {
-        UserOutcomeType::Win => 1u32,
-        UserOutcomeType::Loss => 0u32,
-        UserOutcomeType::Refund => 2u32,
-        UserOutcomeType::Cancel => 3u32,
-    };
+    let outcome_type_u32 = outcome.clone() as u32;
     #[allow(deprecated)]
     env.events().publish(
         (symbol_short!("payout"), symbol_short!("outcome")),
