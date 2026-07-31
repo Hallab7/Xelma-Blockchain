@@ -96,6 +96,8 @@ Emitted when a round is settled competitively by the oracle.
 | 0        | `round_id`    | `u64`  | Round that was resolved                          |
 | 1        | `final_price` | `u128` | Closing price reported by the oracle (4 dec.)    |
 | 2        | `mode`        | `u32`  | Round mode: `0` = UpDown, `1` = Precision        |
+| 3        | `protocol_fee_bps` | `Option<u32>` | Active protocol fee in basis points (if set)     |
+| 4        | `precision_payout_policy` | `u32` | Payout distribution policy used for Precision round: `0` = Equal, `1` = StakeWeighted |
 
 ---
 
@@ -111,7 +113,7 @@ result of a round without replaying contract storage reads.
 | 1        | `mode`         | `u32`     | Round mode: `0` = UpDown, `1` = Precision                 |
 | 2        | `user`         | `Address` | Participant address                                       |
 | 3        | `gross_payout` | `i128`    | Amount credited to pending winnings, in stroops           |
-| 4        | `outcome_type` | `u32`     | `0` = loss, `1` = win, `2` = refund                       |
+| 4        | `outcome_type` | `u32`     | `0` = win, `1` = loss, `2` = refund, `3` = void           |
 
 `gross_payout` is `0` for losses. For refunds, it equals the participant's refunded stake.
 For wins, it equals the full pending payout credited by the resolver, including returned
@@ -201,6 +203,7 @@ Emitted when a round is resolved, cancelled, or refunded. Contains compact settl
 | 5        | `total_pot`         | `i128` | Total accumulated round pot (in stroops)                              |
 | 6        | `fee_amount`        | `i128` | Total protocol fees collected from the round pot (in stroops)         |
 | 7        | `status`            | `u32`  | Round status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund   |
+| 8        | `fee_model`         | `u32`  | Fee incidence model: `0` = FeeOnPot, `1` = FeeOnWinnings (Issue #268) |
 
 ---
 
@@ -240,7 +243,7 @@ Emitted for every admin configuration mutation when a value is actually written,
 
 Example payload for a windows update: `(Windows, Windows(6, 12), Windows(10, 20))`.
 
-`ConfigChangeKind` values currently include `Windows`, `MaxStake`, `MaxUserRoundExposure`, `MaxPendingWinnings`, `OracleStaleThreshold`, `OracleMaxDeviationBps`, `ProtocolFeeBps`, `MinParticipants`, `MaxPrecisionParticipants`, `MintLimit`, and `ArchiveRetention`.
+`ConfigChangeKind` values currently include `Windows`, `MaxStake`, `MaxUserRoundExposure`, `MaxPendingWinnings`, `OracleStaleThreshold`, `OracleMaxDeviationBps`, `ProtocolFeeBps`, `MinParticipants`, `MaxPrecisionParticipants`, `MintLimit`, `ArchiveRetention`, `CloseBufferLedgers`, and `OracleQuorum`.
 
 ---
 
@@ -283,6 +286,52 @@ enum variants in `contracts/src/errors.rs`.
 
 ---
 
+---
+
+## `("oracle", "multisum")` — Multi-feed settlement summary (Issue #262)
+
+Emitted when `resolve_round_multi` successfully computes the median price and
+passes quorum. Provides a compact summary of the multi-feed resolution before
+round settlement proceeds.
+
+| Position | Field               | Type   | Description                                               |
+|----------|---------------------|--------|-----------------------------------------------------------|
+| 0        | `round_id`          | `u64`  | Round that was resolved                                   |
+| 1        | `observation_count` | `u32`  | Total number of feed observations in the payload           |
+| 2        | `survivor_count`    | `u32`  | Observations that passed outlier rejection                |
+| 3        | `median_price`      | `u128` | Computed median settlement price (4 decimal places)       |
+| 4        | `quorum_threshold`  | `u32`  | Configured quorum threshold that was satisfied            |
+
+---
+
+## `("oracle", "nofed")` — Multi-feed quorum failure (Issue #262)
+
+Emitted when `resolve_round_multi` fails because too few observations survived
+outlier rejection to meet the configured quorum threshold.
+
+| Position | Field               | Type   | Description                                               |
+|----------|---------------------|--------|-----------------------------------------------------------|
+| 0        | `round_id`          | `u64`  | Round that failed settlement                              |
+| 1        | `median_price`      | `u128` | Computed median price (4 decimal places)                  |
+| 2        | `survivor_count`    | `u32`  | Observations that passed outlier rejection                |
+| 3        | `quorum_threshold`  | `u32`  | Configured quorum threshold that was NOT met              |
+
+---
+
+## `("oracle", "quorum")` — Quorum config updated (Issue #262)
+
+Emitted when the admin sets or clears the multi-feed oracle quorum
+configuration. Emitted both via the direct setter and via timelocked config
+application.
+
+| Position | Field                  | Type   | Description                                               |
+|----------|------------------------|--------|-----------------------------------------------------------|
+| 0        | `min_observations`     | `u32`  | Minimum observations per multi-feed payload (0 if cleared)|
+| 1        | `quorum_threshold`     | `u32`  | Minimum surviving observations for quorum (0 if cleared)  |
+| 2        | `outlier_threshold_bps`| `u32`  | Max deviation from median before outlier rejection        |
+
+---
+
 ## `("oracle", "heartbeat")`
 
 Emitted when the oracle records an on-chain liveness heartbeat.
@@ -291,6 +340,66 @@ Emitted when the oracle records an on-chain liveness heartbeat.
 |----------|-------------|-------|--------------------------------------------------------------|
 | 0        | `timestamp` | `u64` | Unix epoch seconds when the heartbeat was recorded on-chain  |
 | 1        | `status`    | `u32` | Oracle status: `0` = active, `1` = degraded, `2` = offline  |
+
+---
+
+## Oracle rotation events (two-step with mandatory delay)
+
+Oracle rotation uses a two-step flow with a **mandatory 1-hour delay**
+(`MIN_ROTATION_DELAY_SECONDS = 3_600`) between proposal and acceptance.
+This prevents quiet takeovers — even with admin key compromise, operators
+have a full hour to observe the proposal and react.
+
+### `("oracle", "propose")`
+
+Emitted when the admin proposes a new oracle address with an expiry window.
+
+| Position | Field         | Type      | Description                                            |
+|----------|---------------|-----------|--------------------------------------------------------|
+| 0        | `new_oracle`  | `Address` | Proposed new oracle address                            |
+| 1        | `expires_at`  | `u64`     | Unix timestamp when the proposal expires               |
+
+### `("oracle", "accept")`
+
+Emitted when a pending rotation proposal is successfully accepted (after the
+mandatory delay has elapsed and before expiry).
+
+| Position | Field             | Type      | Description                               |
+|----------|-------------------|-----------|-------------------------------------------|
+| 0        | `previous_oracle` | `Address` | Oracle address before the rotation         |
+| 1        | `new_oracle`      | `Address` | New oracle address after the rotation      |
+
+### `("oracle", "cancel")`
+
+Emitted when the admin cancels a pending rotation proposal.
+
+| Position | Field         | Type      | Description                                      |
+|----------|---------------|-----------|--------------------------------------------------|
+| 0        | `new_oracle`  | `Address` | The proposed oracle address that was cancelled    |
+
+### `("oracle", "expired")`
+
+Emitted when an expired proposal is cleaned up (auto-clean in
+`get_oracle_rotation_proposal` or during `accept_oracle_rotation`).
+
+| Position | Field         | Type  | Description                                      |
+|----------|---------------|-------|--------------------------------------------------|
+| 0        | `new_oracle`  | `Address` | The proposed oracle address that expired       |
+| 1        | `proposed_at` | `u64` | Unix timestamp when the proposal was created      |
+| 2        | `expires_at`  | `u64` | Unix timestamp when the proposal expired          |
+
+### `("oracle", "early")`
+
+Emitted when an attempt to accept a rotation proposal is rejected because the
+mandatory delay (`MIN_ROTATION_DELAY_SECONDS`) has not yet elapsed.
+
+| Position | Field           | Type  | Description                                          |
+|----------|-----------------|-------|------------------------------------------------------|
+| 0        | `new_oracle`    | `Address` | The proposed oracle address                       |
+| 1        | `current_ts`    | `u64` | Current ledger timestamp at rejection time            |
+| 2        | `earliest_accept` | `u64` | Timestamp at which acceptance will be allowed       |
+
+---
 
 ### `("mode", "transition")`
 
@@ -351,21 +460,22 @@ let resolved = events.iter().find(|(_, topics, _)| {
 
 ---
 
-## `("protocol", "fee_collected")` — Competitive-settlement fee accrual
+## `("protocol", "fee_coll")` — Competitive-settlement fee accrual
 
 Emitted by every competitive-settlement path (UpDown indexed/legacy, Precision
 indexed/legacy) when the protocol fee is enabled (Issue #162). NOT emitted on
 refund / cancel / fallback paths — those return users' full stake and the
 treasury stays flat.
 
-| Field         | Type      | Description                                                |
-|---------------|-----------|------------------------------------------------------------|
-| `round_id`    | `u64`     | The id of the settled round.                                |
-| `fee_amount`  | `i128`    | Stroops routed to the on-chain treasury this round.         |
-| `treasury_balance` | `i128` | Cumulative treasury balance AFTER this round's credit.     |
-| `bps_active`  | `u32`     | The fee's bps that produced `fee_amount` (echoes storage).  |
+| Field              | Type          | Description                                                          |
+|--------------------|---------------|----------------------------------------------------------------------|
+| `round_id`         | `u64`         | The id of the settled round.                                          |
+| `fee_amount`       | `i128`        | Stroops routed to the on-chain treasury this round.                   |
+| `treasury_balance` | `i128`        | Cumulative treasury balance AFTER this round's credit.                |
+| `bps_active`       | `u32`         | The fee's bps that produced `fee_amount` (echoes storage).            |
+| `fee_model`        | `u32`         | Fee incidence model: `0` = FeeOnPot, `1` = FeeOnWinnings (Issue #268).|
 
-**Topics**: `("protocol", "fee_collected")`
+**Topics**: `("protocol", "fee_coll")`
 **Source contracts**: `VirtualTokenContract`
 **Emitted by**: `_record_winnings_indexed`, `_record_winnings_legacy`,
 `_resolve_precision_mode`, `_resolve_precision_legacy`.
@@ -373,9 +483,14 @@ treasury stays flat.
 The conservation invariant
 `Σ payout_i + fee_amount == total_pot` holds for every emission. In the
 UpDown pathological case `fee > losing_pool` (very thin losing-side
-liquidity near the bps cap) the spillover is deducted from `winning_pool`
-so the invariant still holds and winners receive only their residual
-principal — documented inline in `_apply_protocol_fee_updown`.
+liquidity near the bps cap, FeeOnPot model only) the spillover is deducted
+from `winning_pool` so the invariant still holds and winners receive only
+their residual principal — documented inline in `_apply_protocol_fee_updown`.
+
+Under `FeeOnWinnings` (Issue #268) the fee is calculated only on the net
+profit (losing_pool in UpDown; pot - winner_stakes in Precision), so
+winners always retain their full principal and the spillover guard is never
+triggered.
 
 ---
 
@@ -478,6 +593,37 @@ ended season are never deleted and remain independently queryable.
 **Topics**: `("season", "reset")`
 **Source contracts**: `VirtualTokenContract`
 **Emitted by**: `reset_leaderboard_season`.
+
+---
+
+## `("oracle", "hblocked")` — Heartbeat health gate blocked settlement
+
+Emitted when `resolve_round` is blocked by the heartbeat health gate in strict mode
+(Issue #264). The round remains active; the oracle or admin must address the heartbeat
+state before retrying.
+
+| Position | Field       | Type   | Description                                    |
+|----------|-------------|--------|------------------------------------------------|
+| 0        | `round_id`  | `u64`  | Round id that was blocked from settlement       |
+
+**Topics**: `("oracle", "hblocked")`
+**Source contracts**: `VirtualTokenContract`
+**Emitted by**: `resolve_round` (heartbeat health gate, strict mode).
+
+---
+
+## `("oracle", "hoverride")` — Heartbeat health gate override consumed
+
+Emitted when the admin-armed heartbeat health override is consumed during
+`resolve_round`, allowing settlement to proceed past the gate (Issue #264).
+
+| Position | Field       | Type   | Description                                    |
+|----------|-------------|--------|------------------------------------------------|
+| 0        | `round_id`  | `u64`  | Round id for which the override was consumed    |
+
+**Topics**: `("oracle", "hoverride")`
+**Source contracts**: `VirtualTokenContract`
+**Emitted by**: `resolve_round` (heartbeat health gate override path).
 
 ---
 
