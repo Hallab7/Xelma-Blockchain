@@ -17,9 +17,10 @@ use soroban_sdk::{symbol_short, Address, Env, Symbol};
 };
 use crate::errors::ContractError;
 use crate::types::{
-    AttestationConfig, AttestationConfigKey, DataKeyCore, DataKeyExt, DeviationConfig,
-    DeviationConfigKey, DeviationReferenceMode, HbGateConfig, HbGateKey, OracleHeartbeatRecord,
-    PolicyAction, ProtocolHealthStatus, Round, RuntimeMode,
+    AttestationConfig, AttestationConfigKey, DataKey, DataKeyCore, DataKeyExt,
+    DeviationConfig, DeviationConfigKey, DeviationReferenceMode, HbGateConfig, HbGateKey,
+    OracleHeartbeatRecord, OracleQuorumConfig, PolicyAction, ProtocolHealthStatus, Round,
+    RuntimeMode,
 };
 use soroban_sdk::{symbol_short, Address, BytesN, Env, Symbol, Vec};
 
@@ -1068,6 +1069,88 @@ pub fn batch_touch_ttl(env: Env, keys: Vec<DataKeyCore>) -> Result<u32, Contract
     );
 
     Ok(touched)
+}
+
+/// Sets the multi-feed oracle quorum configuration (admin only).
+///
+/// When `Some(config)`, `resolve_round_multi` is enabled and the legacy
+/// single-oracle path is unaffected.  When `None`, multi-feed resolution is
+/// disabled and calling `resolve_round_multi` returns `OracleNotSet`.
+pub fn set_oracle_quorum_config(
+    env: Env,
+    config: Option<OracleQuorumConfig>,
+) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("set_quor"), e);
+    })?;
+
+    if let Some(ref cfg) = config {
+        _validate_quorum_config(cfg).inspect_err(|&e| {
+            _emit_action_rejected(&env, &admin, symbol_short!("set_quor"), e);
+        })?;
+    }
+
+    let key = DataKey::OracleQuorum;
+    match config {
+        Some(cfg) => {
+            env.storage().persistent().set(&key, &cfg);
+            _extend_persistent_ttl(&env, &key);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("oracle"), symbol_short!("quorum")),
+                (
+                    cfg.min_observations,
+                    cfg.quorum_threshold,
+                    cfg.outlier_threshold_bps,
+                ),
+            );
+        }
+        None => {
+            env.storage().persistent().remove(&key);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("oracle"), symbol_short!("quorum")),
+                (0u32, 0u32, 0u32),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Returns the configured multi-feed oracle quorum config, if set.
+pub fn get_oracle_quorum_config(env: Env) -> Option<OracleQuorumConfig> {
+    let key = DataKey::OracleQuorum;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
+/// Validates the quorum config values are within allowed bounds.
+pub(crate) fn _validate_quorum_config(cfg: &OracleQuorumConfig) -> Result<(), ContractError> {
+    use crate::common::{
+        DEFAULT_ORACLE_QUORUM_MIN_OBSERVATIONS, DEFAULT_ORACLE_QUORUM_THRESHOLD,
+        MAX_ORACLE_OBSERVATIONS,
+    };
+    if cfg.min_observations < DEFAULT_ORACLE_QUORUM_MIN_OBSERVATIONS
+        || cfg.min_observations > MAX_ORACLE_OBSERVATIONS
+    {
+        return Err(ContractError::TooFewObservations);
+    }
+    if cfg.quorum_threshold < DEFAULT_ORACLE_QUORUM_THRESHOLD
+        || cfg.quorum_threshold > cfg.min_observations
+    {
+        return Err(ContractError::InsufficientOracleQuorum);
+    }
+    if cfg.outlier_threshold_bps == 0 || cfg.outlier_threshold_bps > 10_000 {
+        return Err(ContractError::WindowOutOfRange);
+    }
+    Ok(())
 }
 
 pub fn _require_supported_schema(env: &Env) -> Result<u32, ContractError> {
