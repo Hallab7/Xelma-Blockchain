@@ -56,3 +56,12 @@ pub fn apply_oracle_max_deviation_bps(
     client.schedule_oracle_deviation_bps(&bps);
     activate_pending(env, client, ConfigChangeKind::OracleMaxDeviationBps);
 }
+
+pub fn apply_pending_winnings_expiry(
+    env: &Env,
+    client: &VirtualTokenContractClient,
+    ledgers: u32,
+) {
+    client.schedule_pending_winnings_expiry(&ledgers);
+    activate_pending(env, client, ConfigChangeKind::PendingWinningsExpiry);
+}

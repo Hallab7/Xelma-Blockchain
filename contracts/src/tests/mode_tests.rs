@@ -4,7 +4,7 @@
 use super::config_helpers::{apply_max_stake, apply_max_user_exposure, apply_windows};
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
-use crate::types::{BetSide, OraclePayload, RoundMode};
+use crate::types::{BetSide, DataKey, OraclePayload, RoundMode};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -1564,4 +1564,305 @@ fn test_precision_predictions_page_limit_is_capped_at_max_page_size() {
     // the cap doesn't break normal small-round behavior).
     let page = client.get_precision_predictions_page(&0, &1_000_000);
     assert_eq!(page.len(), 2);
+}
+
+// ============================================================================
+// MODE ALTERNATION REGRESSION TESTS (Issue #259)
+// ============================================================================
+// Verify that stale position data does not persist across mode switches.
+// The unified repository API (storage.rs) ensures clean_round_storage and
+// clean_user_positions remove ALL mode-specific keys regardless of which
+// mode is active.
+
+#[test]
+fn test_alternation_updown_after_precision_no_stale_data() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&alice);
+    client.mint_initial(&bob);
+
+    // --- Step 1: Run a Precision round ---
+    client.create_round(&2000, &Some(1));
+    let precision_round_id = client.get_last_round_id();
+    client.place_precision_prediction(&alice, &100_0000000, &2297);
+    client.place_precision_prediction(&bob, &150_0000000, &2300);
+
+    env.ledger().with_mut(|li| li.sequence_number = 12);
+    client.resolve_round(&OraclePayload {
+        price: 2298,
+        timestamp: env.ledger().timestamp(),
+        round_id: client.get_active_round().map(|r| r.start_ledger).unwrap_or(0),
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    // --- Step 2: Run an UpDown round (mode switch) ---
+    client.create_round(&1_5000000, &None);
+    let updown_round_id = client.get_last_round_id();
+    client.place_bet(&alice, &100_0000000, &BetSide::Up);
+    client.place_bet(&bob, &50_0000000, &BetSide::Down);
+
+    env.ledger().with_mut(|li| li.sequence_number = 25);
+    client.resolve_round(&OraclePayload {
+        price: 2_0000000,
+        timestamp: env.ledger().timestamp(),
+        round_id: client.get_active_round().map(|r| r.start_ledger).unwrap_or(0),
+        nonce: 2u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    // --- Step 3: Verify no stale Precision data leaks into UpDown round ---
+    // Use as_contract to check raw storage
+    env.as_contract(&contract_id, || {
+        // Stale PrecisionPosition from the first round should be cleared
+        let stale_pred_key = DataKey::PrecisionPosition(precision_round_id, alice.clone());
+        let has_stale_pred = env.storage().persistent().has(&stale_pred_key);
+        assert!(
+            !has_stale_pred,
+            "Precision position from round {} should have been cleared after resolution",
+            precision_round_id
+        );
+
+        // Stale PrecisionCommitment from the first round should be cleared
+        let stale_commit_key =
+            DataKey::PrecisionCommitment(precision_round_id, alice.clone());
+        let has_stale_commit = env.storage().persistent().has(&stale_commit_key);
+        assert!(
+            !has_stale_commit,
+            "Precision commitment from round {} should have been cleared",
+            precision_round_id
+        );
+
+        // Stale Position from the UpDown round should be cleared
+        let stale_pos_key = DataKey::Position(updown_round_id, alice.clone());
+        let has_stale_pos = env.storage().persistent().has(&stale_pos_key);
+        assert!(
+            !has_stale_pos,
+            "Position from round {} should have been cleared after resolution",
+            updown_round_id
+        );
+
+        // Legacy keys should also be cleared
+        let has_legacy_updown = env.storage().persistent().has(&DataKey::UpDownPositions);
+        assert!(!has_legacy_updown, "Legacy UpDownPositions should be cleared");
+
+        let has_legacy_precision = env.storage().persistent().has(&DataKey::PrecisionPositions);
+        assert!(
+            !has_legacy_precision,
+            "Legacy PrecisionPositions should be cleared"
+        );
+    });
+}
+
+#[test]
+fn test_alternation_precision_after_updown_no_stale_data() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let alice = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&alice);
+
+    // --- Step 1: Run an UpDown round ---
+    client.create_round(&1_0000000, &None);
+    let updown_round_id = client.get_last_round_id();
+    client.place_bet(&alice, &100_0000000, &BetSide::Up);
+
+    env.ledger().with_mut(|li| li.sequence_number = 12);
+    client.resolve_round(&OraclePayload {
+        price: 1_5000000,
+        timestamp: env.ledger().timestamp(),
+        round_id: client.get_active_round().map(|r| r.start_ledger).unwrap_or(0),
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    // --- Step 2: Run a Precision round (mode switch) ---
+    client.create_round(&2000, &Some(1));
+    let precision_round_id = client.get_last_round_id();
+    client.place_precision_prediction(&alice, &100_0000000, &2297);
+
+    env.ledger().with_mut(|li| li.sequence_number = 25);
+    client.resolve_round(&OraclePayload {
+        price: 2298,
+        timestamp: env.ledger().timestamp(),
+        round_id: client.get_active_round().map(|r| r.start_ledger).unwrap_or(0),
+        nonce: 2u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    // --- Step 3: Verify no stale UpDown data leaks into Precision round ---
+    env.as_contract(&contract_id, || {
+        let stale_pos_key = DataKey::Position(updown_round_id, alice.clone());
+        let has_stale_pos = env.storage().persistent().has(&stale_pos_key);
+        assert!(
+            !has_stale_pos,
+            "Position from round {} should have been cleared after resolution",
+            updown_round_id
+        );
+
+        let stale_pred_key = DataKey::PrecisionPosition(precision_round_id, alice.clone());
+        let has_stale_pred = env.storage().persistent().has(&stale_pred_key);
+        assert!(
+            !has_stale_pred,
+            "Precision position from round {} should have been cleared",
+            precision_round_id
+        );
+    });
+}
+
+#[test]
+fn test_alternation_cancel_clears_both_modes() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let alice = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&alice);
+
+    // Run a Precision round then cancel it
+    client.create_round(&2000, &Some(1));
+    let round_id = client.get_last_round_id();
+    client.place_precision_prediction(&alice, &100_0000000, &2297);
+
+    client.cancel_round(&42u32);
+
+    // Verify all position keys are cleared after cancellation
+    env.as_contract(&contract_id, || {
+        let pred_key = DataKey::PrecisionPosition(round_id, alice.clone());
+        assert!(!env.storage().persistent().has(&pred_key));
+
+        let commit_key = DataKey::PrecisionCommitment(round_id, alice.clone());
+        assert!(!env.storage().persistent().has(&commit_key));
+
+        // Cross-mode key should also be absent (never set, but verify no phantom data)
+        let pos_key = DataKey::Position(round_id, alice.clone());
+        assert!(!env.storage().persistent().has(&pos_key));
+
+        // Round participants should be cleared
+        let participants_key = DataKey::RoundParticipants(round_id);
+        assert!(!env.storage().persistent().has(&participants_key));
+    });
+}
+
+#[test]
+fn test_alternation_three_round_cycle_no_stale_data() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let alice = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+    client.mint_initial(&alice);
+
+    let mut round_ids: Vec<u64> = Vec::new(&env);
+
+    // Round 1: Precision
+    client.create_round(&2000, &Some(1));
+    round_ids.push_back(client.get_last_round_id());
+    client.place_precision_prediction(&alice, &100_0000000, &2100);
+    env.ledger().with_mut(|li| li.sequence_number = 12);
+    client.resolve_round(&OraclePayload {
+        price: 2100,
+        timestamp: env.ledger().timestamp(),
+        round_id: client.get_active_round().map(|r| r.start_ledger).unwrap_or(0),
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    // Round 2: UpDown
+    client.create_round(&1_5000000, &None);
+    round_ids.push_back(client.get_last_round_id());
+    client.place_bet(&alice, &100_0000000, &BetSide::Up);
+    env.ledger().with_mut(|li| li.sequence_number = 25);
+    client.resolve_round(&OraclePayload {
+        price: 2_0000000,
+        timestamp: env.ledger().timestamp(),
+        round_id: client.get_active_round().map(|r| r.start_ledger).unwrap_or(0),
+        nonce: 2u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    // Round 3: Precision again
+    client.create_round(&3000, &Some(1));
+    round_ids.push_back(client.get_last_round_id());
+    client.place_precision_prediction(&alice, &100_0000000, &3000);
+    env.ledger().with_mut(|li| li.sequence_number = 38);
+    client.resolve_round(&OraclePayload {
+        price: 3000,
+        timestamp: env.ledger().timestamp(),
+        round_id: client.get_active_round().map(|r| r.start_ledger).unwrap_or(0),
+        nonce: 3u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+
+    // Verify NO stale data from any round
+    env.as_contract(&contract_id, || {
+        for i in 0..round_ids.len() {
+            if let Some(rid) = round_ids.get(i) {
+                let pos_key = DataKey::Position(rid, alice.clone());
+                let pred_key = DataKey::PrecisionPosition(rid, alice.clone());
+                let commit_key = DataKey::PrecisionCommitment(rid, alice.clone());
+                let participants_key = DataKey::RoundParticipants(rid);
+
+                assert!(
+                    !env.storage().persistent().has(&pos_key),
+                    "Stale Position({}, _) after 3-round cycle",
+                    rid
+                );
+                assert!(
+                    !env.storage().persistent().has(&pred_key),
+                    "Stale PrecisionPosition({}, _) after 3-round cycle",
+                    rid
+                );
+                assert!(
+                    !env.storage().persistent().has(&commit_key),
+                    "Stale PrecisionCommitment({}, _) after 3-round cycle",
+                    rid
+                );
+                assert!(
+                    !env.storage().persistent().has(&participants_key),
+                    "Stale RoundParticipants({}) after 3-round cycle",
+                    rid
+                );
+            }
+        }
+    });
 }
