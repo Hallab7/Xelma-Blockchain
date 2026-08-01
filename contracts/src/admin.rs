@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MIT
 use crate::common::{
-    _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, CURRENT_SCHEMA_VERSION,
-    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS,
-    MAX_TWAP_WINDOW_SAMPLES, MIN_TWAP_WINDOW_SAMPLES, TTL_BUMP_AMOUNT, TTL_BUMP_THRESHOLD,
+    _derive_round_phase, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
+    payout_add, CURRENT_SCHEMA_VERSION, DEFAULT_BET_WINDOW_LEDGERS,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_RUN_WINDOW_LEDGERS, MAX_TWAP_WINDOW_SAMPLES,
+    MIN_TWAP_WINDOW_SAMPLES, TTL_BUMP_AMOUNT, TTL_BUMP_THRESHOLD,
 };
 use crate::errors::ContractError;
 use crate::types::{
-    AttestationConfig, AttestationConfigKey, DataKeyCore, DataKeyExt, DeviationConfig,
-    DeviationConfigKey, DeviationReferenceMode, HbGateConfig, HbGateKey, OracleHeartbeatRecord,
-    PolicyAction, ProtocolHealthStatus, Round, RuntimeMode,
+    AttestationConfig, AttestationConfigKey, DataKey, DataKeyCore, DataKeyExt,
+    DeviationConfig, DeviationConfigKey, DeviationReferenceMode, HbGateConfig, HbGateKey,
+    OracleHeartbeatRecord, OracleQuorumConfig, PolicyAction, ProtocolHealthStatus, Round,
+    RuntimeMode, PENDING_WINNINGS_EXPIRY_KEY, PendingWinningsUpdatedAtKey,
 };
 use soroban_sdk::{symbol_short, Address, BytesN, Env, Symbol, Vec};
 
@@ -64,7 +66,7 @@ pub fn get_schema_version(env: Env) -> u32 {
 /// writes or events are emitted. This lets operators verify that a migration
 /// would succeed before committing to it.
 pub fn migrate_schema_v1_to_v2(env: Env, dry_run: bool) -> Result<(), ContractError> {
-    let admin_key = DataKey::Admin;
+    let admin_key = DataKeyCore::Admin;
     _extend_persistent_ttl(&env, &admin_key);
     let admin: Address = env
         .storage()
@@ -102,7 +104,7 @@ pub fn migrate_schema_v1_to_v2(env: Env, dry_run: bool) -> Result<(), ContractEr
         return Ok(());
     }
 
-    let schema_key = DataKey::SchemaVersion;
+    let schema_key = DataKeyCore::SchemaVersion;
     env.storage().persistent().set(&schema_key, &TARGET_VERSION);
     _extend_persistent_ttl(&env, &schema_key);
 
@@ -121,7 +123,7 @@ pub fn migrate_schema_v1_to_v2(env: Env, dry_run: bool) -> Result<(), ContractEr
 /// writes or events are emitted. This lets operators verify that a migration
 /// would succeed before committing to it.
 pub fn migrate_schema_v2_to_v3(env: Env, dry_run: bool) -> Result<(), ContractError> {
-    let admin_key = DataKey::Admin;
+    let admin_key = DataKeyCore::Admin;
     _extend_persistent_ttl(&env, &admin_key);
     let admin: Address = env
         .storage()
@@ -159,7 +161,7 @@ pub fn migrate_schema_v2_to_v3(env: Env, dry_run: bool) -> Result<(), ContractEr
         return Ok(());
     }
 
-    let schema_key = DataKey::SchemaVersion;
+    let schema_key = DataKeyCore::SchemaVersion;
     env.storage().persistent().set(&schema_key, &TARGET_VERSION);
     _extend_persistent_ttl(&env, &schema_key);
 
@@ -187,7 +189,7 @@ pub fn announce_next_schema(env: Env, target_version: u32) -> Result<(), Contrac
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
 
@@ -195,7 +197,7 @@ pub fn announce_next_schema(env: Env, target_version: u32) -> Result<(), Contrac
         return Err(ContractError::UnsupportedSchemaVersion);
     }
 
-    let key = DataKey::NextSchemaVersion;
+    let key = DataKeyCore::NextSchemaVersion;
     env.storage().persistent().set(&key, &target_version);
     _extend_persistent_ttl(&env, &key);
 
@@ -210,7 +212,7 @@ pub fn announce_next_schema(env: Env, target_version: u32) -> Result<(), Contrac
 
 /// Returns the announced next schema version, if any.
 pub fn get_next_schema(env: Env) -> Option<u32> {
-    let key = DataKey::NextSchemaVersion;
+    let key = DataKeyCore::NextSchemaVersion;
     _extend_persistent_ttl(&env, &key);
     env.storage().persistent().get(&key)
 }
@@ -221,11 +223,11 @@ pub fn clear_next_schema(env: Env) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
 
-    let key = DataKey::NextSchemaVersion;
+    let key = DataKeyCore::NextSchemaVersion;
     if !env.storage().persistent().has(&key) {
         return Err(ContractError::UnsupportedSchemaVersion);
     }
@@ -368,8 +370,8 @@ pub fn _load_deviation_config(env: &Env) -> DeviationConfig {
     if env.storage().persistent().has(&key) {
         env.storage().persistent().extend_ttl(
             &key,
-            crate::common::TTL_BUMP_THRESHOLD,
-            crate::common::TTL_BUMP_AMOUNT,
+            TTL_BUMP_THRESHOLD,
+            TTL_BUMP_AMOUNT,
         );
     }
     env.storage()
@@ -386,8 +388,8 @@ fn _save_deviation_config(env: &Env, config: &DeviationConfig) {
     env.storage().persistent().set(&key, config);
     env.storage().persistent().extend_ttl(
         &key,
-        crate::common::TTL_BUMP_THRESHOLD,
-        crate::common::TTL_BUMP_AMOUNT,
+        TTL_BUMP_THRESHOLD,
+        TTL_BUMP_AMOUNT,
     );
 }
 
@@ -455,8 +457,8 @@ pub fn _load_attestation_config(env: &Env) -> AttestationConfig {
     if env.storage().persistent().has(&key) {
         env.storage().persistent().extend_ttl(
             &key,
-            crate::common::TTL_BUMP_THRESHOLD,
-            crate::common::TTL_BUMP_AMOUNT,
+            TTL_BUMP_THRESHOLD,
+            TTL_BUMP_AMOUNT,
         );
     }
     env.storage()
@@ -486,8 +488,8 @@ pub fn set_attestation_key(env: Env, key: Option<BytesN<32>>) -> Result<(), Cont
         .set(&storage_key, &AttestationConfig { key: key.clone() });
     env.storage().persistent().extend_ttl(
         &storage_key,
-        crate::common::TTL_BUMP_THRESHOLD,
-        crate::common::TTL_BUMP_AMOUNT,
+        TTL_BUMP_THRESHOLD,
+        TTL_BUMP_AMOUNT,
     );
 
     #[allow(deprecated)]
@@ -658,8 +660,8 @@ pub fn _load_hb_config(env: &Env) -> HbGateConfig {
     if env.storage().persistent().has(&key) {
         env.storage().persistent().extend_ttl(
             &key,
-            crate::common::TTL_BUMP_THRESHOLD,
-            crate::common::TTL_BUMP_AMOUNT,
+            TTL_BUMP_THRESHOLD,
+            TTL_BUMP_AMOUNT,
         );
     }
     env.storage()
@@ -678,8 +680,8 @@ pub fn _save_hb_config(env: &Env, config: &HbGateConfig) {
     env.storage().persistent().set(&key, config);
     env.storage().persistent().extend_ttl(
         &key,
-        crate::common::TTL_BUMP_THRESHOLD,
-        crate::common::TTL_BUMP_AMOUNT,
+        TTL_BUMP_THRESHOLD,
+        TTL_BUMP_AMOUNT,
     );
 }
 
@@ -1036,9 +1038,9 @@ pub fn batch_touch_ttl(env: Env, keys: Vec<DataKeyCore>) -> Result<u32, Contract
                 &env,
                 &admin,
                 symbol_short!("batch_t"),
-                ContractError::WindowOutOfRange,
+                ContractError::UnsupportedDataKeyForTtlTouch,
             );
-            return Err(ContractError::WindowOutOfRange);
+            return Err(ContractError::UnsupportedDataKeyForTtlTouch);
         }
         if env.storage().persistent().has(&key) {
             env.storage()
@@ -1059,6 +1061,88 @@ pub fn batch_touch_ttl(env: Env, keys: Vec<DataKeyCore>) -> Result<u32, Contract
     Ok(touched)
 }
 
+/// Sets the multi-feed oracle quorum configuration (admin only).
+///
+/// When `Some(config)`, `resolve_round_multi` is enabled and the legacy
+/// single-oracle path is unaffected.  When `None`, multi-feed resolution is
+/// disabled and calling `resolve_round_multi` returns `OracleNotSet`.
+pub fn set_oracle_quorum_config(
+    env: Env,
+    config: Option<OracleQuorumConfig>,
+) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKeyCore::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("set_quor"), e);
+    })?;
+
+    if let Some(ref cfg) = config {
+        _validate_quorum_config(cfg).inspect_err(|&e| {
+            _emit_action_rejected(&env, &admin, symbol_short!("set_quor"), e);
+        })?;
+    }
+
+    let key = DataKeyCore::OracleQuorum;
+    match config {
+        Some(cfg) => {
+            env.storage().persistent().set(&key, &cfg);
+            _extend_persistent_ttl(&env, &key);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("oracle"), symbol_short!("quorum")),
+                (
+                    cfg.min_observations,
+                    cfg.quorum_threshold,
+                    cfg.outlier_threshold_bps,
+                ),
+            );
+        }
+        None => {
+            env.storage().persistent().remove(&key);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("oracle"), symbol_short!("quorum")),
+                (0u32, 0u32, 0u32),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Returns the configured multi-feed oracle quorum config, if set.
+pub fn get_oracle_quorum_config(env: Env) -> Option<OracleQuorumConfig> {
+    let key = DataKeyCore::OracleQuorum;
+    _extend_persistent_ttl(&env, &key);
+    env.storage().persistent().get(&key)
+}
+
+/// Validates the quorum config values are within allowed bounds.
+pub(crate) fn _validate_quorum_config(cfg: &OracleQuorumConfig) -> Result<(), ContractError> {
+    use crate::common::{
+        DEFAULT_ORACLE_QUORUM_MIN_OBSERVATIONS, DEFAULT_ORACLE_QUORUM_THRESHOLD,
+        MAX_ORACLE_OBSERVATIONS,
+    };
+    if cfg.min_observations < DEFAULT_ORACLE_QUORUM_MIN_OBSERVATIONS
+        || cfg.min_observations > MAX_ORACLE_OBSERVATIONS
+    {
+        return Err(ContractError::TooFewObservations);
+    }
+    if cfg.quorum_threshold < DEFAULT_ORACLE_QUORUM_THRESHOLD
+        || cfg.quorum_threshold > cfg.min_observations
+    {
+        return Err(ContractError::InsufficientOracleQuorum);
+    }
+    if cfg.outlier_threshold_bps == 0 || cfg.outlier_threshold_bps > 10_000 {
+        return Err(ContractError::WindowOutOfRange);
+    }
+    Ok(())
+}
+
 pub fn _require_supported_schema(env: &Env) -> Result<u32, ContractError> {
     _extend_persistent_ttl(env, &DataKeyCore::SchemaVersion);
     if env.storage().persistent().has(&DataKeyCore::Admin) {
@@ -1069,4 +1153,101 @@ pub fn _require_supported_schema(env: &Env) -> Result<u32, ContractError> {
         return Err(ContractError::UnsupportedSchemaVersion);
     }
     Ok(v)
+}
+
+/// Reclaims expired pending winnings from `user` and credits them to the admin.
+///
+/// # Policy
+/// Unclaimed pending winnings older than the configured `PendingWinningsExpiry`
+/// (in ledgers) may be administratively reclaimed. The funds are credited to
+/// the admin's balance as a temporary sink, preserving the conservation
+/// invariant — no value is destroyed.
+///
+/// Emits `("claim", "expired")` on success.
+///
+/// # Errors
+/// - `AdminNotSet` — contract not initialized.
+/// - `ContractPaused` — contract is fully paused.
+/// - `PendingWinningsNotExpired` — entry exists but hasn't reached the expiry threshold.
+/// - `NoActiveRound` — used as a generic "no pending winnings" signal when
+///   the entry doesn't exist or expiry is disabled (0).
+pub fn reclaim_expired_pending_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
+    _require_supported_schema(&env)?;
+    let admin: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKeyCore::Admin)
+        .ok_or(ContractError::AdminNotSet)?;
+    admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("reclaim"), e);
+    })?;
+
+    // Read the expiry config. 0 or absent means expiry is disabled.
+    let expiry_key = PENDING_WINNINGS_EXPIRY_KEY;
+    let expiry_ledgers: u32 = env
+        .storage()
+        .persistent()
+        .get(&expiry_key)
+        .unwrap_or(0);
+    if expiry_ledgers == 0 {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("reclaim"),
+            ContractError::ExpiryNotConfigured,
+        );
+        return Err(ContractError::ExpiryNotConfigured);
+    }
+
+    // Read pending winnings.
+    let pending_key = DataKey::PendingWinnings(user.clone());
+    let pending: i128 = env.storage().persistent().get(&pending_key).unwrap_or(0);
+    if pending == 0 {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("reclaim"),
+            ContractError::PendingWinningsNotFound,
+        );
+        return Err(ContractError::PendingWinningsNotFound);
+    }
+
+    // Read the ledger when this entry was last updated.
+    let updated_key = PendingWinningsUpdatedAtKey(user.clone());
+    let updated_at: u32 = env
+        .storage()
+        .persistent()
+        .get(&updated_key)
+        .ok_or(ContractError::PendingWinningsNotFound)?;
+
+    let current_ledger = env.ledger().sequence();
+    let age = current_ledger.saturating_sub(updated_at);
+
+    if age < expiry_ledgers {
+        _emit_action_rejected(
+            &env,
+            &admin,
+            symbol_short!("reclaim"),
+            ContractError::PendingWinningsNotExpired,
+        );
+        return Err(ContractError::PendingWinningsNotExpired);
+    }
+
+    // CEI: remove storage keys before transferring.
+    env.storage().persistent().remove(&pending_key);
+    env.storage().persistent().remove(&updated_key);
+
+    // Credit the admin's balance (conservation: funds are not destroyed).
+    let admin_bal = balance(env.clone(), admin.clone());
+    let new_admin_bal = payout_add(admin_bal, pending)?;
+    _set_balance(&env, admin.clone(), new_admin_bal);
+
+    #[allow(deprecated)]
+    env.events().publish(
+        (symbol_short!("claim"), symbol_short!("expired")),
+        (user, pending, admin),
+    );
+
+    Ok(pending)
 }

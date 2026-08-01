@@ -1355,7 +1355,7 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
                 && *mode == 0
                 && user == &alice
                 && *gross_payout == 150_0000000
-                && *outcome_type == 1
+                && *outcome_type == 0
         }));
     assert!(outcomes
         .iter()
@@ -1364,7 +1364,7 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
                 && *mode == 0
                 && user == &bob
                 && *gross_payout == 0
-                && *outcome_type == 0
+                && *outcome_type == 1
         }));
 }
 
@@ -1482,7 +1482,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
                 && *mode == 1
                 && user == &alice
                 && *gross_payout == 300_0000000
-                && *outcome_type == 1
+                && *outcome_type == 0
         }));
     assert!(outcomes
         .iter()
@@ -1491,7 +1491,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
                 && *mode == 1
                 && user == &bob
                 && *gross_payout == 0
-                && *outcome_type == 0
+                && *outcome_type == 1
         }));
     assert!(outcomes
         .iter()
@@ -1500,7 +1500,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
                 && *mode == 1
                 && user == &charlie
                 && *gross_payout == 0
-                && *outcome_type == 0
+                && *outcome_type == 1
         }));
 }
 
@@ -3339,7 +3339,7 @@ fn test_get_user_archived_participation_cancel() {
     assert_eq!(outcome.prediction_side, 0);
     assert_eq!(outcome.stake, 100_0000000);
     assert_eq!(outcome.payout, 100_0000000);
-    assert_eq!(outcome.outcome, UserOutcomeType::Cancel);
+    assert_eq!(outcome.outcome, UserOutcomeType::Void);
 }
 
 #[test]

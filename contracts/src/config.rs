@@ -5,16 +5,17 @@ use crate::common::{
     _set_balance, balance, payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS,
     DEFAULT_ARCHIVE_RETENTION, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS,
     DEFAULT_DISPUTE_LEDGERS, DEFAULT_MAX_PRECISION_PARTICIPANTS, DEFAULT_ORACLE_STALE_THRESHOLD,
-    DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION, MAX_BET_WINDOW_LEDGERS,
-    MAX_CLOSE_BUFFER_LEDGERS, MAX_DISPUTE_LEDGERS, MAX_MIN_PARTICIPANTS,
-    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PRECISION_PARTICIPANTS_LIMIT,
-    MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_ARCHIVE_RETENTION,
-    MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD, MIN_START_PRICE,
+    DEFAULT_PENDING_WINNINGS_EXPIRY, DEFAULT_RUN_WINDOW_LEDGERS, MAX_ARCHIVE_RETENTION,
+    MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_DISPUTE_LEDGERS, MAX_MIN_PARTICIPANTS,
+    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_PENDING_WINNINGS_EXPIRY,
+    MAX_PRECISION_PARTICIPANTS_LIMIT, MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS,
+    MAX_START_PRICE, MIN_ARCHIVE_RETENTION, MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD,
+    MIN_PENDING_WINNINGS_EXPIRY, MIN_START_PRICE,
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingConfigChange,
-    PrecisionPayoutPolicy, RoundTemplate,
+    ConfigChangeKind, ConfigChangePayload, DataKey, DataKeyCore, DataKeyScoped, FeeModel,
+    PendingConfigChange, PrecisionPayoutPolicy, RoundTemplate, PENDING_WINNINGS_EXPIRY_KEY,
 };
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
@@ -172,14 +173,14 @@ pub fn set_fee_model(env: Env, model: FeeModel) -> Result<(), ContractError> {
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
     _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("fee_mod"), e);
     })?;
 
-    let key = DataKey::FeeModel;
+    let key = DataKeyCore::FeeModel;
     let old_model = _read_fee_model(&env);
     env.storage().persistent().set(&key, &model);
     _extend_persistent_ttl(&env, &key);
@@ -409,6 +410,7 @@ pub fn get_min_participants(env: Env) -> Option<u32> {
 }
 
 pub fn set_max_precision_participants(env: Env, max: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
     let admin: Address = env
         .storage()
         .persistent()
@@ -456,6 +458,7 @@ pub fn get_max_precision_participants(env: Env) -> u32 {
 }
 
 pub fn set_precision_payout_policy(env: Env, policy: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
     let admin: Address = env
         .storage()
         .persistent()
@@ -507,6 +510,7 @@ pub fn _read_precision_payout_policy(env: &Env) -> PrecisionPayoutPolicy {
 }
 
 pub fn set_mint_limit(env: Env, limit: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
     let admin: Address = env
         .storage()
         .persistent()
@@ -544,6 +548,7 @@ pub fn get_mint_limit(env: Env) -> u32 {
 const EPOCH_MINT_BUDGET_KEY: Symbol = symbol_short!("EpMintBgt");
 
 pub fn set_epoch_mint_budget(env: Env, budget: i128) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
     let admin: Address = env
         .storage()
         .persistent()
@@ -732,12 +737,16 @@ fn _dispute_ledgers_key(env: &Env) -> Symbol {
 /// Sets the dispute window length in ledgers (admin only, immediate).
 /// `0` preserves current behaviour — no dispute window, immediate settlement.
 pub fn set_dispute_ledgers(env: Env, ledgers: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
     let admin: Address = env
         .storage()
         .persistent()
         .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
+    _ensure_not_paused(&env).inspect_err(|&e| {
+        _emit_action_rejected(&env, &admin, symbol_short!("set_dsp"), e);
+    })?;
 
     if ledgers > MAX_DISPUTE_LEDGERS {
         _emit_action_rejected(
@@ -785,14 +794,14 @@ pub fn get_dispute_ledgers(env: &Env) -> u32 {
 /// Sets the early cash-out penalty rate in basis points (admin only).
 /// `None` disables early cash-out entirely (default).
 pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
-    crate::admin::_require_supported_schema(&env)?;
+    _require_supported_schema(&env)?;
     let admin: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Admin)
+        .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
-    crate::admin::_ensure_not_paused(&env).inspect_err(|&e| {
+    _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("ec_bps"), e);
     })?;
 
@@ -831,9 +840,40 @@ pub fn get_early_cashout_bps(env: Env) -> Option<u32> {
     env.storage().persistent().get(&key)
 }
 
-/// Same validation `create_round` performs on `(start_price, mode)`, applied
-/// up front at template-set time so a stored template can never later fail
-/// `create_round`'s own checks for a reason unrelated to round overlap.
+// ─── Pending winnings expiry (Issue #269) ────────────────────────────────────
+
+/// Schedules a timelocked pending winnings expiry update.
+pub fn schedule_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _validate_pending_winnings_expiry(ledgers)?;
+    _schedule_config_change(
+        &env,
+        ConfigChangeKind::PendingWinningsExpiry,
+        ConfigChangePayload::PendingWinningsExpiry(ledgers),
+    )
+}
+
+pub fn set_pending_winnings_expiry(env: Env, ledgers: u32) -> Result<(), ContractError> {
+    schedule_pending_winnings_expiry(env, ledgers)
+}
+
+pub fn get_pending_winnings_expiry(env: Env) -> u32 {
+    _extend_persistent_ttl(&env, &PENDING_WINNINGS_EXPIRY_KEY);
+    env.storage()
+        .persistent()
+        .get(&PENDING_WINNINGS_EXPIRY_KEY)
+        .unwrap_or(DEFAULT_PENDING_WINNINGS_EXPIRY)
+}
+
+// ─── Validation helpers ─────────────────────────────────────────────────────
+
+pub fn _validate_pending_winnings_expiry(ledgers: u32) -> Result<(), ContractError> {
+    if ledgers != 0 && (ledgers < MIN_PENDING_WINNINGS_EXPIRY || ledgers > MAX_PENDING_WINNINGS_EXPIRY) {
+        return Err(ContractError::InvalidDuration);
+    }
+    Ok(())
+}
+
 pub fn _validate_round_template(start_price: u128, mode: Option<u32>) -> Result<(), ContractError> {
     if start_price < MIN_START_PRICE || start_price > MAX_START_PRICE {
         return Err(ContractError::InvalidStartPrice);
@@ -845,8 +885,6 @@ pub fn _validate_round_template(start_price: u128, mode: Option<u32>) -> Result<
     }
     Ok(())
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 pub fn _validate_windows(bet_ledgers: u32, run_ledgers: u32) -> Result<(), ContractError> {
     if bet_ledgers == 0 || run_ledgers == 0 {
@@ -911,11 +949,13 @@ pub fn _validate_protocol_fee_bps(bps: Option<u32>) -> Result<(), ContractError>
     Ok(())
 }
 
+// ─── Fee helpers ─────────────────────────────────────────────────────────────
+
 /// Default fee incidence model: fee-on-pot for backward compatibility.
 pub const DEFAULT_FEE_MODEL: FeeModel = FeeModel::FeeOnPot;
 
 pub fn _read_fee_model(env: &Env) -> FeeModel {
-    let key = DataKey::FeeModel;
+    let key = DataKeyCore::FeeModel;
     let v: Option<FeeModel> = env.storage().persistent().get(&key);
     if v.is_some() {
         _extend_persistent_ttl(env, &key);
@@ -982,8 +1022,6 @@ pub fn calculate_protocol_fee_updown(
                 / BPS_DENOMINATOR
         }
         FeeModel::FeeOnWinnings => {
-            // Fee only on the profit (losing_pool); winners retain their principal.
-            // Since bps ≤ 1000 (10%), fee can never exceed losing_pool.
             losing_pool
                 .checked_mul(bps_value as i128)
                 .ok_or(ContractError::Overflow)?
@@ -997,7 +1035,6 @@ pub fn calculate_protocol_fee_updown(
 
     match model {
         FeeModel::FeeOnPot => {
-            // Fee is split across both pools: losing pool first, then winning pool (spillover).
             let fee_from_losing = fee_amount.min(losing_pool);
             let fee_from_winning = fee_amount
                 .checked_sub(fee_from_losing)
@@ -1011,8 +1048,6 @@ pub fn calculate_protocol_fee_updown(
             Ok((dist_winning, dist_losing, fee_amount))
         }
         FeeModel::FeeOnWinnings => {
-            // Fee is deducted entirely from the losing pool (the profit).
-            // Winners always get their full principal back.
             let dist_losing = losing_pool
                 .checked_sub(fee_amount)
                 .ok_or(ContractError::Overflow)?;
@@ -1051,7 +1086,6 @@ pub fn calculate_protocol_fee_precision(
     let taxable_base = match model {
         FeeModel::FeeOnPot => total_pot,
         FeeModel::FeeOnWinnings => {
-            // Fee only on profits = total_pot minus winners' own stakes.
             let profit = total_pot
                 .checked_sub(winner_stakes)
                 .ok_or(ContractError::Overflow)?;
@@ -1090,6 +1124,8 @@ pub fn _apply_protocol_fee_precision(
     }
     Ok((distributable, fee_amount))
 }
+
+// ─── Internal helpers ───────────────────────────────────────────────────────
 
 pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChangePayload {
     match kind {
@@ -1160,6 +1196,12 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKeyCore::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
         ),
+        ConfigChangeKind::PendingWinningsExpiry => ConfigChangePayload::PendingWinningsExpiry(
+            env.storage()
+                .persistent()
+                .get(&PENDING_WINNINGS_EXPIRY_KEY)
+                .unwrap_or(DEFAULT_PENDING_WINNINGS_EXPIRY),
+        ),
         ConfigChangeKind::MinBet => {
             ConfigChangePayload::MinBet(env.storage().persistent().get(&DataKeyCore::MinBet))
         }
@@ -1181,6 +1223,7 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&_dispute_ledgers_key(env))
                 .unwrap_or(DEFAULT_DISPUTE_LEDGERS),
         ),
+        ConfigChangeKind::FeeModel => ConfigChangePayload::FeeModel(_read_fee_model(env)),
     }
 }
 
@@ -1316,6 +1359,19 @@ pub fn _apply_config_payload(
                 env.storage().persistent().remove(&key);
             }
         }
+        (
+            ConfigChangeKind::PendingWinningsExpiry,
+            ConfigChangePayload::PendingWinningsExpiry(ledgers),
+        ) => {
+            _validate_pending_winnings_expiry(*ledgers)?;
+            env.storage().persistent().set(&PENDING_WINNINGS_EXPIRY_KEY, ledgers);
+            _extend_persistent_ttl(env, &PENDING_WINNINGS_EXPIRY_KEY);
+            #[allow(deprecated)]
+            env.events().publish(
+                (symbol_short!("pending"), symbol_short!("expiry")),
+                (*ledgers,),
+            );
+        }
         (ConfigChangeKind::MinBet, ConfigChangePayload::MinBet(min)) => {
             _validate_min_bet(*min)?;
             let key = DataKeyCore::MinBet;
@@ -1360,7 +1416,54 @@ pub fn _apply_config_payload(
             env.storage().persistent().set(&key, ledgers);
             _extend_ttl_symbol(env, &key);
         }
-        _ => return Err(ContractError::InvalidMode),
+        (ConfigChangeKind::FeeModel, ConfigChangePayload::FeeModel(model)) => {
+            let key = DataKeyCore::FeeModel;
+            env.storage().persistent().set(&key, model);
+            _extend_persistent_ttl(env, &key);
+        }
+        (ConfigChangeKind::EpochMintBudget, ConfigChangePayload::EpochMintBudget(budget)) => {
+            if *budget < 0 {
+                return Err(ContractError::InvalidBetAmount);
+            }
+            env.storage()
+                .instance()
+                .set(&EPOCH_MINT_BUDGET_KEY, budget);
+        }
+        (ConfigChangeKind::MintLimit, ConfigChangePayload::MintLimit(limit)) => {
+            env.storage()
+                .instance()
+                .set(&DataKeyCore::MintLimitConfig, limit);
+        }
+        (ConfigChangeKind::ArchiveRetention, ConfigChangePayload::ArchiveRetention(limit)) => {
+            if !(MIN_ARCHIVE_RETENTION..=MAX_ARCHIVE_RETENTION).contains(limit) {
+                return Err(ContractError::WindowOutOfRange);
+            }
+            let key = DataKeyCore::ArchiveRetention;
+            env.storage().persistent().set(&key, limit);
+            _extend_persistent_ttl(env, &key);
+        }
+        (ConfigChangeKind::MinParticipants, ConfigChangePayload::MinParticipants(min)) => {
+            if let Some(v) = min {
+                if *v == 0 || *v > MAX_MIN_PARTICIPANTS {
+                    return Err(ContractError::InvalidMinParticipants);
+                }
+            }
+            let key = DataKeyCore::MinParticipants;
+            if let Some(v) = min {
+                env.storage().persistent().set(&key, v);
+                _extend_persistent_ttl(env, &key);
+            } else {
+                env.storage().persistent().remove(&key);
+            }
+        }
+        (ConfigChangeKind::MaxPrecisionParticipants, ConfigChangePayload::MaxPrecisionParticipants(max)) => {
+            if *max == 0 || *max > MAX_PRECISION_PARTICIPANTS_LIMIT {
+                return Err(ContractError::InvalidPrecisionCap);
+            }
+            let key = DataKeyCore::MaxPrecisionParticipants;
+            env.storage().persistent().set(&key, max);
+            _extend_persistent_ttl(env, &key);
+        }
     }
     _emit_config_updated(env, kind.clone(), old_value, payload.clone());
     Ok(())
