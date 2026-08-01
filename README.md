@@ -159,6 +159,16 @@ This ensures:
 - ✅ **Simple & predictable** - First predictor gets the remainder
 - ✅ **Fair distribution** - Close to equal split, minimal advantage
 
+### Precision Commit-Reveal Flow
+
+To prevent front-running and copy-trading, Precision rounds support a two-step commit-reveal flow:
+1. **Commit**: Users submit a SHA-256 hash of their `predicted_price` and a `salt`. This locks their stake without revealing the guess. The commitment hash must be valid (not all-zeros).
+2. **Reveal**: During the reveal window, users submit the plaintext `predicted_price` and `salt`. The contract verifies the hash and enforces minimum salt entropy (to prevent trivial grinding).
+
+**Unrevealed Policy**:
+- **Anti-Griefing**: If at least one prediction is revealed (or placed directly), any unrevealed commitments are forfeited to the pot and count as losers.
+- **Conservation**: If *nobody* reveals in the round, all committed stakes are fully refunded to the users.
+
 ### Oracle Operator Runbook
 
 Oracle mistakes are a top incident source. See
