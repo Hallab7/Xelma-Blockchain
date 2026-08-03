@@ -26,6 +26,7 @@ fn setup() -> (
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     (env, contract_id, admin, oracle, client)
 }
 
@@ -429,7 +430,17 @@ fn test_event_coverage_claim_winnings() {
         topics.get(1).unwrap().try_into_val(&env),
         Ok(symbol_short!("winnings"))
     );
-    assert_eq!(data.try_into_val(&env), Ok((user, 100_0000000i128)));
+    // Structured event: (user, amount_claimed, balance_before, balance_after)
+    #[allow(clippy::type_complexity)]
+    let parsed: Result<(Address, i128, i128, i128), _> = data.try_into_val(&env);
+    let (ev_user, ev_amount, ev_balance_before, ev_balance_after) =
+        parsed.expect("claim_winnings event must have 4-element tuple");
+    assert_eq!(ev_user, user);
+    assert_eq!(ev_amount, 100_0000000i128);
+    // balance_before: 900_0000000 (10_0000000 initial - 100_0000000 bet)
+    assert_eq!(ev_balance_before, 900_0000000i128);
+    // balance_after: balance_before + amount = 1_000_0000000
+    assert_eq!(ev_balance_after, 1_000_0000000i128);
 }
 
 // ─── Action rejected diagnostic events (Issue #196) ─────────────────────────

@@ -54,22 +54,23 @@ field is validated in order; a failure at any step rejects the entire submission
 | `network_id`    | `BytesN<32>`| Yes      | SHA-256 hash of the network passphrase. Prevents cross-network replay. |
 | `contract_addr` | `Address`   | Yes      | The contract this payload targets. Prevents cross-contract replay. |
 
-### Validation order (`contract.rs:1488`)
+### Validation order (`contract.rs`)
 
 ```
 1. price ≠ 0                         → InvalidPrice
 2. oracle.require_auth()             → UnauthorizedOracle
 3. contract not paused               → ContractPaused
-4. active round exists               → NoActiveRound
-5. round_id == ActiveRound.start_ledger → InvalidOracleRound
-6. network_id matches env              → OracleNetworkMismatch
-7. contract_addr matches               → OracleContractMismatch
-8. timestamp ≤ now                    → FutureOracleData
-9. now - timestamp ≤ 300 s            → StaleOracleData
-10. deviation ≤ OracleMaxDeviationBps  → OracleDeviationExceeded
-11. nonce not consumed                → OracleNonceReused
-12. current_ledger ≥ end_ledger       → RoundNotEnded
-13. min-participants check            → fallback refund (not an error)
+4. heartbeat health (Issue #264)     → OracleHeartbeatUnhealthy
+5. active round exists               → NoActiveRound
+6. round_id == ActiveRound.start_ledger → InvalidOracleRound
+7. network_id matches env              → OracleNetworkMismatch
+8. contract_addr matches               → OracleContractMismatch
+9. timestamp ≤ now                    → FutureOracleData
+10. now - timestamp ≤ 300 s            → StaleOracleData
+11. deviation ≤ OracleMaxDeviationBps  → OracleDeviationExceeded
+12. nonce not consumed                → OracleNonceReused
+13. current_ledger ≥ end_ledger       → RoundNotEnded
+14. min-participants check            → fallback refund (not an error)
 ```
 
 ### Field requirements in detail
@@ -232,7 +233,8 @@ template, not for signing.
 ## 4. Heartbeat & Liveness
 
 The oracle should call `update_oracle_heartbeat(status)` at regular intervals to
-prove liveness.
+prove liveness. **As of Issue #264, heartbeat liveness is enforced at settlement**
+— a stale or unhealthy oracle cannot resolve rounds without an admin override.
 
 | Status | Meaning |
 |--------|---------|
@@ -250,6 +252,47 @@ is not live. An admin-armed one-shot override (`arm_hb_override`) or a configure
 grace period (`HbGateConfig.grace_seconds`) can allow settlement through the gate.
 
 **Recommended interval:** every 15–30 minutes for a 1-hour threshold.
+
+### 4.1 Heartbeat health enforcement (Issue #264)
+
+`resolve_round` now enforces heartbeat health **before** any state mutation
+occurs. The enforcement gate is checked after oracle auth and pause checks,
+but before nonce consumption and settlement logic.
+
+**Allow/Deny Matrix:**
+
+| Heartbeat        | Strict Mode | In Grace Window | Override Armed | Result         |
+|------------------|-------------|-----------------|----------------|----------------|
+| Active + Fresh   | any         | any             | any            | ALLOW          |
+| Degraded + Fresh | off         | any             | any            | ALLOW          |
+| Degraded + Fresh | on          | any             | no             | DENY (66)      |
+| Stale            | off         | yes             | no             | ALLOW (grace)  |
+| Stale            | off         | no              | no             | DENY (66)      |
+| Stale            | on          | any             | no             | DENY (66)      |
+| Offline (2)      | any         | any             | no             | DENY (66)      |
+| No heartbeat     | n/a         | n/a             | no             | DENY (66)      |
+| ANY              | any         | any             | yes            | ALLOW*         |
+
+\* Override is consumed (one-shot), emitting `(oracle, hb_override)`.
+
+**Key parameters:**
+
+| Parameter | Default | Range | Query |
+|-----------|---------|-------|-------|
+| Stale threshold | 3600 s | 60–86400 s | `get_oracle_stale_threshold()` |
+| Grace period | 600 s | 0–86400 s | `get_oracle_heartbeat_grace()` |
+| Strict mode | false | bool | `get_oracle_heartbeat_strict_mode()` |
+| Override armed | false | bool | `is_oracle_heartbeat_override_armed()` |
+
+**Grace period** is an additional window beyond the stale threshold.
+For example, with a 3600 s stale threshold and 600 s grace:
+- 0–3600 s after heartbeat: fresh → ALLOW
+- 3600–4200 s after heartbeat: stale but within grace → ALLOW (non-strict)
+- 4200+ s after heartbeat: stale beyond grace → DENY
+
+**Strict mode** eliminates the grace period and blocks degraded-status
+settlement entirely. When enabled, only active+fresh heartbeats allow
+settlement (plus the admin override).
 
 ---
 
@@ -380,6 +423,7 @@ MultiFeedPayload {
 | `RoundNotEnded` | 16 | `current_ledger < round.end_ledger` | Query `get_active_round()` and compare `end_ledger` with the latest ledger. | Wait for the round to reach `end_ledger` before submitting. |
 | `InvalidPrice` | 12 | `payload.price == 0` | Check the price feed output. | Ensure price is > 0 before building the payload. |
 | `OracleNotSet` | 3 | Oracle address was never initialised | `get_oracle()` returns nothing. | Contact admin to call `initialize(admin, oracle)`. |
+| `OracleHeartbeatUnhealthy` | 66 | Heartbeat is stale, offline, degraded (strict), or missing | Query `get_oracle_heartbeat()`, `get_oracle_heartbeat_grace()`, `get_oracle_heartbeat_strict_mode()`. | Restore heartbeat service and re-submit, or ask admin to [arm the heartbeat override](#75-heartbeat-override-admin-arms-oracle-uses). |
 
 ### Error recursion risk
 
@@ -444,7 +488,35 @@ persist across rounds.
 - As a workflow bypass. Prefer adjusting `OracleMaxDeviationBps` via timelock
   for persistent changes.
 
-### 7.5 Config timelock (admin initiates)
+### 7.5 Heartbeat override (admin arms, oracle uses)
+
+When the oracle heartbeat is unhealthy (stale, degraded, offline, or missing)
+and the round must still be settled, the admin can arm a one-shot heartbeat
+override:
+
+```
+admin calls: arm_oracle_heartbeat_override()
+oracle calls: resolve_round(payload)          // bypasses heartbeat check once
+```
+
+**Events:**
+- `(oracle, hb_arm_ovr)` — emitted when the override is armed
+- `(oracle, hb_override)` — emitted when the override is consumed during settlement
+
+The override is consumed after one settlement. It does **not** persist across
+rounds and does **not** bypass deviation or confidence guardrails — it only
+suppresses `OracleHeartbeatUnhealthy (66)`.
+
+**When to use:**
+- Oracle service is experiencing a brief outage but the price data is valid.
+- Heartbeat infrastructure failed while the oracle itself is healthy.
+- Emergency settlement needed during a heartbeat system migration.
+
+**When NOT to use:**
+- As a permanent workflow bypass. Restore heartbeat infrastructure promptly.
+- When the oracle's price data may also be unreliable (use `cancel_round` instead).
+
+### 7.6 Config timelock (admin initiates)
 
 Most oracle safety parameters are changed via the timelock. The change is
 scheduled and activates after a cooldown.
@@ -505,6 +577,8 @@ Decision:
 2. Attempt to restore price feed.
 3. If restore takes longer than the active round's end:
    - Contact admin to cancel the round (admin cancel_round).
+   - **OR** admin arms heartbeat override: `arm_oracle_heartbeat_override()`
+     then oracle resolves. Override is one-shot.
    - After cancel, users can claim their refunded stakes.
 4. Once service is fully restored:
    - Log heartbeat as "active" (status = 0).

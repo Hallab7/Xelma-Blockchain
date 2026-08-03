@@ -43,6 +43,13 @@ pub const DEFAULT_ORACLE_STALE_THRESHOLD: u64 = 3_600; // 1 hour
 pub const MIN_ORACLE_STALE_THRESHOLD: u64 = 60; // 1 minute
 pub const MAX_ORACLE_STALE_THRESHOLD: u64 = 86_400; // 24 hours
 
+// ─── Oracle heartbeat grace period ────────────────────────────────────────────
+/// Grace period beyond the stale threshold before settlement is blocked.
+/// Only honoured when heartbeat strict mode is disabled.
+pub const DEFAULT_ORACLE_HEARTBEAT_GRACE_SECONDS: u64 = 600; // 10 minutes
+pub const MIN_ORACLE_HEARTBEAT_GRACE_SECONDS: u64 = 0;
+pub const MAX_ORACLE_HEARTBEAT_GRACE_SECONDS: u64 = 86_400; // 24 hours
+
 pub const DEFAULT_BET_WINDOW_LEDGERS: u32 = 6;
 pub const DEFAULT_RUN_WINDOW_LEDGERS: u32 = 12;
 pub const DEFAULT_CLOSE_BUFFER_LEDGERS: u32 = 0;
