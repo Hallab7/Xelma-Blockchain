@@ -366,6 +366,7 @@ jobs:
       - name: Check coverage thresholds
         run: |
           echo "=== Coverage Threshold Check ==="
+          fail=0
 
           # Extract line coverage for contract.rs
           # cargo-llvm-cov JSON format: .data[].files[].filename / .summary.lines.percent
@@ -388,7 +389,7 @@ jobs:
 
           if [ "$CONTRACT_COVERAGE_INT" -lt "$CONTRACT_THRESHOLD" ]; then
             echo "FAIL: contract.rs coverage ${CONTRACT_COVERAGE}% is below threshold ${CONTRACT_THRESHOLD}%"
-            exit 1
+            fail=1
           fi
 
           # Extract overall workspace line coverage
@@ -408,7 +409,7 @@ jobs:
             exit 1
           fi
 
-          echo "=== All coverage thresholds met ==="
+          echo "=== All coverage thresholds met =="
 
       - name: Upload HTML coverage report
         uses: actions/upload-artifact@v4
@@ -608,7 +609,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [rust-test, contract-build, bindings-test, bindings-build, bindings-vitest, e2e-smoke, parity-check, coverage, format-check, license-header-check, security-audit]
+    needs: [rust-test, contract-build, bindings-test, bindings-build, bindings-vitest, e2e-smoke, parity-check, coverage, format-check, license-header-check, security-audit, wasm-size-gate]
     if: always()
     steps:
       - name: Check all jobs status
@@ -623,7 +624,8 @@ jobs:
              [ "${{ needs.coverage.result }}" != "success" ] || \
              [ "${{ needs.format-check.result }}" != "success" ] || \
              [ "${{ needs.license-header-check.result }}" != "success" ] || \
-             [ "${{ needs.security-audit.result }}" != "success" ]; then
+             [ "${{ needs.security-audit.result }}" != "success" ] || \
+             [ "${{ needs.wasm-size-gate.result }}" != "success" ]; then
             echo "One or more CI jobs failed"
             echo "Rust Tests: ${{ needs.rust-test.result }}"
             echo "Contract Build: ${{ needs.contract-build.result }}"
