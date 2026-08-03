@@ -273,11 +273,11 @@ grace period (`HbGateConfig.grace_seconds`) can allow settlement through the gat
 
 4. **Submit resolve_round**
    - Sign with the oracle key.
-   - If `Ok(())` → round resolved. Monitor the `("round", "resolved")` event.
+   - If `Ok(())` → round resolved. Monitor the `("round", "summary")` event.
    - If `Err(...)` → see [Troubleshooting Matrix](#6-troubleshooting-matrix).
 
 5. **Handle fallback**
-   - If `Ok(())` but the round emitted `("round", "fallback")`, the round had
+   - If `Ok(())` but the round emitted `("round", "summary")` with status `2 (FallbackRefund)`, the round had
      too few participants and stakes were refunded. No competitive settlement
      occurred. This is not an error.
 
@@ -420,7 +420,7 @@ Refunds all participant stakes. Use when the round cannot be resolved
 admin calls: cancel_round(reason)
 ```
 
-Cancelled rounds emit `("round", "cancelled")` and are archived. A cancelled
+Cancelled rounds emit `("round", "summary")` with status `1 (Cancelled)` and are archived. A cancelled
 round **cannot** be resolved later — any `resolve_round` targeting it will fail.
 
 ### 7.4 Deviation override (admin arms, oracle uses)
@@ -465,7 +465,7 @@ scheduled and activates after a cooldown.
 2. Fetch price from primary feed
 3. Build OraclePayload (template §3.1 or §3.2)
 4. Submit resolve_round(payload)
-5. On Ok(()):  Verify ("round", "resolved") event
+5. On Ok(()):  Verify ("round", "summary") event
 6. On Err(e):  Consult troubleshooting matrix, fix, retry
 ```
 

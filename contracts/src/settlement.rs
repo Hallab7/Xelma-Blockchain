@@ -27,7 +27,7 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{symbol_short, Address, Bytes, Env, Map, Vec};
 
 /// Cancels the active round and deterministically refunds all participant stakes.
-pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
+pub fn cancel_round(env: Env, _reason: u32) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     let admin: Address = env
         .storage()
@@ -137,6 +137,7 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
         0,
         participant_count,
         0,
+        None,
     );
 
     env.storage()
@@ -146,13 +147,6 @@ pub fn cancel_round(env: Env, reason: u32) -> Result<(), ContractError> {
         .persistent()
         .set(&DataKeyScoped::CancelledRound(round_id), &true);
     env.storage().persistent().remove(&DataKeyCore::ActiveRound);
-
-    // Emit cancellation event
-    #[allow(deprecated)]
-    env.events().publish(
-        (symbol_short!("round"), symbol_short!("cancel")),
-        (round_id, reason, round.pool_up, round.pool_down),
-    );
 
     Ok(())
 }
@@ -868,7 +862,9 @@ fn _settle_round_with_price(
                 final_price,
                 count,
                 0,
+                None,
             );
+            _refund_under_threshold(&env, &round, &threshold_participants)?;
             _refund_under_threshold(env, round, &threshold_participants)?;
             #[allow(deprecated)]
             env.events().publish(
@@ -908,6 +904,7 @@ fn _settle_round_with_price(
         final_price,
         participant_count,
         fee_amount,
+        payload.confidence,
     );
 
     for i in 0..participants.len() {
@@ -1660,8 +1657,10 @@ pub fn _archive_round(
     final_price: u128,
     participant_count: u32,
     fee_amount: i128,
+    confidence: Option<u32>,
 ) {
     let status_val = status.clone() as u32;
+    let settled_at_ledger = env.ledger().sequence();
     let summary = ArchivedRoundSummary {
         round_id: round.round_id,
         price_start: round.price_start,
@@ -1671,7 +1670,7 @@ pub fn _archive_round(
         pool_up: round.pool_up,
         pool_down: round.pool_down,
         participant_count,
-        settled_at_ledger: env.ledger().sequence(),
+        settled_at_ledger,
     };
 
     env.storage()
@@ -1734,13 +1733,19 @@ pub fn _archive_round(
     env.events().publish(
         (symbol_short!("round"), symbol_short!("summary")),
         (
+            0u32,
             round.round_id,
+            status_val,
             round.mode.clone() as u32,
             round.price_start,
             final_price,
+            round.pool_up,
+            round.pool_down,
             participant_count,
             total_pot,
             fee_amount,
+            settled_at_ledger,
+            confidence,
             status_val,
             fee_model_value,
         ),

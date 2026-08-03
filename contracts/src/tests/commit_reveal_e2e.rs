@@ -36,7 +36,7 @@
 //! `env.events().all()` only returns events from the *current* ledger.
 //!
 //! Per-event topic coverage (the precise shape of `mint/initial`,
-//! `round/created`, `commit/predict`, `reveal/predict`, `round/resolved`,
+//! `round/created`, `commit/predict`, `reveal/predict`, `round/summary`,
 //! `claim/winnings` payloads) lives in dedicated test modules:
 //!
 //! - [`contracts/src/tests/event_coverage.rs`] — one test per event topic,
@@ -130,7 +130,7 @@ fn test_salt(env: &Env, seed: u8) -> BytesN<32> {
 ///    `PrecisionPosition`.
 /// 6. Advance ledger to the resolve window (≥ 12) and submit an oracle
 ///    payload selecting Carol as the unique closest guesser.
-///    Per-ledger event check: `("round", "resolved")`.
+///    Per-ledger event check: `("round", "summary")`.
 /// 7. Assert payout vector, pending winnings, user-stats deltas, and
 ///    archived round summary in one pass.
 /// 8. Carol claims her winnings and ends with the expected final balance.
@@ -245,7 +245,7 @@ fn test_commit_reveal_e2e_full_lifecycle() {
 
     assert_eq!(client.get_active_round(), None);
 
-    // NOTE: "round/resolved" topic verification lives in
+    // NOTE: "round/summary" topic verification lives in
     // `event_coverage.rs::test_event_coverage_resolve_round` and
     // similar tests. The lifecycle test focuses on functional behavior
     // — the round is verifiably resolved because `get_active_round()`

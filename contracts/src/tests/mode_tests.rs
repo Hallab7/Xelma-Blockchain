@@ -627,7 +627,7 @@ fn test_all_events_for_updown_round() {
     });
     assert!(bet_event.is_some(), "Second bet should emit event");
 
-    // 5. Resolve round - should emit round resolved event
+    // 5. Resolve round - should emit round summary event
     let round = client.get_active_round().unwrap();
     env.ledger().with_mut(|li| {
         li.sequence_number = round.end_ledger;
@@ -648,11 +648,11 @@ fn test_all_events_for_updown_round() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
     assert!(
         resolved_event.is_some(),
-        "Round resolved event should be emitted"
+        "Round summary event should be emitted"
     );
 
     // 6. Claim winnings - should emit claim event
@@ -769,7 +769,7 @@ fn test_all_events_for_precision_round() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
     assert!(
         resolved_event.is_some(),
