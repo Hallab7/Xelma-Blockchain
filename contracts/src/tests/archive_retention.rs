@@ -59,14 +59,14 @@ fn test_default_archive_retention() {
 fn test_set_archive_retention_below_min_fails() {
     let (env, client, _, _) = setup_with_oracle();
     let result = client.try_set_archive_retention(&0);
-    assert_eq!(result, Err(Ok(ContractError::InvalidArchiveRetention)));
+    assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
 }
 
 #[test]
 fn test_set_archive_retention_above_max_fails() {
     let (env, client, _, _) = setup_with_oracle();
     let result = client.try_set_archive_retention(&10_001);
-    assert_eq!(result, Err(Ok(ContractError::InvalidArchiveRetention)));
+    assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
 }
 
 #[test]

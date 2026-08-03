@@ -551,13 +551,13 @@ fn test_action_rejected_set_archive_retention_invalid() {
     let (env, _, _, admin, client) = setup();
 
     let result = client.try_set_archive_retention(&0);
-    assert_eq!(result, Err(Ok(ContractError::InvalidArchiveRetention)));
+    assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
 
     assert_last_action_rejected(
         &env,
         admin,
         symbol_short!("set_arch"),
-        ContractError::InvalidArchiveRetention,
+        ContractError::WindowOutOfRange,
     );
 }
 

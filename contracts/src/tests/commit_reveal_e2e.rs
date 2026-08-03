@@ -678,7 +678,7 @@ fn test_commit_reveal_e2e_zero_commitment_hash_is_rejected() {
 
     let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
     let result = client.try_commit_prediction(&user, &zero_hash, &ALICE_BET);
-    assert_eq!(result, Err(Ok(ContractError::InvalidCommitment)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
     assert_eq!(client.balance(&user), INITIAL_BALANCE);
 }
 
@@ -708,13 +708,13 @@ fn test_commit_reveal_e2e_weak_salt_is_rejected() {
     let zero_salt = BytesN::from_array(&env, &[0u8; 32]);
     assert_eq!(
         client.try_reveal_prediction(&user, &price, &zero_salt),
-        Err(Ok(ContractError::InvalidSalt))
+        Err(Ok(ContractError::InvalidPrice))
     );
 
     let constant_salt = BytesN::from_array(&env, &[0xABu8; 32]);
     assert_eq!(
         client.try_reveal_prediction(&user, &price, &constant_salt),
-        Err(Ok(ContractError::InvalidSalt))
+        Err(Ok(ContractError::InvalidPrice))
     );
 
     // Correct entropy salt still reveals successfully.

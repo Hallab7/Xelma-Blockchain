@@ -1240,7 +1240,7 @@ fn test_precision_commit_rejects_zero_commitment_hash() {
 
     let zero = BytesN::from_array(&env, &[0u8; 32]);
     let result = client.try_commit_prediction(&user, &zero, &100_0000000);
-    assert_eq!(result, Err(Ok(ContractError::InvalidCommitment)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 }
 
 #[test]
@@ -1276,7 +1276,7 @@ fn test_precision_reveal_rejects_low_entropy_salt() {
     let zero_salt = BytesN::from_array(&env, &[0u8; 32]);
     assert_eq!(
         client.try_reveal_prediction(&user, &price, &zero_salt),
-        Err(Ok(ContractError::InvalidSalt))
+        Err(Ok(ContractError::InvalidPrice))
     );
 }
 

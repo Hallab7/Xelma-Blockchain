@@ -5,25 +5,24 @@ use crate::admin::{
 use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
     payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION, MAX_ORACLE_OBSERVATIONS,
-};
-use crate::settlement_math::{
-    classify_price_direction, compute_deviation_bps, compute_updown_winner_payout,
-    is_one_sided_pool, total_pot_updown, PriceDirection,
+    TTL_BUMP_AMOUNT, TTL_BUMP_THRESHOLD,
 };
 use crate::config::{
     _apply_protocol_fee_precision, _apply_protocol_fee_updown, _read_fee_model,
 };
-use crate::types::PendingWinningsUpdatedAtKey;
-use crate::config::{_apply_protocol_fee_precision, _apply_protocol_fee_updown};
 use crate::errors::ContractError;
-use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, DataKeyCore, DataKeyScoped,
-    DeviationReferenceMode, HbGateConfig, MultiFeedPayload, OracleHeartbeatRecord,
-    OraclePayload, OracleQuorumConfig, PrecisionCommitment, PrecisionPayoutPolicy,
-    PrecisionPrediction, PriceSample, Round, RoundArchiveStatus, RoundMode, TwapSamplesKey,
-    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+use crate::settlement_math::{
+    classify_price_direction, compute_deviation_bps, compute_updown_winner_payout,
+    is_one_sided_pool, total_pot_updown, PriceDirection,
 };
 use crate::storage::clear_round_storage;
+use crate::types::{
+    ArchivedRoundSummary, BetSide, DataKeyCore, DataKeyScoped, DeviationReferenceMode,
+    HbGateConfig, LeaderboardEntry, MultiFeedPayload, OracleHeartbeatRecord,
+    OraclePayload, OracleQuorumConfig, PrecisionCommitment, PrecisionPayoutPolicy,
+    PrecisionPrediction, PriceSample, PendingWinningsUpdatedAtKey, Round, RoundArchiveStatus,
+    RoundMode, TwapSamplesKey, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{symbol_short, Address, Bytes, Env, Map, Vec};
 
@@ -479,6 +478,13 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
         return Err(ContractError::RoundNotEnded);
     }
 
+    // Record this validated price into the TWAP sample ring (Issue #266).
+    // Runs once the payload has cleared every validity gate above (deviation,
+    // confidence, nonce, freshness, heartbeat) regardless of which
+    // reference mode is active, so a later switch to `Twap` mode has
+    // historical samples to draw from instead of starting empty.
+    _record_twap_sample(&env, payload.price, payload.timestamp);
+
     // Delegate to the shared settlement helper (passes confidence from legacy payload).
     _settle_round_with_price(&env, &round, payload.price, payload.confidence)
 }
@@ -514,11 +520,11 @@ pub fn resolve_round_multi(env: Env, payload: MultiFeedPayload) -> Result<(), Co
     }
 
     // ── Auth and pause check ──────────────────────────────────────────────
-    _extend_persistent_ttl(&env, &DataKey::Oracle);
+    _extend_persistent_ttl(&env, &DataKeyCore::Oracle);
     let oracle: Address = env
         .storage()
         .persistent()
-        .get(&DataKey::Oracle)
+        .get(&DataKeyCore::Oracle)
         .ok_or(ContractError::OracleNotSet)?;
 
     oracle.require_auth();
@@ -527,18 +533,18 @@ pub fn resolve_round_multi(env: Env, payload: MultiFeedPayload) -> Result<(), Co
     })?;
 
     // ── Load quorum config ────────────────────────────────────────────────
-    _extend_persistent_ttl(&env, &DataKey::OracleQuorum);
+    _extend_persistent_ttl(&env, &DataKeyCore::OracleQuorum);
     let quorum_cfg: OracleQuorumConfig = env
         .storage()
         .persistent()
-        .get(&DataKey::OracleQuorum)
+        .get(&DataKeyCore::OracleQuorum)
         .ok_or(ContractError::OracleNotSet)?;
 
     // ── Load active round ─────────────────────────────────────────────────
     let round: Round = env
         .storage()
         .persistent()
-        .get(&DataKey::ActiveRound)
+        .get(&DataKeyCore::ActiveRound)
         .ok_or(ContractError::NoActiveRound)?;
 
     // ── Verify round ID ───────────────────────────────────────────────────
@@ -594,7 +600,7 @@ pub fn resolve_round_multi(env: Env, payload: MultiFeedPayload) -> Result<(), Co
     }
 
     // ── Nonce replay protection ───────────────────────────────────────────
-    let nonce_key = DataKey::ConsumedOracleNonce(round.round_id, payload.nonce);
+    let nonce_key = DataKeyScoped::ConsumedOracleNonce(round.round_id, payload.nonce);
     if env.storage().persistent().has(&nonce_key) {
         _emit_action_rejected(
             &env,
@@ -696,11 +702,11 @@ pub fn resolve_round_multi(env: Env, payload: MultiFeedPayload) -> Result<(), Co
     // The multi-feed path still respects the configured max deviation from
     // the round's start price. This prevents the oracle from using multi-feed
     // to bypass the single-feed deviation guardrail.
-    _extend_persistent_ttl(&env, &DataKey::OracleMaxDeviationBps);
+    _extend_persistent_ttl(&env, &DataKeyCore::OracleMaxDeviationBps);
     if let Some(max_bps) = env
         .storage()
         .persistent()
-        .get::<_, u32>(&DataKey::OracleMaxDeviationBps)
+        .get::<_, u32>(&DataKeyCore::OracleMaxDeviationBps)
     {
         let start_price = round.price_start;
         if start_price == 0 {
@@ -726,7 +732,7 @@ pub fn resolve_round_multi(env: Env, payload: MultiFeedPayload) -> Result<(), Co
         let override_armed: bool = env
             .storage()
             .persistent()
-            .get(&DataKey::OracleDeviationOverrideArmed)
+            .get(&DataKeyCore::OracleDeviationOverrideArmed)
             .unwrap_or(false);
 
         if diff_bps > max_bps && !override_armed {
@@ -747,7 +753,7 @@ pub fn resolve_round_multi(env: Env, payload: MultiFeedPayload) -> Result<(), Co
         if diff_bps > max_bps && override_armed {
             env.storage()
                 .persistent()
-                .remove(&DataKey::OracleDeviationOverrideArmed);
+                .remove(&DataKeyCore::OracleDeviationOverrideArmed);
 
             #[allow(deprecated)]
             env.events().publish(
@@ -821,6 +827,9 @@ pub fn resolve_round_multi(env: Env, payload: MultiFeedPayload) -> Result<(), Co
         ),
     );
 
+    // Record this validated price into the TWAP sample ring (Issue #266).
+    _record_twap_sample(&env, median_price, payload.timestamp);
+
     // ── Settle the round using the computed median price ──────────────────
     _settle_round_with_price(&env, &round, median_price, None)
 }
@@ -839,13 +848,6 @@ fn _settle_round_with_price(
 ) -> Result<(), ContractError> {
     let round_id = round.round_id;
 
-    // Record this validated price into the TWAP sample ring (Issue #266).
-    // Runs once the payload has cleared every validity gate above (deviation,
-    // confidence, nonce, freshness, heartbeat) regardless of which
-    // reference mode is active, so a later switch to `Twap` mode has
-    // historical samples to draw from instead of starting empty.
-    _record_twap_sample(&env, payload.price, payload.timestamp);
-
     // Minimum participants threshold check
     if let Some(min) = env
         .storage()
@@ -855,8 +857,8 @@ fn _settle_round_with_price(
         let threshold_participants: Vec<Address> = env
             .storage()
             .persistent()
-            .get(&DataKey::RoundParticipants(round_id))
-            .unwrap_or(Vec::new(&env));
+            .get(&DataKeyScoped::RoundParticipants(round_id))
+            .unwrap_or(Vec::new(env));
         let count = threshold_participants.len();
         if count < min {
             _archive_round(
@@ -879,7 +881,7 @@ fn _settle_round_with_price(
 
     let fee_amount = match round.mode {
         RoundMode::UpDown => {
-            let (one_sided, fee) = _resolve_updown_mode(env, round, final_price)?;
+            let (one_sided, fee) = _resolve_updown_mode(env, round, final_price, false)?;
             if one_sided {
                 #[allow(deprecated)]
                 env.events().publish(
@@ -889,14 +891,14 @@ fn _settle_round_with_price(
             }
             fee
         }
-        RoundMode::Precision => _resolve_precision_mode(env, round_id, final_price)?,
+        RoundMode::Precision => _resolve_precision_mode(env, round_id, final_price, false)?,
     };
 
     let participants: Vec<Address> = env
         .storage()
         .persistent()
-        .get(&DataKey::RoundParticipants(round_id))
-        .unwrap_or(Vec::new(&env));
+        .get(&DataKeyScoped::RoundParticipants(round_id))
+        .unwrap_or(Vec::new(env));
     let participant_count = participants.len();
 
     _archive_round(
@@ -952,10 +954,12 @@ fn _settle_round_with_price(
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub fn _resolve_updown_mode(
     env: &Env,
     round: &Round,
     final_price: u128,
+    skip_payout: bool,
 ) -> Result<(bool, i128), ContractError> {
     let participants: Vec<Address> = env
         .storage()
@@ -1213,6 +1217,7 @@ pub fn _resolve_precision_mode(
     env: &Env,
     round_id: u64,
     final_price: u128,
+    skip_payout: bool,
 ) -> Result<i128, ContractError> {
     let mut participants: Vec<Address> = env
         .storage()
@@ -1330,8 +1335,10 @@ pub fn _resolve_precision_mode(
             if let Some(winner) = winners.get(i) {
                 let payout = payouts.get(i).unwrap_or(0);
 
-                _accumulate_pending(env, winner.user.clone(), payout)?;
-                _update_stats_win(env, winner.user.clone())?;
+                if !skip_payout {
+                    _accumulate_pending(env, winner.user.clone(), payout)?;
+                    _update_stats_win(env, winner.user.clone())?;
+                }
 
                 _persist_user_outcome(
                     env,
@@ -1983,8 +1990,8 @@ pub fn _load_twap_samples(env: &Env) -> Vec<PriceSample> {
     if env.storage().persistent().has(&key) {
         env.storage().persistent().extend_ttl(
             &key,
-            crate::common::TTL_BUMP_THRESHOLD,
-            crate::common::TTL_BUMP_AMOUNT,
+            TTL_BUMP_THRESHOLD,
+            TTL_BUMP_AMOUNT,
         );
     }
     env.storage().persistent().get(&key).unwrap_or(Vec::new(env))
@@ -2002,8 +2009,8 @@ pub fn _record_twap_sample(env: &Env, price: u128, timestamp: u64) {
     env.storage().persistent().set(&key, &samples);
     env.storage().persistent().extend_ttl(
         &key,
-        crate::common::TTL_BUMP_THRESHOLD,
-        crate::common::TTL_BUMP_AMOUNT,
+        TTL_BUMP_THRESHOLD,
+        TTL_BUMP_AMOUNT,
     );
 }
 
