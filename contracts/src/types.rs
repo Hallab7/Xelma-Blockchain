@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Type definitions for the XLM Price Prediction Market.
 
-use soroban_sdk::{contracttype, Address, BytesN, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, IntoVal, Symbol, Val, Vec};
 
 /// Round mode for prediction type
 #[contracttype]
@@ -10,6 +10,15 @@ use soroban_sdk::{contracttype, Address, BytesN, Vec};
 pub enum RoundMode {
     UpDown = 0,    // Simple up/down predictions
     Precision = 1, // Exact price predictions (Legends mode)
+}
+
+/// Payout policy for Precision mode
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum PrecisionPayoutPolicy {
+    Equal = 0,         // Split payout pool equally among winners (default)
+    StakeWeighted = 1, // Split payout pool proportionally to winner stakes
 }
 
 /// Runtime mode for the contract lifecycle
@@ -164,16 +173,23 @@ pub enum DataKey {
     /// Frozen snapshot of a season's final rankings, written when the season
     /// is reset. Seasons are never deleted — this is a permanent archive.
     SeasonArchive(u32),
-    /// Grace period in seconds beyond `OracleStaleThreshold` during which
-    /// the oracle may still resolve rounds with a stale heartbeat.
-    /// Unset = `DEFAULT_ORACLE_HEARTBEAT_GRACE_SECONDS` (600 s).
-    OracleHeartbeatGraceSeconds,
-    /// One-shot admin override allowing the next settlement to bypass
-    /// heartbeat-health checks. Automatically cleared after use.
-    OracleHeartbeatOverrideArmed,
-    /// When true, settlement is blocked unless the oracle heartbeat is
-    /// active (status 0) and fresh — no grace period, no degraded allowance.
-    OracleHeartbeatStrictMode,
+    /// Admin-configured multi-feed oracle quorum parameters.
+    /// When set, `resolve_round_multi` is enabled.
+    OracleQuorum,
+    /// Announced next schema version for migration preview (v-next template).
+    /// When set, operators can inspect this value before executing a real migration.
+    /// Absent means no next migration has been announced.
+    NextSchemaVersion,
+    /// Minimum bet amount (dust protection). Unset = no minimum.
+    MinBet,
+    /// Epoch mint budget: total mints allowed per epoch.
+    EpochMintBudget,
+    /// Early cash-out penalty in basis points. Unset = early cash-out disabled.
+    EarlyCashoutBps,
+    /// Fee incidence model: FeeOnPot (default) or FeeOnWinnings.
+    FeeModel,
+    /// Dispute window length in ledgers. 0 = no dispute window.
+    DisputeLedgers,
 }
 
 /// Identifies which critical risk setting is pending timelocked activation.
@@ -187,14 +203,18 @@ pub enum ConfigChangeKind {
     MaxPendingWinnings = 3,
     OracleStaleThreshold = 4,
     OracleMaxDeviationBps = 5,
-    /// Optional protocol settlement fee in bps (Issue #162).
-    /// `None` disables the fee entirely, restoring pre-fee behaviour.
     ProtocolFeeBps = 6,
     MinParticipants = 7,
     MaxPrecisionParticipants = 8,
     MintLimit = 9,
     ArchiveRetention = 10,
     CloseBufferLedgers = 11,
+    EpochMintBudget = 12,
+    PendingWinningsExpiry = 13,
+    PrecisionPayoutPolicy = 14,
+    MinBet = 15,
+    DisputeLedgers = 16,
+    FeeModel = 17,
 }
 
 /// Payload for a scheduled critical config change.
@@ -213,6 +233,12 @@ pub enum ConfigChangePayload {
     MintLimit(u32),
     ArchiveRetention(u32),
     CloseBufferLedgers(u32),
+    EpochMintBudget(i128),
+    PendingWinningsExpiry(u32),
+    PrecisionPayoutPolicy(u32),
+    MinBet(Option<i128>),
+    DisputeLedgers(u32),
+    FeeModel(FeeModel),
 }
 
 /// Pending timelocked config change with activation ledger for on-chain observability.
@@ -273,23 +299,59 @@ pub struct OraclePayload {
     /// Round identifier that should match `Round.start_ledger`
     pub round_id: u32,
     /// Per-round replay-protection nonce.
-    ///
-    /// The oracle service must generate a unique value per submission for a
-    /// given round (e.g. a monotonic counter or random 64-bit value). The
-    /// contract records each consumed nonce under
-    /// `DataKey::ConsumedOracleNonce(round_id, nonce)` and rejects any reuse,
-    /// making resolution idempotent against accidental duplicate submissions.
     pub nonce: u64,
     /// SHA-256 hash of the network passphrase this payload targets.
-    /// Validated against `env.ledger().network_id()` to prevent cross-network replay.
     pub network_id: BytesN<32>,
     /// Contract address this payload is intended for.
-    /// Validated against `env.current_contract_address()` to prevent cross-contract replay.
     pub contract_addr: Address,
     /// Optional confidence score from the price feed (0–10000 bps, where 10000 = 100%).
-    /// When `None`, the payload is treated as a legacy submission.
-    /// When strict mode is enabled, `None` is rejected.
     pub confidence: Option<u32>,
+    /// Optional ed25519 signature over the attestation domain-separated message.
+    pub attestation: Option<BytesN<64>>,
+}
+
+/// Multi-feed oracle resolution payload (N observations, quorum + median).
+///
+/// Unlike the legacy single-oracle `OraclePayload`, this carries N independent
+/// feed observations as parallel arrays. The contract computes the median,
+/// rejects outliers, and requires a configurable quorum of feeds to agree
+/// within the outlier threshold before settlement proceeds.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MultiFeedPayload {
+    /// Prices from each feed, scaled to 4 decimal places (e.g. 2297 = $0.2297).
+    pub prices: Vec<u128>,
+    /// Feed source identifiers (0-based index, max N-1). Must be unique.
+    pub sources: Vec<u32>,
+    /// Round identifier that must match `Round.start_ledger`
+    pub round_id: u32,
+    /// Per-round replay-protection nonce.
+    pub nonce: u64,
+    /// SHA-256 hash of the network passphrase this payload targets.
+    pub network_id: BytesN<32>,
+    /// Contract address this payload is intended for.
+    pub contract_addr: Address,
+    /// Unix epoch seconds when the observations were collected.
+    pub timestamp: u64,
+}
+
+/// Admin-configurable quorum and outlier rejection parameters for multi-feed
+/// oracle settlement. Stored under `DataKey::OracleQuorum`.
+///
+/// When set, `resolve_round_multi` becomes the preferred settlement path.
+/// The legacy single-oracle `resolve_round` path remains available
+/// independently of this configuration.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OracleQuorumConfig {
+    /// Minimum number of unique feed observations required in a multi-feed payload.
+    pub min_observations: u32,
+    /// Minimum number of observations that must survive outlier rejection to
+    /// form a valid quorum and proceed to settlement.
+    pub quorum_threshold: u32,
+    /// Maximum deviation from the median (in basis points, 1 bp = 0.01%)
+    /// before an observation is rejected as an outlier.
+    pub outlier_threshold_bps: u32,
 }
 
 /// Oracle liveness record, updated by the oracle service on each heartbeat call.
@@ -299,6 +361,22 @@ pub struct OraclePayload {
 pub struct OracleHeartbeatRecord {
     pub timestamp: u64,
     pub status: u32,
+}
+
+/// Heartbeat health gate configuration (Issue #264).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct HbGateConfig {
+    pub strict_mode: bool,
+    pub override_armed: bool,
+    pub grace_seconds: u64,
+}
+
+/// Storage key for heartbeat gate config (separate from DataKey to stay within variant limits, Issue #264).
+#[contracttype]
+#[derive(Clone)]
+pub enum HbGateKey {
+    Config,
 }
 
 #[contracttype]
@@ -349,68 +427,26 @@ pub enum RoundArchiveStatus {
     Cancelled = 1,
     /// Settlement aborted due to insufficient participants; stakes refunded.
     FallbackRefund = 2,
+    /// Dispute window ended via void; all participants refunded their stake.
+    Voided = 3,
 }
 
 /// Composite protocol health status returned by `get_protocol_health`.
-///
-/// Designed for operators to poll a single endpoint instead of stitching
-/// together multiple read-only calls.
-///
-/// ## Status code → alert severity mapping
-///
-/// | code | label           | severity | meaning                                   |
-/// |------|-----------------|----------|-------------------------------------------|
-/// | 0    | HEALTHY         | none     | All subsystems nominal                    |
-/// | 1    | PAUSED          | critical | Contract is emergency-paused               |
-/// | 2    | ORACLE_STALE    | warning  | Oracle heartbeat is stale or offline      |
-/// | 3    | ROUND_STALE     | warning  | Round is past its end ledger but unresolved|
-/// | 4    | NO_ACTIVE_ROUND | info     | No round currently active (idle protocol) |
-/// | 5    | MULTIPLE_ISSUES | critical | Two or more issues detected simultaneously|
-///
-/// ## Phase codes (`active_round_phase`)
-///
-/// | phase | meaning                                           |
-/// |-------|---------------------------------------------------|
-/// | 0     | No active round                                   |
-/// | 1     | Betting open (`ledger < bet_end_ledger`)           |
-/// | 2     | Running / reveal window (`bet_end_ledger ≤ ledger < end_ledger`) |
-/// | 3     | Resolvable (`ledger ≥ end_ledger`)                |
-///
-/// ## Oracle status codes (`oracle_status`)
-///
-/// | code | meaning                                |
-/// |------|----------------------------------------|
-/// | 0    | Active (healthy heartbeat)             |
-/// | 1    | Degraded (heartbeat marked degraded)   |
-/// | 2    | Offline (heartbeat marked offline)     |
-/// | 3    | Unknown (no heartbeat record stored)   |
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProtocolHealthStatus {
-    /// Whether the contract is emergency-paused (`Paused == true`)
     pub paused: bool,
-    /// Whether the oracle heartbeat is non-stale and not offline
     pub oracle_live: bool,
-    /// Raw oracle heartbeat status (0=active, 1=degraded, 2=offline, 3=unknown)
     pub oracle_status: u32,
-    /// Whether a round is currently active
     pub has_active_round: bool,
-    /// Current round phase (0=no_round, 1=betting, 2=running, 3=resolvable)
     pub active_round_phase: u32,
-    /// On-chain storage schema version
     pub schema_version: u32,
-    /// Ledger sequence at which this health snapshot was taken
     pub ledger_sequence: u32,
-    /// Ledger timestamp at which this health snapshot was taken
     pub ledger_timestamp: u64,
-    /// Composite status code (see mapping table above)
     pub status_code: u32,
 }
 
 /// Compact historical round summary persisted after resolve or cancel.
-///
-/// Designed for explorer/analytics queries without replaying events.
-/// `price_final` is `0` for admin cancellations (no oracle settlement price).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ArchivedRoundSummary {
@@ -426,10 +462,6 @@ pub struct ArchivedRoundSummary {
 }
 
 /// Pending two-step oracle rotation proposal.
-///
-/// The admin proposes a new oracle address with a timestamp-based expiry window.
-/// After `expires_at` (ledger timestamp) the proposal is stale and acceptance
-/// is rejected until the admin submits a fresh proposal.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct OracleRotationProposal {
@@ -439,87 +471,31 @@ pub struct OracleRotationProposal {
 }
 
 /// Global status of the protocol, returned by `get_protocol_status`.
-///
-/// Designed for frontend state machines that need a single, stable code
-/// instead of combining multiple boolean flags.
-///
-/// ## Status codes
-///
-/// | value | variant      | description                                                             |
-/// |-------|--------------|-------------------------------------------------------------------------|
-/// | 0     | `Active`     | Not paused; a round is currently active (bets open or running).          |
-/// | 1     | `Paused`     | Emergency-paused by the admin; no mutations accepted except unpause.     |
-/// | 2     | `ClaimsOnly` | Not paused; no active round. Only `claim_winnings` is meaningful.        |
-///
-/// ## Transition rules
-///
-/// - `ClaimsOnly` → `Active` when `create_round()` succeeds.
-/// - `Active` → `ClaimsOnly` when `resolve_round()` or `cancel_round()` completes.
-/// - Any state → `Paused` when `pause_contract()` is called.
-/// - `Paused` → `Active` when `unpause_contract()` is called *and* an active round still exists.
-/// - `Paused` → `ClaimsOnly` when `unpause_contract()` is called *and* no active round exists.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 #[repr(u32)]
 pub enum ProtocolStatus {
-    /// The contract is not paused and has a currently active round.
     Active = 0,
-    /// The contract is emergency-paused by the admin.
     Paused = 1,
-    /// The contract is not paused, but no round is active.
-    /// Mutating actions are limited to claiming pending winnings.
     ClaimsOnly = 2,
 }
 
 /// Status of a specific round, returned by `get_round_status(round_id)`.
-///
-/// Queries a round by its monotonic `round_id`. Covers all lifecycle
-/// stages from creation through terminal settlement.
-///
-/// ## Status codes
-///
-/// | value | variant          | description                                                                      |
-/// |-------|------------------|-----------------------------------------------------------------------------------|
-/// | 0     | `Unknown`        | Round does not exist or has been pruned from the on-chain archive.               |
-/// | 1     | `Betting`        | Round is active; bets and predictions accepted (`ledger < bet_end_ledger`).      |
-/// | 2     | `Running`        | Betting closed; reveal window open (`bet_end_ledger ≤ ledger < end_ledger`).    |
-/// | 3     | `AwaitingResolve`| Round ended; awaiting oracle settlement (`ledger ≥ end_ledger`).                |
-/// | 4     | `Resolved`       | Oracle settled the round; pot distributed to winners.                            |
-/// | 5     | `Cancelled`      | Admin cancelled the round; all stakes refunded.                                  |
-/// | 6     | `FallbackRefund` | Insufficient participants at settlement; all stakes refunded.                    |
-///
-/// ## Transition rules
-///
-/// - `Unknown` → `Betting` when `create_round()` succeeds.
-/// - `Betting` → `Running` when `ledger ≥ bet_end_ledger` (derived; no on-chain write).
-/// - `Running` → `AwaitingResolve` when `ledger ≥ end_ledger` (derived; no on-chain write).
-/// - `{Betting | Running | AwaitingResolve}` → `Cancelled` when `cancel_round()` is called.
-/// - `AwaitingResolve` → `Resolved` when `resolve_round()` settles with enough participants.
-/// - `AwaitingResolve` → `FallbackRefund` when `resolve_round()` finds fewer than `min_participants`.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 #[repr(u32)]
 pub enum RoundStatus {
-    /// Round does not exist or has been pruned from the on-chain archive.
     Unknown = 0,
-    /// Round is active; bets and predictions accepted (`ledger < bet_end_ledger`).
     Betting = 1,
-    /// Betting is closed; reveal window is open (`bet_end_ledger ≤ ledger < end_ledger`).
     Running = 2,
-    /// Round has ended and is waiting for oracle settlement (`ledger ≥ end_ledger`).
     AwaitingResolve = 3,
-    /// Oracle settled the round normally; pot distributed to winners.
     Resolved = 4,
-    /// Admin cancelled the round; all stakes refunded.
     Cancelled = 5,
-    /// Settlement triggered but insufficient participants; all stakes refunded.
     FallbackRefund = 6,
+    Voided = 7,
 }
 
 /// Terminal outcome persisted per user per archived round.
-///
-/// Allows `get_user_archived_participation` to answer profile/history
-/// queries without replaying the full event stream.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 #[repr(u32)]
@@ -527,7 +503,7 @@ pub enum UserOutcomeType {
     Win = 0,
     Loss = 1,
     Refund = 2,
-    Cancel = 3,
+    Void = 3,
 }
 
 #[contracttype]
@@ -552,14 +528,10 @@ pub struct SimulationResult {
     pub precision_total_stake: i128,
     pub fee_amount: i128,
     pub outcomes: Vec<UserRoundOutcome>,
+    pub fee_model: u32,
 }
 
 /// Admin-configured blueprint for `create_next_from_template`.
-///
-/// Mirrors the arguments accepted by `create_round` (`start_price`, `mode`)
-/// so a keeper can spin up the next round after a settle/cancel without an
-/// operator re-specifying parameters each time. Validated with the exact
-/// same rules `create_round` applies at creation time.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoundTemplate {
@@ -584,11 +556,7 @@ pub struct SeasonLeaderboardEntry {
     pub best_streak: u32,
 }
 
-/// Frozen snapshot of a season's final bounded rankings, written by
-/// `reset_leaderboard_season`. `participant_count` is the number of distinct
-/// addresses that appeared in either bounded index at reset time (a lower
-/// bound on total season participants beyond the tracked top
-/// `LEADERBOARD_LIMIT`, mirroring the same bound the live indexes enforce).
+/// Frozen snapshot of a season's final bounded rankings.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SeasonArchive {
@@ -597,4 +565,174 @@ pub struct SeasonArchive {
     pub wins: Vec<SeasonLeaderboardEntry>,
     pub streak: Vec<SeasonLeaderboardEntry>,
     pub participant_count: u32,
+}
+
+/// Configurable pending-winnings expiry in ledgers.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PendingWinningsExpiryKey(pub ());
+
+pub const PENDING_WINNINGS_EXPIRY_KEY: PendingWinningsExpiryKey = PendingWinningsExpiryKey(());
+
+/// Ledger sequence when a user's pending winnings entry was last modified.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PendingWinningsUpdatedAtKey(pub Address);
+
+/// Fee incidence model for protocol fees (Issue #268).
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum FeeModel {
+    FeeOnPot = 0,      // Fee charged on total pot (default)
+    FeeOnWinnings = 1, // Fee charged only on net winnings/profit
+}
+
+/// TWAP sample ring entry (Issue #266).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PriceSample {
+    pub price: u128,
+    pub timestamp: u64,
+}
+
+/// Storage key for TWAP samples ring (separate from DataKey to stay within variant limits, Issue #266).
+#[contracttype]
+#[derive(Clone)]
+pub enum TwapSamplesKey {
+    Samples,
+}
+
+/// Dev Reference Mode (Issue #266).
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum DeviationReferenceMode {
+    StartPrice = 0, // Use round.price_start (default)
+    Twap = 1,       // Use trailing-sample TWAP average
+}
+
+/// Deviation guardrail config (Issue #266).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviationConfig {
+    pub reference_mode: DeviationReferenceMode,
+    pub window_samples: u32,
+}
+
+/// Storage key for deviation config (separate from DataKey to stay within variant limits, Issue #266).
+#[contracttype]
+#[derive(Clone)]
+pub enum DeviationConfigKey {
+    Config,
+}
+
+/// Oracle attestation config (Issue #263).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttestationConfig {
+    pub key: Option<BytesN<32>>, // ed25519 public key; None = attestation disabled
+}
+
+/// Storage key for attestation config (separate from DataKey to stay within variant limits, Issue #263).
+#[contracttype]
+#[derive(Clone)]
+pub enum AttestationConfigKey {
+    Config,
+}
+
+impl IntoVal<Env, Val> for DataKey {
+    fn into_val(&self, env: &Env) -> Val {
+        use Symbol as S;
+        match self {
+            DataKey::Balance(a) => (S::new(env, "Balance"), a.clone()).into_val(env),
+            DataKey::Admin => S::new(env, "Admin").into_val(env),
+            DataKey::Oracle => S::new(env, "Oracle").into_val(env),
+            DataKey::SchemaVersion => S::new(env, "SchemaVersion").into_val(env),
+            DataKey::ActiveRound => S::new(env, "ActiveRound").into_val(env),
+            DataKey::Positions => S::new(env, "Positions").into_val(env),
+            DataKey::UpDownPositions => S::new(env, "UpDownPositions").into_val(env),
+            DataKey::PrecisionPositions => S::new(env, "PrecisionPositions").into_val(env),
+            DataKey::PendingWinnings(a) => {
+                (S::new(env, "PendingWinnings"), a.clone()).into_val(env)
+            }
+            DataKey::UserStats(a) => (S::new(env, "UserStats"), a.clone()).into_val(env),
+            DataKey::Paused => S::new(env, "Paused").into_val(env),
+            DataKey::BetWindowLedgers => S::new(env, "BetWindowLedgers").into_val(env),
+            DataKey::RunWindowLedgers => S::new(env, "RunWindowLedgers").into_val(env),
+            DataKey::CloseBufferLedgers => S::new(env, "CloseBufferLedgers").into_val(env),
+            DataKey::LastRoundId => S::new(env, "LastRoundId").into_val(env),
+            DataKey::Position(id, a) => {
+                (S::new(env, "Position"), id, a.clone()).into_val(env)
+            }
+            DataKey::PrecisionPosition(id, a) => {
+                (S::new(env, "PrecisionPosition"), id, a.clone()).into_val(env)
+            }
+            DataKey::PrecisionCommitment(id, a) => {
+                (S::new(env, "PrecisionCommitment"), id, a.clone()).into_val(env)
+            }
+            DataKey::RoundParticipants(id) => {
+                (S::new(env, "RoundParticipants"), id).into_val(env)
+            }
+            DataKey::MaxStake => S::new(env, "MaxStake").into_val(env),
+            DataKey::MaxUserRoundExposure => S::new(env, "MaxUserRoundExposure").into_val(env),
+            DataKey::MaxPendingWinnings => S::new(env, "MaxPendingWinnings").into_val(env),
+            DataKey::CancelledRound(id) => (S::new(env, "CancelledRound"), id).into_val(env),
+            DataKey::ConsumedOracleNonce(id, nonce) => {
+                (S::new(env, "ConsumedOracleNonce"), id, nonce).into_val(env)
+            }
+            DataKey::MinParticipants => S::new(env, "MinParticipants").into_val(env),
+            DataKey::OracleHeartbeat => S::new(env, "OracleHeartbeat").into_val(env),
+            DataKey::OracleStaleThreshold => S::new(env, "OracleStaleThreshold").into_val(env),
+            DataKey::MaxPrecisionParticipants => {
+                S::new(env, "MaxPrecisionParticipants").into_val(env)
+            }
+            DataKey::OracleMaxDeviationBps => S::new(env, "OracleMaxDeviationBps").into_val(env),
+            DataKey::OracleDeviationOverrideArmed => {
+                S::new(env, "OracleDeviationOverrideArmed").into_val(env)
+            }
+            DataKey::OracleMinConfidenceBps => {
+                S::new(env, "OracleMinConfidenceBps").into_val(env)
+            }
+            DataKey::OracleStrictMode => S::new(env, "OracleStrictMode").into_val(env),
+            DataKey::ArchivedRound(id) => (S::new(env, "ArchivedRound"), id).into_val(env),
+            DataKey::RecentArchivedRoundIds => {
+                S::new(env, "RecentArchivedRoundIds").into_val(env)
+            }
+            DataKey::UserRoundOutcome(id, a) => {
+                (S::new(env, "UserRoundOutcome"), id, a.clone()).into_val(env)
+            }
+            DataKey::MigratedToV3 => S::new(env, "MigratedToV3").into_val(env),
+            DataKey::PendingConfigChange(k) => {
+                (S::new(env, "PendingConfigChange"), k.clone()).into_val(env)
+            }
+            DataKey::ProtocolFeeBps => S::new(env, "ProtocolFeeBps").into_val(env),
+            DataKey::ProtocolFeeTreasury => S::new(env, "ProtocolFeeTreasury").into_val(env),
+            DataKey::LedgerMintCounter(id) => {
+                (S::new(env, "LedgerMintCounter"), id).into_val(env)
+            }
+            DataKey::MintLimitConfig => S::new(env, "MintLimitConfig").into_val(env),
+            DataKey::OracleRotationProposal => S::new(env, "OracleRotationProposal").into_val(env),
+            DataKey::ArchiveRetention => S::new(env, "ArchiveRetention").into_val(env),
+            DataKey::RoundTemplate => S::new(env, "RoundTemplate").into_val(env),
+            DataKey::LeaderboardWins => S::new(env, "LeaderboardWins").into_val(env),
+            DataKey::LeaderboardStreak => S::new(env, "LeaderboardStreak").into_val(env),
+            DataKey::SeasonId => S::new(env, "SeasonId").into_val(env),
+            DataKey::SeasonUserStats(sid, a) => {
+                (S::new(env, "SeasonUserStats"), sid, a.clone()).into_val(env)
+            }
+            DataKey::SeasonLeaderboardWins => S::new(env, "SeasonLeaderboardWins").into_val(env),
+            DataKey::SeasonLeaderboardStreak => {
+                S::new(env, "SeasonLeaderboardStreak").into_val(env)
+            }
+            DataKey::SeasonArchive(id) => (S::new(env, "SeasonArchive"), id).into_val(env),
+            DataKey::OracleQuorum => S::new(env, "OracleQuorum").into_val(env),
+            DataKey::NextSchemaVersion => S::new(env, "NextSchemaVersion").into_val(env),
+            DataKey::MinBet => S::new(env, "MinBet").into_val(env),
+            DataKey::EpochMintBudget => S::new(env, "EpochMintBudget").into_val(env),
+            DataKey::EarlyCashoutBps => S::new(env, "EarlyCashoutBps").into_val(env),
+            DataKey::FeeModel => S::new(env, "FeeModel").into_val(env),
+            DataKey::DisputeLedgers => S::new(env, "DisputeLedgers").into_val(env),
+        }
+    }
 }

@@ -66,7 +66,7 @@ export type BetSide = {tag: "Up", values: void} | {tag: "Down", values: void};
  * Legacy single-key maps (`UpDownPositions`, `PrecisionPositions`) are kept for
  * backward-compatible reads during a migration window; they are no longer written.
  */
-export type DataKey = {tag: "Balance", values: readonly [string]} | {tag: "Admin", values: void} | {tag: "Oracle", values: void} | {tag: "SchemaVersion", values: void} | {tag: "ActiveRound", values: void} | {tag: "Positions", values: void} | {tag: "UpDownPositions", values: void} | {tag: "PrecisionPositions", values: void} | {tag: "PendingWinnings", values: readonly [string]} | {tag: "UserStats", values: readonly [string]} | {tag: "Paused", values: void} | {tag: "BetWindowLedgers", values: void} | {tag: "RunWindowLedgers", values: void} | {tag: "LastRoundId", values: void} | {tag: "Position", values: readonly [u64, string]} | {tag: "PrecisionPosition", values: readonly [u64, string]} | {tag: "PrecisionCommitment", values: readonly [u64, string]} | {tag: "RoundParticipants", values: readonly [u64]} | {tag: "MaxStake", values: void} | {tag: "MaxUserRoundExposure", values: void} | {tag: "MaxPendingWinnings", values: void} | {tag: "CancelledRound", values: readonly [u64]} | {tag: "ConsumedOracleNonce", values: readonly [u64, u64]} | {tag: "MinParticipants", values: void} | {tag: "OracleHeartbeat", values: void} | {tag: "OracleStaleThreshold", values: void} | {tag: "MaxPrecisionParticipants", values: void} | {tag: "OracleMaxDeviationBps", values: void} | {tag: "OracleDeviationOverrideArmed", values: void} | {tag: "ArchivedRound", values: readonly [u64]} | {tag: "RecentArchivedRoundIds", values: void} | {tag: "PendingConfigChange", values: readonly [ConfigChangeKind]};
+export type DataKey = {tag: "Balance", values: readonly [string]} | {tag: "Admin", values: void} | {tag: "Oracle", values: void} | {tag: "SchemaVersion", values: void} | {tag: "ActiveRound", values: void} | {tag: "Positions", values: void} | {tag: "UpDownPositions", values: void} | {tag: "PrecisionPositions", values: void} | {tag: "PendingWinnings", values: readonly [string]} | {tag: "UserStats", values: readonly [string]} | {tag: "Paused", values: void} | {tag: "BetWindowLedgers", values: void} | {tag: "RunWindowLedgers", values: void} | {tag: "LastRoundId", values: void} | {tag: "Position", values: readonly [u64, string]} | {tag: "PrecisionPosition", values: readonly [u64, string]} | {tag: "PrecisionCommitment", values: readonly [u64, string]} | {tag: "RoundParticipants", values: readonly [u64]} | {tag: "MaxStake", values: void} | {tag: "MaxUserRoundExposure", values: void} | {tag: "MaxPendingWinnings", values: void} | {tag: "CancelledRound", values: readonly [u64]} | {tag: "ConsumedOracleNonce", values: readonly [u64, u64]} | {tag: "MinParticipants", values: void} | {tag: "OracleHeartbeat", values: void} | {tag: "OracleStaleThreshold", values: void} | {tag: "MaxPrecisionParticipants", values: void} | {tag: "OracleMaxDeviationBps", values: void} | {tag: "OracleDeviationOverrideArmed", values: void} | {tag: "ArchivedRound", values: readonly [u64]} | {tag: "RecentArchivedRoundIds", values: void} | {tag: "PendingConfigChange", values: readonly [ConfigChangeKind]} | {tag: "ProtocolFeeBps", values: void} | {tag: "ProtocolFeeTreasury", values: void} | {tag: "FeeModel", values: void} | {tag: "CloseBufferLedgers", values: void};
 
 /**
  * Round mode for prediction type
@@ -136,12 +136,24 @@ export interface UserRoundOutcome {
   outcome: UserOutcomeType;
 }
 
+/**
+ * Protocol fee incidence model — determines what portion of the pot is taxed.
+ */
+export enum FeeModel {
+  /** Fee is calculated on the total round pot (all stakes pooled). */
+  FeeOnPot = 0,
+  /** Fee is calculated only on the net winnings (profit transferred from losers). */
+  FeeOnWinnings = 1,
+}
+
 export interface SimulationResult {
   mode: RoundMode;
   pool_up: i128;
   pool_down: i128;
   precision_total_stake: i128;
   fee_amount: i128;
+  /** Fee incidence model used: 0 = FeeOnPot, 1 = FeeOnWinnings (Issue #268). */
+  fee_model: u32;
   outcomes: Array<UserRoundOutcome>;
 }
 
@@ -226,11 +238,14 @@ export enum ConfigChangeKind {
   OracleStaleThreshold = 4,
   OracleMaxDeviationBps = 5,
   ProtocolFeeBps = 6,
+  /** Fee incidence model: 0 = FeeOnPot (default), 1 = FeeOnWinnings (Issue #268). */
+  FeeModel = 12,
   MinParticipants = 7,
   MaxPrecisionParticipants = 8,
   MintLimit = 9,
   ArchiveRetention = 10,
   CloseBufferLedgers = 11,
+  EpochMintBudget = 12,
 }
 
 /**
@@ -257,7 +272,8 @@ export type ConfigChangePayload =
   | {tag: "MaxPrecisionParticipants", values: readonly [u32]}
   | {tag: "MintLimit", values: readonly [u32]}
   | {tag: "ArchiveRetention", values: readonly [u32]}
-  | {tag: "CloseBufferLedgers", values: readonly [u32]};
+  | {tag: "CloseBufferLedgers", values: readonly [u32]}
+  | {tag: "EpochMintBudget", values: readonly [i128]};
 
 
 /**
@@ -284,6 +300,42 @@ export interface PrecisionPrediction {
   amount: i128;
   predicted_price: u128;
   user: string;
+}
+
+/**
+ * Cursor-based page of precision predictions.
+ * Pass next_cursor as the cursor argument to the next call to fetch the subsequent page.
+ */
+export interface PrecisionPredictionsPage {
+  items: Array<PrecisionPrediction>;
+  next_cursor: Option<string>;
+}
+
+/**
+ * Single entry in a cursor-based Up/Down positions page.
+ */
+/**
+ * Cursor-based page of Up/Down positions.
+ */
+export interface UpdownPositionsPage {
+  items: Array<[string, UserPosition]>;
+  next_cursor: Option<string>;
+}
+
+/**
+ * Entry in the global leaderboard.
+ */
+export interface LeaderboardEntry {
+  user: string;
+  stats: UserStats;
+}
+
+/**
+ * Cursor-based page of leaderboard entries.
+ */
+export interface LeaderboardPage {
+  items: Array<LeaderboardEntry>;
+  next_cursor: Option<string>;
 }
 
 
@@ -494,7 +546,22 @@ export const ContractError = {
   /**
    * Reveal salt fails minimum entropy rules (all-zero or constant-byte)
    */
-  64: {message:"InvalidSalt"}
+  64: {message:"InvalidSalt"},
+  /**
+   * Epoch mint budget has been fully consumed
+   */
+  66: {message:"EpochBudgetExceeded"}
+   * create_next_from_template called with no round template configured
+   */
+  65: {message:"NoRoundTemplate"},
+  /**
+   * Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
+   */
+  66: {message:"OracleNotLive"},
+  /**
+   * Invalid precision payout policy
+   */
+  67: {message:"InvalidPayoutPolicy"}
 }
 
 /**
@@ -544,6 +611,29 @@ export function ContractErrorDecoder(code: number): string {
   return `Unknown contract error code ${code}`;
 }
 
+export interface RoundTemplate {
+  start_price: u128;
+  mode: Option<u32>;
+}
+
+export interface LeaderboardEntry {
+  user: string;
+  stats: UserStats;
+}
+
+export interface SeasonLeaderboardEntry {
+  user: string;
+  wins: u32;
+  best_streak: u32;
+}
+
+export interface SeasonArchive {
+  season_id: u32;
+  ended_at_ledger: u32;
+  wins: Array<SeasonLeaderboardEntry>;
+  streak: Array<SeasonLeaderboardEntry>;
+  participant_count: u32;
+}
 
 export interface Client {
   /**
@@ -1034,8 +1124,22 @@ export interface Client {
   get_protocol_fee_bps: (options?: MethodOptions) => Promise<AssembledTransaction<Option<u32>>>
   get_protocol_fee_treasury: (options?: MethodOptions) => Promise<AssembledTransaction<i128>>
   withdraw_protocol_fee: ({recipient, amount}: {recipient: string, amount: i128}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
+  /**
+   * Construct and simulate a set_fee_model transaction.
+   * Sets the fee incidence model (admin only).
+   * `FeeOnPot` (0): fee is calculated on the total round pot (default).
+   * `FeeOnWinnings` (1): fee is calculated only on net winnings / profit.
+   */
+  set_fee_model: ({model}: {model: FeeModel}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  /**
+   * Construct and simulate a get_fee_model transaction.
+   * Returns the configured fee incidence model, defaulting to `FeeOnPot`.
+   */
+  get_fee_model: (options?: MethodOptions) => Promise<AssembledTransaction<FeeModel>>
   set_mint_limit: ({limit}: {limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
   get_mint_limit: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  set_epoch_mint_budget: ({budget}: {budget: i128}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_epoch_mint_budget: (options?: MethodOptions) => Promise<AssembledTransaction<i128>>
   set_archive_retention: ({limit}: {limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
   get_archive_retention: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
   set_close_buffer_ledgers: ({buffer_ledgers}: {buffer_ledgers: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
@@ -1043,6 +1147,26 @@ export interface Client {
   get_round_pool_stats: (options?: MethodOptions) => Promise<AssembledTransaction<Option<RoundPoolStats>>>
   get_user_archived_participation: ({user, round_id}: {user: string, round_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Option<UserRoundOutcome>>>
 
+  set_hb_strict_mode: ({enabled}: {enabled: boolean}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_hb_strict_mode: (options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
+  arm_hb_override: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_hb_override_armed: (options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
+  set_hb_grace_seconds: ({grace_seconds}: {grace_seconds: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_hb_grace_seconds: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  set_precision_payout_policy: ({policy}: {policy: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_precision_payout_policy: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  set_round_template: ({start_price, mode}: {start_price: u128, mode: Option<u32>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  clear_round_template: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_round_template: (options?: MethodOptions) => Promise<AssembledTransaction<Option<RoundTemplate>>>
+  create_next_from_template: (options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  get_leaderboard_by_wins: ({offset, limit}: {offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<LeaderboardEntry>>>
+  get_leaderboard_by_streak: ({offset, limit}: {offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<LeaderboardEntry>>>
+  get_current_season_id: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+  get_season_user_stats: ({season_id, user}: {season_id: u32, user: string}, options?: MethodOptions) => Promise<AssembledTransaction<UserStats>>
+  reset_leaderboard_season: (options?: MethodOptions) => Promise<AssembledTransaction<Result<u32>>>
+  get_season_archive: ({season_id}: {season_id: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Option<SeasonArchive>>>
+  get_season_leaderboard_by_wins: ({season_id, offset, limit}: {season_id: u32, offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<SeasonLeaderboardEntry>>>
+  get_season_leaderboard_by_streak: ({season_id, offset, limit}: {season_id: u32, offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<SeasonLeaderboardEntry>>>
 }
 export class Client extends ContractClient {
   static async deploy<T = Client>(
@@ -1228,11 +1352,33 @@ export class Client extends ContractClient {
         withdraw_protocol_fee: this.txFromJSON<Result<i128>>,
         set_mint_limit: this.txFromJSON<Result<void>>,
         get_mint_limit: this.txFromJSON<u32>,
+        set_epoch_mint_budget: this.txFromJSON<Result<void>>,
+        get_epoch_mint_budget: this.txFromJSON<i128>,
         set_archive_retention: this.txFromJSON<Result<void>>,
         get_archive_retention: this.txFromJSON<u32>,
         set_close_buffer_ledgers: this.txFromJSON<Result<void>>,
         get_close_buffer_ledgers: this.txFromJSON<u32>,
         get_round_pool_stats: this.txFromJSON<Option<RoundPoolStats>>,
-        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>
+        get_user_archived_participation: this.txFromJSON<Option<UserRoundOutcome>>,
+        set_hb_strict_mode: this.txFromJSON<Result<void>>,
+        get_hb_strict_mode: this.txFromJSON<boolean>,
+        arm_hb_override: this.txFromJSON<Result<void>>,
+        get_hb_override_armed: this.txFromJSON<boolean>,
+        set_hb_grace_seconds: this.txFromJSON<Result<void>>,
+        get_hb_grace_seconds: this.txFromJSON<u32>,
+        set_precision_payout_policy: this.txFromJSON<Result<void>>,
+        get_precision_payout_policy: this.txFromJSON<u32>,
+        set_round_template: this.txFromJSON<Result<void>>,
+        clear_round_template: this.txFromJSON<Result<void>>,
+        get_round_template: this.txFromJSON<Option<RoundTemplate>>,
+        create_next_from_template: this.txFromJSON<Result<void>>,
+        get_leaderboard_by_wins: this.txFromJSON<Array<LeaderboardEntry>>,
+        get_leaderboard_by_streak: this.txFromJSON<Array<LeaderboardEntry>>,
+        get_current_season_id: this.txFromJSON<u32>,
+        get_season_user_stats: this.txFromJSON<UserStats>,
+        reset_leaderboard_season: this.txFromJSON<Result<u32>>,
+        get_season_archive: this.txFromJSON<Option<SeasonArchive>>,
+        get_season_leaderboard_by_wins: this.txFromJSON<Array<SeasonLeaderboardEntry>>,
+        get_season_leaderboard_by_streak: this.txFromJSON<Array<SeasonLeaderboardEntry>>
   }
 }

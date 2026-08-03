@@ -129,6 +129,8 @@ fn differential_invariant_harness() {
                         nonce: 1u64,
                         network_id: env.ledger().network_id(),
                         contract_addr: contract_id.clone(),
+                        confidence: None,
+                        attestation: None,
                     });
                     // Simplified: no explicit winners map; model resolves with empty map.
                     model.resolve(&std::collections::BTreeMap::new());

@@ -103,7 +103,7 @@ fn test_mutations_fail_while_paused() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(resolve_result, Err(Ok(ContractError::ContractPaused)));
 
     client.unpause_contract();

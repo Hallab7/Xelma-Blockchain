@@ -81,7 +81,7 @@ fn test_claim_winnings_cei_pending_cleared_after_claim() {
         network_id: env.ledger().network_id(),
         contract_addr: client.address.clone(),
         confidence: None,
-    };
+        attestation: None,    };
     client.resolve_round(&payload);
 
     // Alice should have pending winnings.
