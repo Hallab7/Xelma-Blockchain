@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+use crate::access_control::_enforce_access_control;
 use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
 use crate::common::{
     _accumulate_pending, _current_epoch_id, _emit_action_rejected, _enforce_min_bet,
@@ -6,7 +7,7 @@ use crate::common::{
     DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_RUN_WINDOW_LEDGERS, MAX_START_PRICE, MIN_START_PRICE,
 };
 use crate::config::{
-    _collect_protocol_fee, get_early_cashout_bps, get_max_precision_participants,
+    _collect_protocol_fee, _read_fee_model, get_early_cashout_bps, get_max_precision_participants,
 };
 use crate::errors::ContractError;
 use crate::settlement::_persist_user_outcome;
@@ -218,6 +219,7 @@ pub fn place_bet(
     _require_supported_schema(&env)?;
     user.require_auth();
     _ensure_normal_mode(&env)?;
+    _enforce_access_control(&env, &user)?;
 
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
@@ -349,6 +351,7 @@ pub fn place_precision_prediction(
     _require_supported_schema(&env)?;
     user.require_auth();
     _ensure_normal_mode(&env)?;
+    _enforce_access_control(&env, &user)?;
 
     if amount <= 0 {
         return Err(ContractError::InvalidBetAmount);
@@ -475,6 +478,7 @@ pub fn commit_prediction(
 ) -> Result<(), ContractError> {
     user.require_auth();
     _ensure_normal_mode(&env)?;
+    _enforce_access_control(&env, &user)?;
 
     // Reject clearly invalid commitment placeholders early (before balance
     // reads / deductions) so griefing commits cannot lock liquidity.
@@ -590,6 +594,7 @@ pub fn reveal_prediction(
 ) -> Result<(), ContractError> {
     user.require_auth();
     _ensure_normal_mode(&env)?;
+    _enforce_access_control(&env, &user)?;
 
     // Enforce salt entropy before any storage reads so malformed reveals fail
     // fast with an explicit error (not HashMismatch after a wasted lookup).
@@ -690,6 +695,7 @@ pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     user.require_auth();
     _ensure_normal_mode(&env)?;
+    _enforce_access_control(&env, &user)?;
 
     // Check early cash-out is enabled
     let penalty_bps = get_early_cashout_bps(env.clone())
@@ -765,7 +771,8 @@ pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
 
     // Collect forfeited amount as protocol fee
     if forfeit > 0 {
-        _collect_protocol_fee(&env, round.round_id, forfeit, Some(penalty_bps))?;
+        let fee_model = _read_fee_model(&env);
+        _collect_protocol_fee(&env, round.round_id, forfeit, Some(penalty_bps), fee_model)?;
     }
 
     // Persist user outcome record for the early exit
@@ -828,6 +835,9 @@ pub fn mint_initial(env: Env, user: Address) -> i128 {
         soroban_sdk::panic_with_error!(&env, e);
     }
     if let Err(e) = _ensure_normal_mode(&env) {
+        soroban_sdk::panic_with_error!(&env, e);
+    }
+    if let Err(e) = _enforce_access_control(&env, &user) {
         soroban_sdk::panic_with_error!(&env, e);
     }
 
