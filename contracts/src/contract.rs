@@ -6,6 +6,7 @@
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Map, Symbol, Vec};
 
 use crate::errors::ContractError;
+use crate::governance;
 use crate::types::{
     ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore,
     DataKeyScoped, DeviationReferenceMode, LeaderboardEntry, MultiFeedPayload, OracleHeartbeatRecord,
@@ -602,6 +603,70 @@ impl VirtualTokenContract {
             }
         }
         proposal
+    }
+
+    // ─── Dual-Approval Governance (Issue #272) ──────────────────────────────
+
+    /// Configures the secondary governance approver (admin only).
+    pub fn set_gov_approver(env: Env, approver: Address) -> Result<(), ContractError> {
+        governance::set_gov_approver(env, approver)
+    }
+
+    /// Returns the configured secondary governance approver address, if set.
+    pub fn get_gov_approver(env: Env) -> Option<Address> {
+        governance::get_gov_approver(env)
+    }
+
+    /// Sets default proposal TTL in ledgers (admin only).
+    pub fn set_gov_proposal_ttl(env: Env, ttl_ledgers: u32) -> Result<(), ContractError> {
+        governance::set_gov_proposal_ttl(env, ttl_ledgers)
+    }
+
+    /// Returns default proposal TTL in ledgers.
+    pub fn get_gov_proposal_ttl(env: Env) -> u32 {
+        governance::get_gov_proposal_ttl(env)
+    }
+
+    /// Proposes a protected administrative action (governance admin/approver only).
+    pub fn propose_gov_action(
+        env: Env,
+        proposer: Address,
+        action: GovAction,
+        custom_ttl: Option<u32>,
+    ) -> Result<u64, ContractError> {
+        governance::propose(env, proposer, action, custom_ttl)
+    }
+
+    /// Approves a pending governance proposal (governance admin/approver only, distinct from proposer).
+    pub fn approve_gov_proposal(
+        env: Env,
+        approver: Address,
+        proposal_id: u64,
+    ) -> Result<(), ContractError> {
+        governance::approve(env, approver, proposal_id)
+    }
+
+    /// Executes an approved governance proposal (governance admin/approver only).
+    pub fn execute_gov_proposal(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+    ) -> Result<(), ContractError> {
+        governance::execute(env, executor, proposal_id)
+    }
+
+    /// Cancels an unexecuted governance proposal (governance admin/approver only).
+    pub fn cancel_gov_proposal(
+        env: Env,
+        canceller: Address,
+        proposal_id: u64,
+    ) -> Result<(), ContractError> {
+        governance::cancel(env, canceller, proposal_id)
+    }
+
+    /// Queries details for a governance proposal.
+    pub fn get_gov_proposal(env: Env, proposal_id: u64) -> Option<GovProposal> {
+        governance::get_gov_proposal(env, proposal_id)
     }
 
     /// Schedules a timelocked windows update (alias for [`Self::schedule_windows`]).

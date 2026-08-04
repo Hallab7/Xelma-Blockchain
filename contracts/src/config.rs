@@ -211,6 +211,9 @@ pub fn withdraw_protocol_fee(
         .get(&DataKeyCore::Admin)
         .ok_or(ContractError::AdminNotSet)?;
     admin.require_auth();
+    if crate::governance::_is_gov_approver_set(&env) {
+        return Err(ContractError::GovUnauthorized);
+    }
     _ensure_not_paused(&env).inspect_err(|&e| {
         _emit_action_rejected(&env, &admin, symbol_short!("withdraw"), e);
     })?;
