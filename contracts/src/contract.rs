@@ -391,6 +391,7 @@ impl VirtualTokenContract {
                 RoundArchiveStatus::Resolved => RoundStatus::Resolved,
                 RoundArchiveStatus::Cancelled => RoundStatus::Cancelled,
                 RoundArchiveStatus::FallbackRefund => RoundStatus::FallbackRefund,
+                RoundArchiveStatus::Voided => RoundStatus::Voided,
             };
         }
 
@@ -1023,6 +1024,28 @@ impl VirtualTokenContract {
     /// - `PositionNotFound` — user has no position in the active round
     pub fn cash_out_early(env: Env, user: Address) -> Result<(), ContractError> {
         betting::cash_out_early(env, user)
+    }
+
+    // ─── Dispute window / void-to-refund (Issue #276) ──────────────────────
+
+    pub fn set_dispute_ledgers(env: Env, ledgers: u32) -> Result<(), ContractError> {
+        config::set_dispute_ledgers(env, ledgers)
+    }
+
+    pub fn get_dispute_ledgers(env: Env) -> u32 {
+        config::get_dispute_ledgers(&env)
+    }
+
+    /// Anyone may call `void_round` during the dispute window to refund all
+    /// participants their full stakes (void-to-refund path).
+    pub fn void_round(env: Env, round_id: u64) -> Result<(), ContractError> {
+        settlement::void_round(env, round_id)
+    }
+
+    /// Anyone may call `finalize_round` after the dispute window expires to
+    /// distribute winnings to winners (normal settlement outcome).
+    pub fn finalize_round(env: Env, round_id: u64) -> Result<(), ContractError> {
+        settlement::finalize_round(env, round_id)
     }
 
     pub fn get_active_round(env: Env) -> Option<Round> {
