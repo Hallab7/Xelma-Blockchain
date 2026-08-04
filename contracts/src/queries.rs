@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 use crate::common::{
-    _derive_round_phase, _extend_persistent_ttl, payout_add, payout_mul, sort_addresses,
-    BPS_DENOMINATOR, DEFAULT_ARCHIVE_RETENTION, MAX_PAGE_SIZE,
+    _derive_round_phase, _extend_persistent_ttl, _legacy_positions_key, payout_add, payout_mul,
+    sort_addresses, BPS_DENOMINATOR, DEFAULT_ARCHIVE_RETENTION, MAX_PAGE_SIZE,
 };
 use crate::config::{
     _read_fee_model, _read_protocol_fee_bps, calculate_protocol_fee_precision,
@@ -9,12 +9,10 @@ use crate::config::{
 };
 use crate::errors::ContractError;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, DataKey, PrecisionCommitment, PrecisionPrediction,
-    PendingWinningsUpdatedAtKey, Round, RoundMode, RoundPhase, RoundPoolStats, RoundTemplate,
-    SeasonArchive, SimulationResult, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
-    ArchivedRoundSummary, BetSide, DataKeyCore, DataKeyScoped, PrecisionCommitment, PrecisionPrediction, Round,
-    RoundMode, RoundPhase, RoundPoolStats, SimulationResult, UserOutcomeType, UserPosition,
-    UserRoundOutcome, UserStats,
+    ArchivedRoundSummary, BetSide, DataKey, DataKeyCore, DataKeyScoped, LeaderboardEntry,
+    PrecisionCommitment, PrecisionPrediction, PendingWinningsUpdatedAtKey, Round, RoundMode,
+    RoundPhase, RoundPoolStats, RoundTemplate, SeasonArchive, SimulationResult, UserOutcomeType,
+    UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -218,8 +216,7 @@ pub fn get_user_stats(env: Env, user: Address) -> UserStats {
 
 /// Returns user's unclaimed pending winnings balance
 pub fn get_pending_winnings(env: Env, user: Address) -> i128 {
-    let key = DataKey::PendingWinnings(user.clone());
-    let key = DataKeyScoped::PendingWinnings(user);
+    let key = DataKeyScoped::PendingWinnings(user.clone());
     _extend_persistent_ttl(&env, &key);
     let updated_key = PendingWinningsUpdatedAtKey(user);
     _extend_persistent_ttl(&env, &updated_key);
@@ -754,7 +751,7 @@ pub fn get_precision_predictions_cursor(
     let round = match env
         .storage()
         .persistent()
-        .get::<_, Round>(&DataKey::ActiveRound)
+        .get::<_, Round>(&DataKeyCore::ActiveRound)
     {
         Some(r) => r,
         None => return (Vec::new(&env), None),
@@ -763,7 +760,7 @@ pub fn get_precision_predictions_cursor(
     let participants: Vec<Address> = env
         .storage()
         .persistent()
-        .get(&DataKey::RoundParticipants(round.round_id))
+        .get(&DataKeyScoped::RoundParticipants(round.round_id))
         .unwrap_or(Vec::new(&env));
     let participants = sort_addresses(participants);
 
@@ -779,7 +776,7 @@ pub fn get_precision_predictions_cursor(
     let mut last_addr: Option<Address> = None;
     for i in start..end {
         if let Some(user) = participants.get(i) {
-            let pred_key = DataKey::PrecisionPosition(round.round_id, user.clone());
+            let pred_key = DataKeyScoped::PrecisionPosition(round.round_id, user.clone());
             if let Some(pred) = env.storage().persistent().get(&pred_key) {
                 last_addr = Some(user.clone());
                 items.push_back(pred);
@@ -807,7 +804,7 @@ pub fn get_updown_positions_cursor(
     let round = match env
         .storage()
         .persistent()
-        .get::<_, Round>(&DataKey::ActiveRound)
+        .get::<_, Round>(&DataKeyCore::ActiveRound)
     {
         Some(r) => r,
         None => return (Vec::new(&env), None),
@@ -816,7 +813,7 @@ pub fn get_updown_positions_cursor(
     let participants: Vec<Address> = env
         .storage()
         .persistent()
-        .get(&DataKey::RoundParticipants(round.round_id))
+        .get(&DataKeyScoped::RoundParticipants(round.round_id))
         .unwrap_or(Vec::new(&env));
     let participants = sort_addresses(participants);
 
@@ -832,7 +829,7 @@ pub fn get_updown_positions_cursor(
     let mut last_addr: Option<Address> = None;
     for i in start..end {
         if let Some(user) = participants.get(i) {
-            let pos_key = DataKey::Position(round.round_id, user.clone());
+            let pos_key = DataKeyScoped::Position(round.round_id, user.clone());
             if let Some(pos) = env.storage().persistent().get(&pos_key) {
                 last_addr = Some(user.clone());
                 items.push_back((user, pos));
@@ -859,12 +856,12 @@ fn _collect_leaderboard_entries(env: &Env) -> Vec<LeaderboardEntry> {
     if let Some(round) = env
         .storage()
         .persistent()
-        .get::<_, Round>(&DataKey::ActiveRound)
+        .get::<_, Round>(&DataKeyCore::ActiveRound)
     {
         let participants: Vec<Address> = env
             .storage()
             .persistent()
-            .get(&DataKey::RoundParticipants(round.round_id))
+            .get(&DataKeyScoped::RoundParticipants(round.round_id))
             .unwrap_or(Vec::new(env));
         for i in 0..participants.len() {
             if let Some(user) = participants.get(i) {

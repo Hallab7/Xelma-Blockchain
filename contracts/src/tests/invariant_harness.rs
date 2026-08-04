@@ -88,6 +88,7 @@ fn differential_invariant_harness() {
         let oracle = Address::generate(&env);
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
         let users: std::vec::Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
         for u in &users {

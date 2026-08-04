@@ -36,6 +36,7 @@ fn test_create_round_default_mode() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create round without specifying mode (should default to UpDown)
     client.create_round(&1_0000000, &None);
@@ -56,6 +57,7 @@ fn test_create_round_updown_mode_explicit() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create round with explicit Up/Down mode (0)
     client.create_round(&1_0000000, &Some(0));
@@ -76,6 +78,7 @@ fn test_create_round_precision_mode() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create round with Precision mode (1)
     client.create_round(&1_0000000, &Some(1));
@@ -96,6 +99,7 @@ fn test_create_round_invalid_mode() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Try to create round with invalid mode (2)
     let result = client.try_create_round(&1_0000000, &Some(2));
@@ -115,6 +119,7 @@ fn test_place_bet_on_updown_mode() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Up/Down round
@@ -141,6 +146,7 @@ fn test_place_bet_on_precision_mode_fails() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Precision round
@@ -164,6 +170,7 @@ fn test_place_precision_prediction_on_precision_mode() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Precision round
@@ -194,6 +201,7 @@ fn test_place_precision_prediction_on_updown_mode_fails() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Up/Down round
@@ -217,6 +225,7 @@ fn test_precision_prediction_already_bet() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Precision round
@@ -244,6 +253,7 @@ fn test_get_precision_predictions() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -292,6 +302,7 @@ fn test_get_updown_positions() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -330,6 +341,7 @@ fn test_precision_insufficient_balance() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user); // Has 1000 vXLM
 
     // Create Precision round
@@ -357,6 +369,7 @@ fn test_precision_round_ended() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Precision round (default bet window is 6 ledgers)
@@ -385,6 +398,7 @@ fn test_precision_invalid_amount() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Precision round
@@ -412,6 +426,7 @@ fn test_predict_price_alias() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Precision round
@@ -441,6 +456,7 @@ fn test_predict_price_valid_scales() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Test various valid price scales (4 decimal places)
     let test_cases = [
@@ -501,6 +517,7 @@ fn test_predict_price_invalid_scale() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Precision round
@@ -528,6 +545,7 @@ fn test_predict_price_event_emission() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Create Precision round at ledger 0
@@ -569,6 +587,7 @@ fn test_all_events_for_updown_round() {
 
     // 1. Initialize (no event expected)
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // 2. Mint initial tokens - should emit mint event
     client.mint_initial(&user1);
@@ -627,7 +646,7 @@ fn test_all_events_for_updown_round() {
     });
     assert!(bet_event.is_some(), "Second bet should emit event");
 
-    // 5. Resolve round - should emit round resolved event
+    // 5. Resolve round - should emit round summary event
     let round = client.get_active_round().unwrap();
     env.ledger().with_mut(|li| {
         li.sequence_number = round.end_ledger;
@@ -648,11 +667,11 @@ fn test_all_events_for_updown_round() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
     assert!(
         resolved_event.is_some(),
-        "Round resolved event should be emitted"
+        "Round summary event should be emitted"
     );
 
     // 6. Claim winnings - should emit claim event
@@ -686,6 +705,7 @@ fn test_all_events_for_precision_round() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     env.events().all();
     client.mint_initial(&user2);
@@ -769,7 +789,7 @@ fn test_all_events_for_precision_round() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
     assert!(
         resolved_event.is_some(),
@@ -804,6 +824,7 @@ fn test_windows_update_event() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Update windows - should emit windows updated event
     apply_windows(&env, &client, 10, 30);
@@ -836,6 +857,7 @@ fn test_precision_prediction_exceeds_max_stake_fails() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     apply_max_stake(&env, &client, Some(50_0000000i128));
     client.create_round(&1_0000000, &Some(1));
@@ -856,6 +878,7 @@ fn test_precision_prediction_at_max_stake_boundary_succeeds() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     apply_max_stake(&env, &client, Some(100_0000000i128));
     client.create_round(&1_0000000, &Some(1));
@@ -877,6 +900,7 @@ fn test_precision_prediction_exposure_cap_exceeded_fails() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     apply_max_user_exposure(&env, &client, Some(75_0000000i128));
     client.create_round(&1_0000000, &Some(1));
@@ -897,6 +921,7 @@ fn test_caps_disabled_precision_prediction_succeeds() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     // No caps configured — large bet allowed
     client.create_round(&1_0000000, &Some(1));
@@ -916,6 +941,7 @@ fn test_default_precision_participant_cap_allows_predictions_below_cap() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     assert_eq!(client.get_max_precision_participants(), 1_000);
@@ -940,6 +966,7 @@ fn test_custom_precision_participant_cap_boundary_and_over_cap() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.set_max_precision_participants(&2u32);
     client.mint_initial(&user1);
     client.mint_initial(&user2);
@@ -966,6 +993,7 @@ fn test_set_max_precision_participants_validation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let zero = client.try_set_max_precision_participants(&0u32);
     assert_eq!(zero, Err(Ok(ContractError::InvalidPrecisionCap)));
@@ -992,6 +1020,7 @@ fn test_precision_commit_reveal_happy_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
@@ -1032,6 +1061,7 @@ fn test_precision_commit_reveal_already_revealed() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
@@ -1070,6 +1100,7 @@ fn test_precision_commit_reveal_hash_mismatch() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
@@ -1110,6 +1141,7 @@ fn test_precision_commit_reveal_invalid_window_early() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
@@ -1143,6 +1175,7 @@ fn test_precision_commit_reveal_invalid_window_late() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
@@ -1177,6 +1210,7 @@ fn test_precision_commit_reveal_commitment_not_found() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
@@ -1205,6 +1239,7 @@ fn test_precision_commit_reveal_double_bet_fails() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
@@ -1235,12 +1270,13 @@ fn test_precision_commit_rejects_zero_commitment_hash() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
     let zero = BytesN::from_array(&env, &[0u8; 32]);
     let result = client.try_commit_prediction(&user, &zero, &100_0000000);
-    assert_eq!(result, Err(Ok(ContractError::InvalidCommitment)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
 }
 
 #[test]
@@ -1258,6 +1294,7 @@ fn test_precision_reveal_rejects_low_entropy_salt() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &Some(1));
 
@@ -1276,7 +1313,7 @@ fn test_precision_reveal_rejects_low_entropy_salt() {
     let zero_salt = BytesN::from_array(&env, &[0u8; 32]);
     assert_eq!(
         client.try_reveal_prediction(&user, &price, &zero_salt),
-        Err(Ok(ContractError::InvalidSalt))
+        Err(Ok(ContractError::InvalidPrice))
     );
 }
 
@@ -1292,6 +1329,7 @@ fn test_precision_predictions_page_ordering_matches_full_read() {
     let carol = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&carol);
@@ -1333,6 +1371,7 @@ fn test_precision_predictions_page_respects_offset_and_limit() {
     let carol = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&carol);
@@ -1376,6 +1415,7 @@ fn test_precision_predictions_page_offset_past_end_is_empty() {
     let alice = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     client.create_round(&1_0000000, &Some(1));
@@ -1400,6 +1440,7 @@ fn test_precision_predictions_page_zero_limit_is_empty() {
     let alice = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     client.create_round(&1_0000000, &Some(1));
@@ -1418,6 +1459,7 @@ fn test_precision_predictions_page_no_active_round_is_empty() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // No round created at all.
     let page = client.get_precision_predictions_page(&0, &10);
@@ -1436,6 +1478,7 @@ fn test_updown_positions_page_respects_offset_and_limit() {
     let carol = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&carol);
@@ -1495,6 +1538,7 @@ fn test_updown_positions_page_offset_past_end_is_empty() {
     let alice = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     client.create_round(&1_0000000, &Some(0));
@@ -1517,6 +1561,7 @@ fn test_updown_positions_page_zero_limit_is_empty() {
     let alice = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     client.create_round(&1_0000000, &Some(0));
@@ -1535,6 +1580,7 @@ fn test_updown_positions_page_no_active_round_is_empty() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let page = client.get_updown_positions_page(&0, &10);
     assert_eq!(page.len(), 0);
@@ -1551,6 +1597,7 @@ fn test_precision_predictions_page_limit_is_capped_at_max_page_size() {
     let bob = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
