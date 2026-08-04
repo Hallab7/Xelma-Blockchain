@@ -66,6 +66,7 @@ fn test_resolve_round_price_unchanged() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create a round with start price 1.5 XLM
     let start_price: u128 = 1_5000000;
@@ -167,6 +168,7 @@ fn test_resolve_round_price_went_up() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create a round with start price 1.0 XLM
     let start_price: u128 = 1_0000000;
@@ -279,6 +281,7 @@ fn test_resolve_round_price_went_down() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create a round with start price 2.0 XLM
     let start_price: u128 = 2_0000000;
@@ -382,6 +385,7 @@ fn test_user_stats_tracking() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Initial stats should be all zeros
     let stats = client.get_user_stats(&alice);
@@ -433,6 +437,7 @@ fn test_resolve_round_without_active_round() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Try to resolve without creating a round - should return error
     let result = client.try_resolve_round(&OraclePayload {
@@ -465,6 +470,7 @@ fn test_resolve_precision_closest_guess_wins() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create Precision mode round starting at 2000
     client.create_round(&2000, &Some(1));
@@ -564,6 +570,7 @@ fn test_resolve_precision_tie_splits_pot() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create Precision mode round
     client.create_round(&2000, &Some(1));
@@ -661,6 +668,7 @@ fn test_resolve_precision_exact_match() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&2000, &Some(1));
 
@@ -731,6 +739,7 @@ fn test_resolve_precision_no_predictions() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create Precision mode round with no predictions
     client.create_round(&2000, &Some(1));
@@ -768,6 +777,7 @@ fn test_resolve_precision_three_way_tie() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&2000, &Some(1));
 
@@ -856,6 +866,7 @@ fn test_resolve_precision_single_prediction() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&2000, &Some(1));
 
@@ -911,6 +922,7 @@ fn test_resolve_precision_large_differences() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&100_0000, &Some(1));
 
@@ -980,6 +992,7 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&1_0000, &Some(1));
 
@@ -1075,6 +1088,7 @@ fn test_precision_remainder_5way_tie() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&1_0000, &Some(1));
 
@@ -1193,6 +1207,7 @@ fn test_precision_no_remainder() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&1_0000, &Some(1));
 
@@ -1267,6 +1282,7 @@ fn test_round_resolved_event_emitted() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &None);
 
@@ -1297,12 +1313,12 @@ fn test_round_resolved_event_emitted() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
 
     assert!(
         resolved_event.is_some(),
-        "Round resolved event should be emitted"
+        "Round summary event should be emitted"
     );
 }
 
@@ -1320,6 +1336,7 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.create_round(&1_0000000, &None);
@@ -1382,6 +1399,7 @@ fn test_unchanged_price_resolution_emits_refund_outcomes() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.create_round(&1_0000000, &None);
@@ -1445,6 +1463,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -1517,6 +1536,7 @@ fn test_claim_winnings_event_emitted() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &None);
 
@@ -1594,6 +1614,7 @@ fn test_no_claim_event_when_no_winnings() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Count events before claim
@@ -1647,6 +1668,7 @@ fn test_precision_payout_deterministic_same_inputs() {
 
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
         client.create_round(&1_0000, &Some(1));
 
         env.as_contract(&contract_id, || {
@@ -1732,6 +1754,7 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.create_round(&1_0000, &Some(1));
 
     let alice = Address::generate(&env);
@@ -1813,6 +1836,7 @@ fn test_min_participants_blocks_settlement_updown() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.create_round(&1_0000000, &None);
 
@@ -1857,6 +1881,7 @@ fn test_min_participants_allows_settlement_at_threshold() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.mint_initial(&user2);
     client.create_round(&1_0000000, &None);
@@ -1900,6 +1925,7 @@ fn test_min_participants_fallback_refunds_precision_mode() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.create_round(&2000, &Some(1));
 
@@ -1940,6 +1966,7 @@ fn test_min_participants_fallback_event_emitted() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.create_round(&1_0000000, &None);
     client.place_bet(&user1, &100_0000000, &BetSide::Up);
@@ -1967,11 +1994,11 @@ fn test_min_participants_fallback_event_emitted() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("fallback"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
     assert!(
         fallback_event.is_some(),
-        "Fallback event must be emitted when min-participants threshold is not met"
+        "Fallback summary event must be emitted when min-participants threshold is not met"
     );
 }
 
@@ -1985,6 +2012,7 @@ fn test_set_min_participants_validation() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Zero is invalid
     let result = client.try_set_min_participants(&Some(0u32));
@@ -2015,6 +2043,7 @@ fn test_no_min_participants_threshold_resolves_normally() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.create_round(&1_0000000, &None);
 
@@ -2056,6 +2085,7 @@ fn test_precision_payout_conservation_large_tie_set() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.create_round(&1_0000, &Some(1));
 
     let u0 = Address::generate(&env);
@@ -2148,6 +2178,7 @@ fn test_precision_commit_reveal_resolution_payout_with_unrevealed_participants()
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2222,6 +2253,7 @@ fn test_precision_remainder_goes_to_lexicographically_lowest_winner() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user_a);
     client.mint_initial(&user_b);
 
@@ -2334,6 +2366,7 @@ fn test_archived_round_after_resolve_matches_settlement() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2375,6 +2408,7 @@ fn test_archived_round_after_cancel() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     let start_price: u128 = 1_5000000;
@@ -2408,6 +2442,7 @@ fn test_archived_round_after_precision_resolve() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2446,6 +2481,7 @@ fn test_archived_round_fallback_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.set_min_participants(&Some(2u32));
     client.mint_initial(&user);
 
@@ -2485,6 +2521,7 @@ fn test_get_recent_archived_rounds_order_and_limit() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let mut round_ids = Vec::new(&env);
     for i in 0..3 {
@@ -2576,6 +2613,7 @@ fn test_outcome_loss_event_updown_indexed_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -2651,6 +2689,7 @@ fn test_outcome_loss_event_updown_legacy_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2736,6 +2775,7 @@ fn test_outcome_loss_event_precision_indexed_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -2820,6 +2860,7 @@ fn test_outcome_loss_event_precision_legacy_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -2920,6 +2961,7 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2992,6 +3034,7 @@ fn test_outcome_loss_event_not_emitted_on_min_participants_fallback() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.set_min_participants(&Some(3u32));
 
@@ -3034,6 +3077,7 @@ fn test_outcome_loss_event_not_emitted_on_cancel() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     client.create_round(&1_0000000, &None);
@@ -3065,6 +3109,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&u_a);
     client.mint_initial(&u_b);
     client.mint_initial(&u_c);
@@ -3168,6 +3213,7 @@ fn test_archive_retention_prunes_oldest() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // MAX_ARCHIVED_ROUNDS = 128; create 129 resolved rounds to force pruning of round 1.
     let mut first_round_id = 0u64;
@@ -3209,6 +3255,7 @@ fn test_get_user_archived_participation_updown_win() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3250,6 +3297,7 @@ fn test_get_user_archived_participation_updown_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     let start_price: u128 = 1_0000000;
@@ -3281,6 +3329,7 @@ fn test_get_user_archived_participation_precision_win() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3323,6 +3372,7 @@ fn test_get_user_archived_participation_cancel() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     let start_price: u128 = 1_0000000;
@@ -3367,6 +3417,7 @@ fn test_get_user_archived_participation_min_participants_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.set_min_participants(&Some(2u32));
 
@@ -3464,6 +3515,7 @@ fn test_protocol_fee_disabled_default_is_no_behaviour_change() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3512,6 +3564,7 @@ fn test_protocol_fee_updown_indexed_conservation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3588,6 +3641,7 @@ fn test_protocol_fee_updown_legacy_conservation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3670,6 +3724,7 @@ fn test_protocol_fee_precision_indexed_conservation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -3728,6 +3783,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -3818,6 +3874,7 @@ fn test_protocol_fee_thin_losing_pool_updown() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3888,6 +3945,7 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3972,6 +4030,7 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -4032,6 +4091,7 @@ fn test_protocol_fee_withdrawal_to_recipient() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&treasury_account);
@@ -4095,6 +4155,7 @@ fn test_protocol_fee_schedule_validation_rejects_zero_and_over_cap() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // None always OK.
     client.schedule_protocol_fee_bps(&None);
@@ -4783,7 +4844,7 @@ fn test_precision_payout_policy_config() {
 
     // Reject invalid policy value
     let res = client.try_set_precision_payout_policy(&2);
-    assert_eq!(res, Err(Ok(ContractError::InvalidPayoutPolicy)));
+    assert_eq!(res, Err(Ok(ContractError::InvalidMode)));
     assert_eq!(client.get_precision_payout_policy(), 1);
 
     // Set back to 0 (Equal)

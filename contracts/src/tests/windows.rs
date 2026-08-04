@@ -26,6 +26,7 @@ fn test_set_windows_admin_only() {
 
     // Initialize contract
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Admin can set windows
     client.set_windows(&10, &20);
@@ -55,6 +56,7 @@ fn test_set_windows_fails_without_admin_auth() {
         },
     }]);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Attempting to set windows without admin auth
     let result = client.try_set_windows(&10, &20);
@@ -73,6 +75,7 @@ fn test_set_windows_fails_with_wrong_auth() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // We only provide auth for malicious_user, but the contract expects admin auth
     env.mock_auths(&[soroban_sdk::testutils::MockAuth {
@@ -101,6 +104,7 @@ fn test_set_windows_positive_values() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Zero values should fail
     let result = client.try_set_windows(&0, &12);
@@ -125,6 +129,7 @@ fn test_set_windows_bet_must_be_less_than_run() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // bet_ledgers >= run_ledgers should fail
     let result = client.try_set_windows(&12, &12);
@@ -148,6 +153,7 @@ fn test_set_windows_respects_max_bounds() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Inclusive max bounds are accepted.
     client.set_windows(&MAX_BET_WINDOW_LEDGERS, &MAX_RUN_WINDOW_LEDGERS);
@@ -171,6 +177,7 @@ fn test_set_windows_does_not_mutate_state_on_validation_failure() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     apply_windows(&env, &client, 20, 40);
 
     let result = client.try_set_windows(&41, &40);
@@ -193,6 +200,7 @@ fn test_set_close_buffer_ledgers_rejects_out_of_range() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let result = client.try_set_close_buffer_ledgers(&(MAX_BET_WINDOW_LEDGERS + 1));
     assert_eq!(result, Err(Ok(ContractError::WindowOutOfRange)));
@@ -216,6 +224,7 @@ fn test_close_buffer_rejects_bets_in_final_window() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user_a);
     client.mint_initial(&user_b);
 
@@ -379,6 +388,7 @@ fn test_create_round_uses_configured_windows() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Set custom windows
     apply_windows(&env, &client, 10, 20);
@@ -411,6 +421,7 @@ fn test_create_round_uses_default_windows() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Don't set custom windows, use defaults
     let start_price: u128 = 1_0000000;
@@ -441,6 +452,7 @@ fn test_betting_closes_at_bet_end_ledger() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Set windows: bet closes at ledger 6, round ends at ledger 12
@@ -487,6 +499,7 @@ fn test_resolution_only_allowed_after_run_ledgers() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Set windows: bet closes at ledger 6, round ends at ledger 12
@@ -552,6 +565,7 @@ fn test_precision_prediction_respects_bet_window() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Set windows
@@ -595,6 +609,7 @@ fn test_place_precision_prediction_fails_without_user_auth() {
         },
     }]);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     env.mock_auths(&[soroban_sdk::testutils::MockAuth {
         address: &user,
@@ -635,6 +650,7 @@ fn test_create_round_rejects_zero_start_price() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let result = client.try_create_round(&0u128, &None);
     assert_eq!(result, Err(Ok(ContractError::InvalidStartPrice)));
@@ -650,6 +666,7 @@ fn test_create_round_rejects_price_above_max() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // MAX_START_PRICE = 1_000_000_000_000_000_000; one above must fail
     let result = client.try_create_round(&1_000_000_000_000_000_001u128, &None);
@@ -666,6 +683,7 @@ fn test_create_round_accepts_boundary_prices() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Minimum allowed price (1)
     client.create_round(&1u128, &None);
@@ -689,6 +707,7 @@ fn test_get_round_phase_no_active_round() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let result = client.try_get_round_phase();
     assert_eq!(result, Err(Ok(ContractError::NoActiveRound)));
@@ -708,6 +727,7 @@ fn test_get_round_phase_boundary_ledgers() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     apply_windows(&env, &client, 10, 20);
     client.create_round(&1_0000000u128, &None);
@@ -740,6 +760,7 @@ fn test_get_round_phase_default_windows() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.create_round(&1_0000000u128, &None);
 
     // default: bet_end=56, end=62

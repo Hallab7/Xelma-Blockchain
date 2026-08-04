@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Tests for schema versioning and migration guards.
 
+use crate::common::_migrated_key;
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
 use crate::types::{DataKeyCore, DataKeyScoped};
@@ -145,7 +146,7 @@ fn test_dry_run_v1_to_v2_passes_validation() {
 
     // Simulate legacy schema v1.
     env.as_contract(&contract_id, || {
-        env.storage().persistent().remove(&DataKey::SchemaVersion);
+        env.storage().persistent().remove(&DataKeyCore::SchemaVersion);
     });
 
     assert_eq!(client.get_schema_version(), 1u32);
@@ -174,7 +175,7 @@ fn test_dry_run_v2_to_v3_passes_validation() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::SchemaVersion, &2u32);
+            .set(&DataKeyCore::SchemaVersion, &2u32);
     });
 
     assert_eq!(client.get_schema_version(), 2u32);
@@ -190,7 +191,7 @@ fn test_dry_run_v2_to_v3_passes_validation() {
     let migrated = env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .get::<_, bool>(&DataKey::MigratedToV3)
+            .get::<_, bool>(&DataKeyCore::MigratedToV3)
     });
     assert_eq!(migrated, None);
 }
@@ -229,7 +230,7 @@ fn test_dry_run_still_validates_unsupported_version() {
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::SchemaVersion, &2u32);
+            .set(&DataKeyCore::SchemaVersion, &2u32);
     });
 
     let res = client.try_migrate_schema_v1_to_v2(&true);
