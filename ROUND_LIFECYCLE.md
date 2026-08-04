@@ -88,6 +88,17 @@ every committed stake is **refunded** to pending winnings so funds cannot
 remain locked. Admin cancel and insufficient-participant fallback also refund
 unrevealed commitments.
 
+### One-Sided Market Settlement Policy (Issue #270)
+
+When a round ends with liquidity on only one side (e.g. `pool_up > 0` and `pool_down == 0` or vice versa), competitive settlement is impossible because there is no counter-pool.
+
+The settlement engine deterministically executes the configured `OneSidedPolicy`:
+- **`Refund` (Default):** 100% of user stakes are credited to `PendingWinnings`. No protocol fees are deducted and user win/loss statistics are preserved without artificial mutation.
+- **`Void`:** Round is voided, returning full stakes to participants.
+- **`CarryForward`:** Unopposed pool is carried forward to the subsequent round structure (with refund fallback if unsupported).
+
+A dedicated `("pool", "onesided")` event is published containing `round_id`, `policy_code`, `affected_side`, `refund_amount`, `carry_amount`, `pool_up`, and `pool_down`.
+
 ## Claiming Winnings
 
 Users call `claim_winnings` any time after a round resolves. The pending amount

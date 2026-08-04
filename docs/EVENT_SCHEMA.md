@@ -214,6 +214,24 @@ All stakes are refunded; no competitive settlement occurs.
 
 ---
 
+### `("pool", "onesided")`
+
+Emitted when a prediction round settles as a one-sided (degenerate) market (Issue #270).
+Triggered when bets/predictions were placed on only one side (e.g., UP only or DOWN only).
+Applies the configured deterministic settlement policy (`OneSidedPolicy::Refund` default).
+
+| Position | Field            | Type   | Description                                                              |
+|----------|------------------|--------|--------------------------------------------------------------------------|
+| 0        | `round_id`       | `u64`  | Round that was settled as one-sided                                      |
+| 1        | `policy_code`    | `u32`  | Policy applied: `0` = Refund, `1` = Void, `2` = CarryForward              |
+| 2        | `affected_side`  | `u32`  | Side containing positions: `0` = Up, `1` = Down, `2` = Empty             |
+| 3        | `refund_amount`  | `i128` | Total stake amount refunded across all participants (in stroops)         |
+| 4        | `carry_amount`   | `i128` | Total stake amount carried forward to next round (in stroops)            |
+| 5        | `pool_up`        | `i128` | Total Up-side pool at settlement time (in stroops)                       |
+| 6        | `pool_down`      | `i128` | Total Down-side pool at settlement time (in stroops)                     |
+
+---
+
 ### `("round", "summary")`
 
 Emitted when a round is resolved, cancelled, or refunded. Contains compact settlement data.

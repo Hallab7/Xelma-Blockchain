@@ -24,6 +24,7 @@ mod lifecycle;
 mod migration_versioning;
 mod min_bet;
 mod mode_tests;
+mod one_sided_settlement;
 mod overflow_tests;
 mod pause;
 mod pending_winnings_expiry;

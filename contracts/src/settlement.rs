@@ -1027,8 +1027,29 @@ pub fn _resolve_updown_mode(
 
     let mut fee_amount = 0;
 
-    if !participants.is_empty() {
-        if price_unchanged || is_one_sided {
+    if is_one_sided {
+        let policy = _select_one_sided_policy(round);
+        let positions: Map<Address, UserPosition> = if participants.is_empty() {
+            env.storage()
+                .persistent()
+                .get(&DataKey::UpDownPositions)
+                .unwrap_or(Map::new(env))
+        } else {
+            Map::new(env)
+        };
+        fee_amount = _apply_one_sided_policy(
+            env,
+            round,
+            policy,
+            &participants,
+            &if participants.is_empty() {
+                Some(positions)
+            } else {
+                None
+            },
+        )?;
+    } else if !participants.is_empty() {
+        if price_unchanged {
             _record_refunds_indexed(env, round.round_id, 0, &participants)?;
         } else if price_went_up {
             fee_amount = _record_winnings_indexed(

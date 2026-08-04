@@ -987,6 +987,15 @@ impl VirtualTokenContract {
         queries::get_active_round(env)
     }
 
+    pub fn get_one_sided_policy(env: Env) -> OneSidedPolicy {
+        let active_round: Option<Round> = env.storage().persistent().get(&DataKey::ActiveRound);
+        if let Some(round) = active_round {
+            settlement::_select_one_sided_policy(&round)
+        } else {
+            OneSidedPolicy::Refund
+        }
+    }
+
     pub fn get_round_pool_stats(env: Env) -> Option<RoundPoolStats> {
         queries::get_round_pool_stats(env)
     }
