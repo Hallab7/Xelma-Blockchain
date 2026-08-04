@@ -60,13 +60,13 @@ pub enum ContractError {
     /// expiry threshold — caller must wait before reclaiming.
     PendingWinningsNotExpired = 66,
     /// Epoch mint budget has been fully consumed
-    EpochBudgetExceeded = 66,
+    EpochBudgetExceeded = 67,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
-    OracleNotLive = 67,
+    OracleNotLive = 68,
     /// Invalid precision payout policy
-    InvalidPayoutPolicy = 68,
+    InvalidPayoutPolicy = 69,
     /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
-    BelowMinBet = 69,
+    BelowMinBet = 70,
     /// Multi-feed resolution: fewer observations survived outlier rejection
     /// than the configured quorum threshold.
     InsufficientOracleQuorum = 71,
@@ -80,5 +80,11 @@ pub enum ContractError {
     DuplicateOracleSource = 74,
     /// Multi-feed payload has observations that are not sorted or sources
     /// are out of expected range.
-    InvalidObservationOrder = 75
+    InvalidObservationOrder = 75,
+    /// The requested data key is not allowed for batch TTL touch operations.
+    UnsupportedDataKeyForTtlTouch = 76,
+    /// Pending winnings entry does not exist or expiry is not configured.
+    PendingWinningsNotFound = 77,
+    /// Pending winnings expiry is not configured (value is 0).
+    ExpiryNotConfigured = 78,
 }
