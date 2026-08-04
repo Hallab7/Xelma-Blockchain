@@ -26,6 +26,7 @@ fn test_guard_success_path_no_active_round() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Pre-condition: no active round
     assert!(client.get_active_round().is_none());
@@ -58,6 +59,7 @@ fn test_guard_passes_after_round_resolved() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&1_0000000u128, &None);
     let round = client.get_active_round().unwrap();
@@ -97,6 +99,7 @@ fn test_guard_failure_path_active_round_exists() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create first round
     let start_price: u128 = 1_5000000;
@@ -145,6 +148,7 @@ fn test_guard_repeated_rejections_do_not_corrupt_state() {
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&1_0000000u128, &None);
     let original_round = client.get_active_round().unwrap();

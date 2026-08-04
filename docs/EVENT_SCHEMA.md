@@ -87,6 +87,7 @@ Emitted when a user submits a Precision mode price prediction.
 
 ---
 
+### `("round", "summary")`
 ### `("round", "resolved")`
 
 Emitted when a round is settled competitively by the oracle.
@@ -101,7 +102,31 @@ Emitted when a round is settled competitively by the oracle.
 
 ---
 
-### `("payout", "outcome")`
+Emitted exactly once per terminal round transition — competitive resolution,
+admin cancellation, or min-participants fallback. Replaces the previously
+separate `("round", "resolved")`, `("round", "cancelled")`, and
+`("round", "fallback")` events.
+
+This is the **canonical terminal round event**. Indexers should listen for
+`("round", "summary")` and ignore legacy topic names.
+
+The payload carries the full terminal state of the round:
+
+| Position | Field               | Type         | Description                                                                 |
+|----------|---------------------|--------------|-----------------------------------------------------------------------------|
+| 0        | `version`           | `u32`        | Schema version tag (`0` for this layout). Reserved for future field changes. |
+| 1        | `round_id`          | `u64`        | Monotonically increasing round identifier                                   |
+| 2        | `status`            | `u32`        | Terminal status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund       |
+| 3        | `mode`              | `u32`        | Round mode: `0` = UpDown, `1` = Precision                                   |
+| 4        | `price_start`       | `u128`       | Opening price at round start (4 decimal places)                             |
+| 5        | `price_final`       | `u128`       | Settlement price from oracle, or `0` for cancelled/fallback rounds           |
+| 6        | `pool_up`           | `i128`       | Total Up-side pool at terminal time (stroops)                                |
+| 7        | `pool_down`         | `i128`       | Total Down-side pool at terminal time (stroops)                              |
+| 8        | `participant_count` | `u32`        | Total unique user participants                                               |
+| 9        | `total_pot`         | `i128`       | Total accumulated round pot (stroops)                                        |
+| 10       | `fee_amount`        | `i128`       | Protocol fees collected (stroops), `0` for non-competitive paths             |
+| 11       | `settled_at_ledger` | `u32`        | Ledger sequence number when the round was archived                           |
+| 12       | `confidence`        | `Option<u32>` | Oracle confidence in basis points (`None` for cancel / fallback)            |
 
 Emitted once per participant during round resolution after that participant's settlement
 outcome is known. Indexers can use these events to reconstruct the complete participant-level
@@ -129,7 +154,7 @@ at the top of this file).*
 
 Emitted per losing participant whenever a round settles competitively
 (Issue #168).  Complements the implicit "winner" signal from pending-winnings
-accumulation and the explicit `("round", "fallback")` refund event so that
+accumulation so that
 analytics, user notifications, and indexers can detect losses without
 inferring them from the absence of payout events.
 
@@ -472,7 +497,7 @@ use soroban_sdk::{symbol_short, testutils::{Events, TryIntoVal}, Env};
 let events = env.events().all();
 let resolved = events.iter().find(|(_, topics, _)| {
     topics.get(0).and_then(|t| t.try_into_val(&env).ok()) == Some(symbol_short!("round"))
-        && topics.get(1).and_then(|t| t.try_into_val(&env).ok()) == Some(symbol_short!("resolved"))
+        && topics.get(1).and_then(|t| t.try_into_val(&env).ok()) == Some(symbol_short!("summary"))
 });
 ```
 
