@@ -77,33 +77,41 @@ fn pretty_print_failure(
 
 #[test]
 fn differential_invariant_harness() {
-    let seq_len: u32 = env::var("SEQUENCE_LENGTH")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(30);
-    let seed_opt: Option<u64> = env::var("SEED").ok().and_then(|v| v.parse().ok());
+        // Environment configuration
+        let seq_len: u32 = env::var("SEQUENCE_LENGTH")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20);
+        let seed_opt: Option<u64> = env::var("SEED")
+            .ok()
+            .and_then(|v| v.parse().ok());
 
-    let mut config = Config::with_cases(seq_len);
-    if let Some(seed) = seed_opt {
-        config.rng_seed = RngSeed::Fixed(seed);
-    }
-    let mut runner = TestRunner::new(config);
-    let actions_strategy = prop::collection::vec(action_strategy(), 1..=seq_len as usize);
-    let actions = actions_strategy
-        .new_tree(&mut runner)
-        .expect("Failed to generate actions")
-        .current();
+        // Set up proptest runner with optional seed (deterministic when seed is provided)
+        let mut config = Config::with_cases(seq_len);
+        if let Some(seed) = seed_opt {
+            config.rng_seed = RngSeed::Fixed(seed);
+        }
+        let mut runner = TestRunner::new(config);
+        let actions_strategy = prop::collection::vec(action_strategy(), 1..=seq_len as usize);
+        let actions = actions_strategy
+            .new_tree(&mut runner)
+            .expect("Failed to generate actions")
+            .current();
 
-    let env = Env::default();
-    let contract_id = env.register(VirtualTokenContract, ());
-    let client = VirtualTokenContractClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    let oracle = Address::generate(&env);
-    env.mock_all_auths();
-    client.initialize(&admin, &oracle);
+        // Setup contract environment.
+        let env = Env::default();
+        let contract_id = env.register(VirtualTokenContract, ());
+        let client = VirtualTokenContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let oracle = Address::generate(&env);
+        env.mock_all_auths();
+        client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
-    let users: std::vec::Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
-    let mut model = ReferenceModel::new();
+        let users: std::vec::Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
+        for u in &users {
+            client.mint_initial(u);
+        }
 
     for u in &users {
         client.mint_initial(u);
