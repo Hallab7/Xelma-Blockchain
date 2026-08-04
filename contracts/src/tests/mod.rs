@@ -13,6 +13,7 @@ mod conservation;
 mod cost_benchmarks;
 mod deviation_reference;
 mod edge_cases;
+mod drill;
 mod event_coverage;
 mod fee_model;
 mod guard_tests;

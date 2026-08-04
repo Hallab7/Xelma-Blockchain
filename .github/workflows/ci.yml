@@ -44,6 +44,9 @@ jobs:
       - name: Run cargo test
         run: cargo test --workspace --verbose --locked
 
+      - name: Run emergency claims-only drill test
+        run: cargo test --package xelma-contract --lib tests::drill --locked -- --nocapture
+
       - name: Benchmark report (cost/gas regression guardrails)
         run: cargo test --package xelma-contract cost_benchmarks --locked -- --nocapture
 
