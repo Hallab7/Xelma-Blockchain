@@ -833,6 +833,12 @@ pub fn set_early_cashout_bps(env: Env, bps: Option<u32>) -> Result<(), ContractE
         (symbol_short!("config"), symbol_short!("ec_bps")),
         (bps,),
     );
+    _emit_config_updated(
+        &env,
+        ConfigChangeKind::EarlyCashoutBps,
+        ConfigChangePayload::EarlyCashoutBps(old_bps),
+        ConfigChangePayload::EarlyCashoutBps(bps),
+    );
     Ok(())
 }
 

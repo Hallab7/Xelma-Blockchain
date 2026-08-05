@@ -130,6 +130,25 @@ pub fn cancel_round(env: Env, _reason: u32) -> Result<(), ContractError> {
 
     // Clean up participant list and mark round as cancelled
     let participant_count = participants.len();
+    let total_pot = match round.mode {
+        RoundMode::UpDown => round.pool_up.checked_add(round.pool_down).unwrap_or(0),
+        RoundMode::Precision => {
+            let mut pot = 0i128;
+            for i in 0..participants.len() {
+                if let Some(user) = participants.get(i) {
+                    let pred_key = DataKeyScoped::PrecisionPosition(round_id, user.clone());
+                    let commit_key = DataKeyScoped::PrecisionCommitment(round_id, user);
+                    if let Some(pred) = env.storage().persistent().get::<_, PrecisionPrediction>(&pred_key) {
+                        pot = pot.checked_add(pred.amount).unwrap_or(pot);
+                    } else if let Some(commit) = env.storage().persistent().get::<_, PrecisionCommitment>(&commit_key) {
+                        pot = pot.checked_add(commit.amount).unwrap_or(pot);
+                    }
+                }
+            }
+            pot
+        }
+    };
+
     _archive_round(
         &env,
         &round,
@@ -916,13 +935,13 @@ fn _settle_round_with_price(
             #[allow(deprecated)]
             env.events().publish(
                 (symbol_short!("round"), symbol_short!("fallback")),
-                (round_id, count, min),
+                (round_id, participant_count, min),
             );
             return Ok(());
         }
     }
 
-    let fee_amount = match round.mode {
+    let (fee_amount, total_pot) = match round.mode {
         RoundMode::UpDown => {
             let (one_sided, fee) = _resolve_updown_mode(env, round, final_price, false)?;
             if one_sided {
@@ -932,7 +951,8 @@ fn _settle_round_with_price(
                     (round_id, round.pool_up, round.pool_down),
                 );
             }
-            fee
+            let pot = round.pool_up.checked_add(round.pool_down).unwrap_or(0);
+            (fee, pot)
         }
         RoundMode::Precision => _resolve_precision_mode(env, round_id, final_price, false)?,
     };
@@ -954,17 +974,28 @@ fn _settle_round_with_price(
         payload.confidence,
     );
 
-    for i in 0..participants.len() {
-        if let Some(user) = participants.get(i) {
-            env.storage()
-                .persistent()
-                .remove(&DataKeyScoped::Position(round_id, user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKeyScoped::PrecisionPosition(round_id, user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKeyScoped::PrecisionCommitment(round_id, user));
+    // Mode-scoped position cleanup (eliminates redundant storage delete lookups)
+    match round.mode {
+        RoundMode::UpDown => {
+            for i in 0..raw_participants.len() {
+                if let Some(user) = raw_participants.get(i) {
+                    env.storage()
+                        .persistent()
+                        .remove(&DataKeyScoped::Position(round_id, user));
+                }
+            }
+        }
+        RoundMode::Precision => {
+            for i in 0..raw_participants.len() {
+                if let Some(user) = raw_participants.get(i) {
+                    env.storage()
+                        .persistent()
+                        .remove(&DataKeyScoped::PrecisionPosition(round_id, user.clone()));
+                    env.storage()
+                        .persistent()
+                        .remove(&DataKeyScoped::PrecisionCommitment(round_id, user));
+                }
+            }
         }
     }
     env.storage()
@@ -1005,12 +1036,7 @@ pub fn _resolve_updown_mode(
     final_price: u128,
     skip_payout: bool,
 ) -> Result<(bool, i128), ContractError> {
-    let participants: Vec<Address> = env
-        .storage()
-        .persistent()
-        .get(&DataKeyScoped::RoundParticipants(round.round_id))
-        .unwrap_or(Vec::new(env));
-    let participants = sort_addresses(participants);
+    let participants = sort_addresses(raw_participants.clone());
 
     // Pure price-direction classification and one-sided check delegated to
     // settlement_math for auditability and golden-vector coverage.
@@ -1298,7 +1324,7 @@ pub fn _resolve_precision_mode(
             .get(&DataKeyCore::PrecisionPositions)
             .unwrap_or(Map::new(env));
         if legacy.is_empty() {
-            return Ok(0);
+            return Ok((0, 0));
         }
         return _resolve_precision_legacy(env, round_id, &legacy, final_price);
     }
@@ -1306,9 +1332,10 @@ pub fn _resolve_precision_mode(
     let mut min_diff: Option<u128> = None;
     let mut winners: Vec<PrecisionPrediction> = Vec::new(env);
     let mut total_pot: i128 = 0;
-    let mut participant_amounts: Vec<i128> = Vec::new(env);
-    let mut participant_prices: Vec<u128> = Vec::new(env);
-    let mut is_winner_mask: Vec<bool> = Vec::new(env);
+    let p_len = participants.len() as usize;
+    let mut participant_amounts: StdVec<i128> = StdVec::with_capacity(p_len);
+    let mut participant_prices: StdVec<u128> = StdVec::with_capacity(p_len);
+    let mut is_winner_mask: StdVec<bool> = StdVec::with_capacity(p_len);
 
     for i in 0..participants.len() {
         if let Some(user) = participants.get(i) {
@@ -1340,9 +1367,9 @@ pub fn _resolve_precision_mode(
             total_pot = total_pot
                 .checked_add(amount)
                 .ok_or(ContractError::Overflow)?;
-            participant_amounts.push_back(amount);
-            participant_prices.push_back(cached_price);
-            is_winner_mask.push_back(false);
+            participant_amounts.push(amount);
+            participant_prices.push(cached_price);
+            is_winner_mask.push(false);
 
             if let Some(pred) = pred_opt {
                 let diff = if pred.predicted_price >= final_price {
@@ -1355,24 +1382,25 @@ pub fn _resolve_precision_mode(
                         .ok_or(ContractError::Overflow)?
                 };
 
+                let idx = i as usize;
                 match min_diff {
                     None => {
                         min_diff = Some(diff);
                         winners.push_back(pred.clone());
-                        is_winner_mask.set(i, true);
+                        is_winner_mask[idx] = true;
                     }
                     Some(current_min) => {
                         if diff < current_min {
                             min_diff = Some(diff);
                             winners = Vec::new(env);
                             winners.push_back(pred.clone());
-                            for j in 0..i {
-                                is_winner_mask.set(j, false);
+                            for j in 0..idx {
+                                is_winner_mask[j] = false;
                             }
-                            is_winner_mask.set(i, true);
+                            is_winner_mask[idx] = true;
                         } else if diff == current_min {
                             winners.push_back(pred.clone());
-                            is_winner_mask.set(i, true);
+                            is_winner_mask[idx] = true;
                         }
                     }
                 }
@@ -1421,10 +1449,11 @@ pub fn _resolve_precision_mode(
 
         for i in 0..participants.len() {
             if let Some(user) = participants.get(i) {
-                let was_winner = is_winner_mask.get(i).unwrap_or(false);
+                let idx = i as usize;
+                let was_winner = is_winner_mask.get(idx).copied().unwrap_or(false);
                 if !was_winner {
-                    let stake = participant_amounts.get(i).unwrap();
-                    let predicted_price = participant_prices.get(i).unwrap();
+                    let stake = participant_amounts[idx];
+                    let predicted_price = participant_prices[idx];
 
                     #[allow(deprecated)]
                     env.events().publish(
@@ -1455,7 +1484,8 @@ pub fn _resolve_precision_mode(
         // sum_refunds == total_pot, fee == 0, no stats mutation).
         for i in 0..participants.len() {
             if let Some(user) = participants.get(i) {
-                let stake = participant_amounts.get(i).unwrap_or(0);
+                let idx = i as usize;
+                let stake = participant_amounts.get(idx).copied().unwrap_or(0);
                 if stake > 0 {
                     _accumulate_pending(env, user.clone(), stake)?;
                     _persist_user_outcome(
@@ -1474,7 +1504,7 @@ pub fn _resolve_precision_mode(
         }
     }
 
-    Ok(fee_amount)
+    Ok((fee_amount, total_pot))
 }
 
 pub fn _resolve_precision_legacy(
@@ -1482,10 +1512,10 @@ pub fn _resolve_precision_legacy(
     round_id: u64,
     predictions_map: &Map<Address, PrecisionPrediction>,
     final_price: u128,
-) -> Result<i128, ContractError> {
+) -> Result<(i128, i128), ContractError> {
     let predictions = predictions_map.values();
     if predictions.is_empty() {
-        return Ok(0);
+        return Ok((0, 0));
     }
 
     let mut min_diff: Option<u128> = None;
@@ -1598,7 +1628,7 @@ pub fn _resolve_precision_legacy(
         }
     }
 
-    Ok(fee_amount)
+    Ok((fee_amount, total_pot))
 }
 
 pub fn _record_refunds_indexed(
@@ -1856,6 +1886,9 @@ pub fn _archive_round(
                 (symbol_short!("archive"), symbol_short!("pruned")),
                 (oldest, retention_limit),
             );
+            recent.remove(0);
+        } else {
+            break;
         }
         recent.remove(0);
     }

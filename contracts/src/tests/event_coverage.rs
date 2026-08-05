@@ -59,6 +59,51 @@ fn assert_last_config_updated(
     assert_eq!(data.try_into_val(env), Ok((kind, old_value, new_value)));
 }
 
+fn assert_last_config_scheduled(env: &Env, kind: ConfigChangeKind, expected_activation: u32) {
+    let events = env.events().all();
+    let (_contract, topics, data) = events
+        .iter()
+        .rev()
+        .find(|(_contract, topics, _data)| {
+            topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(env) == Ok(symbol_short!("config"))
+                && topics.get(1).unwrap().try_into_val(env) == Ok(symbol_short!("sched"))
+        })
+        .expect("config sched event should exist");
+
+    assert_eq!(data.try_into_val(env), Ok((kind, expected_activation)));
+}
+
+fn assert_last_config_applied(env: &Env, kind: ConfigChangeKind, expected_activation: u32) {
+    let events = env.events().all();
+    let (_contract, topics, data) = events
+        .iter()
+        .rev()
+        .find(|(_contract, topics, _data)| {
+            topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(env) == Ok(symbol_short!("config"))
+                && topics.get(1).unwrap().try_into_val(env) == Ok(symbol_short!("applied"))
+        })
+        .expect("config applied event should exist");
+
+    assert_eq!(data.try_into_val(env), Ok((kind, expected_activation)));
+}
+
+fn assert_last_config_cancelled(env: &Env, kind: ConfigChangeKind, expected_cancelled_at: u32) {
+    let events = env.events().all();
+    let (_contract, topics, data) = events
+        .iter()
+        .rev()
+        .find(|(_contract, topics, _data)| {
+            topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(env) == Ok(symbol_short!("config"))
+                && topics.get(1).unwrap().try_into_val(env) == Ok(symbol_short!("cancel"))
+        })
+        .expect("config cancel event should exist");
+
+    assert_eq!(data.try_into_val(env), Ok((kind, expected_cancelled_at)));
+}
+
 #[test]
 fn test_event_coverage_direct_config_setters_emit_audit_event() {
     let (env, _, _, _, client) = setup();
@@ -110,22 +155,42 @@ fn test_event_coverage_direct_config_setters_emit_audit_event() {
         ConfigChangePayload::PrecisionPayoutPolicy(0),
         ConfigChangePayload::PrecisionPayoutPolicy(1),
     );
+
+    client.set_early_cashout_bps(&Some(500));
+    assert_last_config_updated(
+        &env,
+        ConfigChangeKind::EarlyCashoutBps,
+        ConfigChangePayload::EarlyCashoutBps(None),
+        ConfigChangePayload::EarlyCashoutBps(Some(500)),
+    );
 }
 
 #[test]
-fn test_event_coverage_timelocked_config_apply_emits_audit_event() {
+fn test_event_coverage_timelocked_config_lifecycle_emits_audit_events() {
     let (env, _, _, _, client) = setup();
 
+    // 1. Schedule
     client.schedule_windows(&10, &20);
+    assert_last_config_scheduled(&env, ConfigChangeKind::Windows, 1440);
+
+    // 2. Apply after timelock delay
     env.ledger().with_mut(|li| li.sequence_number = 1_441);
     client.apply_scheduled_changes(&ConfigChangeKind::Windows);
 
+    assert_last_config_applied(&env, ConfigChangeKind::Windows, 1440);
     assert_last_config_updated(
         &env,
         ConfigChangeKind::Windows,
         ConfigChangePayload::Windows(6, 12),
         ConfigChangePayload::Windows(10, 20),
     );
+
+    // 3. Cancel
+    env.ledger().with_mut(|li| li.sequence_number = 1_500);
+    client.schedule_max_stake(&Some(500_0000000));
+    assert_last_config_scheduled(&env, ConfigChangeKind::MaxStake, 1500 + 1440);
+    client.cancel_config_change(&ConfigChangeKind::MaxStake);
+    assert_last_config_cancelled(&env, ConfigChangeKind::MaxStake, 1500);
 }
 
 #[test]
