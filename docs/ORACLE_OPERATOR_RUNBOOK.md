@@ -11,6 +11,7 @@
 1. [Oracle Role & Responsibilities](#1-oracle-role--responsibilities)
 2. [OraclePayload Field Reference](#2-oraclepayload-field-reference)
 3. [Payload Templates](#3-payload-templates)
+   - [3.6 Payload Simulator CLI](#36-payload-simulator-cli-scriptsoracle_payload_simpy)
 4. [Heartbeat & Liveness](#4-heartbeat--liveness)
 5. [Resolution Flow (Step by Step)](#5-resolution-flow-step-by-step)
 6. [Troubleshooting Matrix](#6-troubleshooting-matrix)
@@ -70,6 +71,23 @@ field is validated in order; a failure at any step rejects the entire submission
 11. nonce not consumed                 → OracleNonceReused
 12. current_ledger ≥ end_ledger        → RoundNotEnded
 13. min-participants check             → fallback refund (not an error)
+### Validation order (`contract.rs`)
+
+```
+1. price ≠ 0                         → InvalidPrice
+2. oracle.require_auth()             → UnauthorizedOracle
+3. contract not paused               → ContractPaused
+4. heartbeat health (Issue #264)     → OracleHeartbeatUnhealthy
+5. active round exists               → NoActiveRound
+6. round_id == ActiveRound.start_ledger → InvalidOracleRound
+7. network_id matches env              → OracleNetworkMismatch
+8. contract_addr matches               → OracleContractMismatch
+9. timestamp ≤ now                    → FutureOracleData
+10. now - timestamp ≤ 300 s            → StaleOracleData
+11. deviation ≤ OracleMaxDeviationBps  → OracleDeviationExceeded
+12. nonce not consumed                → OracleNonceReused
+13. current_ledger ≥ end_ledger       → RoundNotEnded
+14. min-participants check            → fallback refund (not an error)
 ```
 
 **Round window calculation:**
@@ -182,12 +200,68 @@ function networkIdFor(networkPassphrase: string): Buffer {
 // Testnet: networkIdFor("Test SDF Network ; September 2015")
 ```
 
+### 3.6 Payload Simulator CLI (`scripts/oracle_payload_sim.py`)
+
+A CLI tool to build, validate, and preview `OraclePayload`s *before* submitting a
+real on-chain transaction. Catches common mistakes — wrong `network_id`, stale
+timestamps, deviation overruns, malformed addresses — without consuming gas or
+burning nonces.
+
+**Usage:**
+
+```bash
+python3 scripts/oracle_payload_sim.py \
+  --price 12345 \
+  --round-id <start_ledger> \
+  --network-id-from-passphrase "Test SDF Network ; September 2015" \
+  --contract-addr <CONTRACT_ID>
+```
+
+**What it validates (all local, no RPC call needed):**
+
+| Check | Requires | Rejects if |
+|-------|----------|------------|
+| Price > 0 | `--price` | Zero or negative |
+| Timestamp freshness | `--timestamp` (default: now) | Future or >300 s old |
+| round_id range | `--round-id` | Outside u32 |
+| nonce range | `--nonce` (default: 1) | Outside u64 |
+| network_id format | `--network-id` or `--network-id-from-passphrase` | Not 64 hex chars |
+| contract_addr format | `--contract-addr` | Not a valid C… address |
+| Confidence range | `--confidence` | Outside 0–10000 bps |
+| Deviation guardrails | `--start-price` + `--max-deviation-bps` | Exceeds threshold |
+| Confidence floor | `--confidence` + `--min-confidence-bps` | Below minimum |
+
+**Example — full validation with deviation guardrails:**
+
+```bash
+python3 scripts/oracle_payload_sim.py \
+  --price 15500 \
+  --round-id 100 \
+  --network-id-from-passphrase "Test SDF Network ; September 2015" \
+  --contract-addr CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABLF4 \
+  --start-price 15000 \
+  --max-deviation-bps 5000 \
+  --stellar-cli \
+  --contract-id CCJZ5NJGZKP5I5TRLXU3M6YIQKU7D24B5E6Z6F6J4X5Y6Z7J6K5L4M3N \
+  --oracle-key my-oracle-key
+```
+
+**Output** includes a copy-paste `stellar contract invoke` command at the bottom,
+so the operator can paste it directly into their terminal.
+
+**Exit codes:** `0` = all checks passed, `2` = one or more validation failures.
+
+**No secrets:** The tool never requires a secret key — it is purely a pre-flight
+check. The `--oracle-key` flag is only used for the copy-paste CLI command
+template, not for signing.
+
 ---
 
 ## 4. Heartbeat & Liveness
 
 The oracle should call `update_oracle_heartbeat(status)` at regular intervals to
-prove liveness.
+prove liveness. **As of Issue #264, heartbeat liveness is enforced at settlement**
+— a stale or unhealthy oracle cannot resolve rounds without an admin override.
 
 | Status | Meaning |
 |--------|---------|
@@ -206,9 +280,52 @@ grace period (`HbGateConfig.grace_seconds`) can allow settlement through the gat
 
 **Recommended interval:** every 15–30 minutes for a 1-hour threshold.
 
+### 4.1 Heartbeat health enforcement (Issue #264)
+
+`resolve_round` now enforces heartbeat health **before** any state mutation
+occurs. The enforcement gate is checked after oracle auth and pause checks,
+but before nonce consumption and settlement logic.
+
+**Allow/Deny Matrix:**
+
+| Heartbeat        | Strict Mode | In Grace Window | Override Armed | Result         |
+|------------------|-------------|-----------------|----------------|----------------|
+| Active + Fresh   | any         | any             | any            | ALLOW          |
+| Degraded + Fresh | off         | any             | any            | ALLOW          |
+| Degraded + Fresh | on          | any             | no             | DENY (66)      |
+| Stale            | off         | yes             | no             | ALLOW (grace)  |
+| Stale            | off         | no              | no             | DENY (66)      |
+| Stale            | on          | any             | no             | DENY (66)      |
+| Offline (2)      | any         | any             | no             | DENY (66)      |
+| No heartbeat     | n/a         | n/a             | no             | DENY (66)      |
+| ANY              | any         | any             | yes            | ALLOW*         |
+
+\* Override is consumed (one-shot), emitting `(oracle, hb_override)`.
+
+**Key parameters:**
+
+| Parameter | Default | Range | Query |
+|-----------|---------|-------|-------|
+| Stale threshold | 3600 s | 60–86400 s | `get_oracle_stale_threshold()` |
+| Grace period | 600 s | 0–86400 s | `get_oracle_heartbeat_grace()` |
+| Strict mode | false | bool | `get_oracle_heartbeat_strict_mode()` |
+| Override armed | false | bool | `is_oracle_heartbeat_override_armed()` |
+
+**Grace period** is an additional window beyond the stale threshold.
+For example, with a 3600 s stale threshold and 600 s grace:
+- 0–3600 s after heartbeat: fresh → ALLOW
+- 3600–4200 s after heartbeat: stale but within grace → ALLOW (non-strict)
+- 4200+ s after heartbeat: stale beyond grace → DENY
+
+**Strict mode** eliminates the grace period and blocks degraded-status
+settlement entirely. When enabled, only active+fresh heartbeats allow
+settlement (plus the admin override).
+
 ---
 
 ## 5. Resolution Flow (Step by Step)
+
+### 5.1 Legacy Single-Feed Path (`resolve_round`)
 
 1. **Verify round eligibility**
    - `get_active_round()` returns a round.
@@ -226,11 +343,11 @@ grace period (`HbGateConfig.grace_seconds`) can allow settlement through the gat
 
 4. **Submit resolve_round**
    - Sign with the oracle key.
-   - If `Ok(())` → round resolved. Monitor the `("round", "resolved")` event.
+   - If `Ok(())` → round resolved. Monitor the `("round", "summary")` event.
    - If `Err(...)` → see [Troubleshooting Matrix](#6-troubleshooting-matrix).
 
 5. **Handle fallback**
-   - If `Ok(())` but the round emitted `("round", "fallback")`, the round had
+   - If `Ok(())` but the round emitted `("round", "summary")` with status `2 (FallbackRefund)`, the round had
      too few participants and stakes were refunded. No competitive settlement
      occurred. This is not an error.
 
@@ -238,6 +355,81 @@ grace period (`HbGateConfig.grace_seconds`) can allow settlement through the gat
    - If the call fails with `OracleNonceReused`, increment the nonce and retry.
    - If the call fails for any other reason, the nonce is **not** consumed and
      can be reused.
+
+### 5.2 Multi-Feed Path (`resolve_round_multi`) — Issue #262
+
+When `OracleQuorumConfig` is configured by the admin, the oracle SHOULD use
+`resolve_round_multi` for improved settlement safety. This path accepts N
+independent feed observations, computes the median price, rejects outliers,
+and requires a quorum of feeds to agree.
+
+**MultiFeedPayload structure:**
+
+| Field           | Type          | Required | Description |
+|-----------------|---------------|----------|-------------|
+| `prices`        | `Vec<u128>`   | Yes      | N feed prices, 4 decimals, all non-zero. |
+| `sources`       | `Vec<u32>`    | Yes      | N feed identifiers, 0-based, must all be unique. |
+| `round_id`      | `u32`         | Yes      | Must match `ActiveRound.start_ledger`. |
+| `nonce`         | `u64`         | Yes      | Per-round replay protection, unique per round. |
+| `network_id`    | `BytesN<32>`  | Yes      | SHA-256 of network passphrase. |
+| `contract_addr` | `Address`     | Yes      | Target contract address. |
+| `timestamp`     | `u64`         | Yes      | Unix epoch seconds when observations were collected. |
+
+**Quorum configuration (set by admin):**
+
+| Parameter             | Range    | Default | Description |
+|-----------------------|----------|---------|-------------|
+| `min_observations`    | 3–32     | 3       | Minimum feeds in payload. |
+| `quorum_threshold`    | 3–min_obs| 3       | Minimum survivors for settlement. |
+| `outlier_threshold_bps`| 1–10000 | 500     | Max deviation from median (5% default). |
+
+**Multi-feed resolution steps:**
+
+1. **Collect feed observations**
+   - Query N independent price feeds (e.g., Coinbase, Binance, Kraken).
+   - Each feed must have a unique `source` identifier.
+   - All prices scaled to 4 decimal places, non-zero.
+
+2. **Build payload**
+   - `prices`: ordered list of feed prices.
+   - `sources`: corresponding feed source IDs (0, 1, 2, …).
+   - Same `round_id`, `nonce`, `network_id`, `contract_addr` conventions
+     as the legacy path.
+
+3. **Submit `resolve_round_multi(payload)`**
+   - Signed with the oracle key (same key as legacy path).
+
+4. **On-chain processing:**
+   a. Validates payload (lengths match, prices > 0, sources unique).
+   b. Checks `n >= min_observations` and `n <= 32` (gas cap).
+   c. Sorts prices, computes **median**.
+   d. Applies deviation guardrail (same `OracleMaxDeviationBps` as legacy).
+   e. **Outlier rejection**: each feed's price is compared to the median.
+      If `|price - median| / median * 10000 > outlier_threshold_bps`,
+      the observation is rejected.
+   f. **Quorum check**: surviving count must be `>= quorum_threshold`.
+   g. If quorum passes, the **median price** is used for settlement.
+
+5. **Events emitted:**
+   - `("oracle", "multisum")` — summary of multi-feed resolution (round_id,
+     observation_count, survivor_count, median_price, quorum_threshold).
+   - `("round", "resolved")` — standard resolved event.
+   - If quorum fails: `("oracle", "nofed")` — failure details.
+
+**Example multi-feed payload (3 feeds):**
+
+```rust
+MultiFeedPayload {
+    // Feed 0: $0.2300, Feed 1: $0.2310, Feed 2: $0.2295
+    prices: vec![&env, 2300u128, 2310u128, 2295u128],
+    sources: vec![&env, 0u32, 1u32, 2u32],
+    round_id: 1234567,       // ActiveRound.start_ledger
+    nonce: 1,
+    network_id: BytesN::from_array(&env, &[/* SHA-256 of passphrase */]),
+    contract_addr: contract_id,
+    timestamp: 1700000000,
+}
+```
 
 ---
 
@@ -258,6 +450,7 @@ grace period (`HbGateConfig.grace_seconds`) can allow settlement through the gat
 | `RoundNotEnded` | 16 | `current_ledger < round.end_ledger` | Query `get_active_round()` and compare `end_ledger` with the latest ledger. | Wait for the round to reach `end_ledger` before submitting. |
 | `InvalidPrice` | 12 | `payload.price == 0` | Check the price feed output. | Ensure price is > 0 before building the payload. |
 | `OracleNotSet` | 3 | Oracle address was never initialised | `get_oracle()` returns nothing. | Contact admin to call `initialize(admin, oracle)`. |
+| `OracleHeartbeatUnhealthy` | 66 | Heartbeat is stale, offline, degraded (strict), or missing | Query `get_oracle_heartbeat()`, `get_oracle_heartbeat_grace()`, `get_oracle_heartbeat_strict_mode()`. | Restore heartbeat service and re-submit, or ask admin to [arm the heartbeat override](#75-heartbeat-override-admin-arms-oracle-uses). |
 
 ### Error recursion risk
 
@@ -298,7 +491,7 @@ Refunds all participant stakes. Use when the round cannot be resolved
 admin calls: cancel_round(reason)
 ```
 
-Cancelled rounds emit `("round", "cancelled")` and are archived. A cancelled
+Cancelled rounds emit `("round", "summary")` with status `1 (Cancelled)` and are archived. A cancelled
 round **cannot** be resolved later — any `resolve_round` targeting it will fail.
 
 ### 7.4 Deviation override (admin arms, oracle uses)
@@ -322,7 +515,35 @@ persist across rounds.
 - As a workflow bypass. Prefer adjusting `OracleMaxDeviationBps` via timelock
   for persistent changes.
 
-### 7.5 Config timelock (admin initiates)
+### 7.5 Heartbeat override (admin arms, oracle uses)
+
+When the oracle heartbeat is unhealthy (stale, degraded, offline, or missing)
+and the round must still be settled, the admin can arm a one-shot heartbeat
+override:
+
+```
+admin calls: arm_oracle_heartbeat_override()
+oracle calls: resolve_round(payload)          // bypasses heartbeat check once
+```
+
+**Events:**
+- `(oracle, hb_arm_ovr)` — emitted when the override is armed
+- `(oracle, hb_override)` — emitted when the override is consumed during settlement
+
+The override is consumed after one settlement. It does **not** persist across
+rounds and does **not** bypass deviation or confidence guardrails — it only
+suppresses `OracleHeartbeatUnhealthy (66)`.
+
+**When to use:**
+- Oracle service is experiencing a brief outage but the price data is valid.
+- Heartbeat infrastructure failed while the oracle itself is healthy.
+- Emergency settlement needed during a heartbeat system migration.
+
+**When NOT to use:**
+- As a permanent workflow bypass. Restore heartbeat infrastructure promptly.
+- When the oracle's price data may also be unreliable (use `cancel_round` instead).
+
+### 7.6 Config timelock (admin initiates)
 
 Most oracle safety parameters are changed via the timelock. The change is
 scheduled and activates after a cooldown.
@@ -344,7 +565,7 @@ scheduled and activates after a cooldown.
 2. Fetch price from primary feed
 3. Build OraclePayload (template §3.1 or §3.2)
 4. Submit resolve_round(payload)
-5. On Ok(()):  Verify ("round", "resolved") event
+5. On Ok(()):  Verify ("round", "summary") event
 6. On Err(e):  Consult troubleshooting matrix, fix, retry
 ```
 
@@ -390,6 +611,8 @@ Decision:
 2. Attempt to restore price feed.
 3. If restore takes longer than the active round's end:
    - Contact admin to cancel the round (admin cancel_round).
+   - **OR** admin arms heartbeat override: `arm_oracle_heartbeat_override()`
+     then oracle resolves. Override is one-shot.
    - After cancel, users can claim their refunded stakes.
 4. Once service is fully restored:
    - Log heartbeat as "active" (status = 0).
@@ -409,6 +632,95 @@ Prevention:
     so the next round starts fresh.
 ```
 
+### Playbook F: Multi-feed quorum failure
+
+```
+Symptom:  resolve_round_multi returns InsufficientOracleQuorum
+Diagnosis:
+  1. Check the ("oracle", "nofed") event for survivor_count vs quorum_threshold.
+  2. Determine which feeds are producing outlier prices.
+Decision:
+  - One feed consistently out of line? Disable it from the payload.
+  - Market conditions causing wide spreads?
+    → Admin can increase outlier_threshold_bps via set_oracle_quorum_config.
+    → Or reduce quorum_threshold if fewer feeds are available.
+  - All feeds diverging? Consider falling back to legacy resolve_round.
+```
+
+### Playbook G: Multi-feed duplicate sources
+
+```
+Symptom:  resolve_round_multi returns DuplicateOracleSource
+Cause:    Two or more observations share the same source identifier.
+Fix:      Ensure each feed has a unique source ID (0, 1, 2, …).
+Prevention:
+  - Maintain a mapping of feed name → source ID in your oracle service.
+  - Validate sources are unique before building the payload.
+```
+
+---
+
+## 9. Oracle Rotation (Two-Step with Mandatory Delay)
+
+The oracle address can be rotated through a two-step process: first the admin
+proposes a new oracle, then **any caller** can accept the proposal after a
+**mandatory 1-hour delay** has elapsed. This delay prevents quiet one-block
+takeovers — even if the admin key is compromised, the community has a full hour
+to observe the `(oracle, propose)` event and react before the oracle actually
+changes.
+
+### 9.1 Rotation lifecycle
+
+```
+Admin proposes ──→ (1 hour delay) ──→ Anyone accepts ──→ Oracle rotated
+     │                                       │
+     └── Admin can cancel at any time ───────┘
+```
+
+### 9.2 Constants
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `MIN_ROTATION_DELAY_SECONDS` | 3 600 (1 hour) | Minimum time between proposal and acceptance |
+| `MIN_ROTATION_EXPIRY_SECONDS` | 60 (1 minute) | Minimum expiry window after delay |
+
+### 9.3 Entry points
+
+**`propose_oracle_rotation(new_oracle, expires_in_seconds)`** (admin only)
+- Proposes a new oracle address.
+- `expires_in_seconds` must be ≥ 3 600 (the mandatory delay).
+- Emits `(oracle, propose)`.
+
+**`accept_oracle_rotation()`** (any caller)
+- Accepts the pending proposal after the delay has elapsed.
+- Fails with `RotationDelayNotElapsed` if called too early.
+- Fails with `NoPendingRotation` if the proposal has expired.
+- Emits `(oracle, accept)` on success.
+
+**`cancel_oracle_rotation()`** (admin only)
+- Cancels a pending proposal at any time.
+- Emits `(oracle, cancel)`.
+
+### 9.4 Events
+
+| Event | Emitted when |
+|-------|-------------|
+| `(oracle, propose)` | Admin proposes a new oracle |
+| `(oracle, accept)` | Rotation is successfully accepted after delay |
+| `(oracle, cancel)` | Admin cancels a pending proposal |
+| `(oracle, expired)` | Proposal expires (auto-cleaned) |
+| `(oracle, early)` | Acceptance attempted before delay elapsed |
+
+### 9.5 Monitoring checklist
+
+Operators and monitoring dashboards should:
+1. Watch for `(oracle, propose)` events — these signal an impending rotation.
+2. If the proposed address is unexpected, escalate to the admin within the
+   1-hour delay window.
+3. Watch for `(oracle, early)` events — these indicate someone is trying to
+   bypass the delay.
+4. After `(oracle, accept)`, verify the new oracle by calling `get_oracle()`.
+
 ---
 
 ## Related Documents
@@ -423,3 +735,4 @@ Prevention:
 | [contract.rs](../contracts/src/contract.rs) | `resolve_round` implementation (line 1488) |
 | [errors.rs](../contracts/src/errors.rs) | All 50 `ContractError` variants |
 | [types.rs](../contracts/src/types.rs) | `OraclePayload` struct definition |
+| [oracle_payload_sim.py](../scripts/oracle_payload_sim.py) | Pre-flight payload validation CLI |

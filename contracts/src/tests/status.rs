@@ -23,6 +23,7 @@ fn setup_contract(env: &Env) -> (VirtualTokenContractClient<'_>, Address, Addres
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     (client, admin, oracle)
 }
@@ -102,7 +103,7 @@ fn test_protocol_status_claims_only_after_resolve() {
         network_id: env.ledger().network_id(),
         contract_addr: client.address.clone(),
         confidence: None,
-    };
+        attestation: None,    };
     client.resolve_round(&payload);
 
     assert_eq!(client.get_protocol_status(), ProtocolStatus::ClaimsOnly);
@@ -186,7 +187,7 @@ fn test_round_status_full_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: client.address.clone(),
         confidence: None,
-    };
+        attestation: None,    };
     client.resolve_round(&payload);
 
     assert_eq!(client.get_protocol_status(), ProtocolStatus::ClaimsOnly);
@@ -264,7 +265,7 @@ fn test_round_status_fallback_refund() {
         network_id: env.ledger().network_id(),
         contract_addr: client.address.clone(),
         confidence: None,
-    };
+        attestation: None,    };
     client.resolve_round(&payload);
 
     assert_eq!(client.get_protocol_status(), ProtocolStatus::ClaimsOnly);
