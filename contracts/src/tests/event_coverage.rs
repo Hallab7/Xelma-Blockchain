@@ -793,7 +793,7 @@ fn test_action_rejected_resolve_round_future_timestamp() {
 }
 
 #[test]
-fn test_action_rejected_resolve_round_stale_data() {
+fn test_action_rejected_resolve_round_timestamp_outside_window() {
     let (env, contract_id, _, _, client) = setup();
     let user = Address::generate(&env);
     client.mint_initial(&user);
@@ -805,9 +805,12 @@ fn test_action_rejected_resolve_round_stale_data() {
         li.timestamp = 1_700_000_000;
     });
 
+    // Round started at ts=0, end_ledger=12 -> end_estimate = 60
+    // Default skew 300 -> window: [0, 360]
+    // Timestamp 1_699_999_000 is far outside the round window
     let payload = OraclePayload {
         price: 1_2000000,
-        timestamp: 1_699_999_000, // >300s old
+        timestamp: 1_699_999_000,
         round_id: 0,
         nonce: 1,
         network_id: env.ledger().network_id(),
@@ -816,7 +819,7 @@ fn test_action_rejected_resolve_round_stale_data() {
         attestation: None,    };
 
     let result = client.try_resolve_round(&payload);
-    assert_eq!(result, Err(Ok(ContractError::StaleOracleData)));
+    assert_eq!(result, Err(Ok(ContractError::OracleTimestampOutsideWindow)));
 
     // Note: event checks on client failure calls are omitted since Soroban SDK v20+ rolls back failed calls and discards events.
 }

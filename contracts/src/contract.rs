@@ -758,6 +758,19 @@ impl VirtualTokenContract {
         config::schedule_oracle_deviation_bps(env, bps)
     }
 
+    /// Schedules a timelocked update to the oracle timestamp skew (admin only).
+    pub fn schedule_oracle_timestamp_skew(
+        env: Env,
+        seconds: u64,
+    ) -> Result<(), ContractError> {
+        config::schedule_oracle_timestamp_skew(env, seconds)
+    }
+
+    /// Returns the configured oracle timestamp skew, or the default (300 s) if not set.
+    pub fn get_oracle_timestamp_skew(env: Env) -> u64 {
+        config::get_oracle_timestamp_skew(env)
+    }
+
     pub fn schedule_protocol_fee_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
         config::schedule_protocol_fee_bps(env, bps)
     }

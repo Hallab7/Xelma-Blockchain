@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 use crate::admin::{_ensure_normal_mode, _ensure_not_paused, _require_supported_schema};
 use crate::common::{
+    _emit_action_rejected, _emit_config_updated, _extend_persistent_ttl, _set_balance, balance,
+    payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS, DEFAULT_ARCHIVE_RETENTION,
+    DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS, DEFAULT_MAX_PRECISION_PARTICIPANTS,
+    DEFAULT_ORACLE_STALE_THRESHOLD, DEFAULT_ORACLE_TIMESTAMP_SKEW, DEFAULT_RUN_WINDOW_LEDGERS,
+    MAX_ARCHIVE_RETENTION, MAX_BET_WINDOW_LEDGERS, MAX_CLOSE_BUFFER_LEDGERS, MAX_MIN_PARTICIPANTS,
+    MAX_ORACLE_DEVIATION_BPS, MAX_ORACLE_STALE_THRESHOLD, MAX_ORACLE_TIMESTAMP_SKEW,
+    MAX_PRECISION_PARTICIPANTS_LIMIT, MAX_PROTOCOL_FEE_BPS, MAX_RUN_WINDOW_LEDGERS,
+    MAX_START_PRICE, MIN_ARCHIVE_RETENTION, MIN_CAP_VALUE, MIN_ORACLE_STALE_THRESHOLD,
+    MIN_ORACLE_TIMESTAMP_SKEW, MIN_START_PRICE,
     _emit_action_rejected, _emit_config_updated, _extend_persistent_ttl, _extend_ttl_symbol,
     _set_balance, balance, payout_add, BPS_DENOMINATOR, CONFIG_TIMELOCK_LEDGERS,
     DEFAULT_ARCHIVE_RETENTION, DEFAULT_BET_WINDOW_LEDGERS, DEFAULT_CLOSE_BUFFER_LEDGERS,
@@ -134,6 +143,23 @@ pub fn schedule_oracle_deviation_bps(env: Env, bps: Option<u32>) -> Result<(), C
         ConfigChangeKind::OracleMaxDeviationBps,
         ConfigChangePayload::OracleMaxDeviationBps(bps),
     )
+}
+
+pub fn schedule_oracle_timestamp_skew(env: Env, seconds: u64) -> Result<(), ContractError> {
+    _require_supported_schema(&env)?;
+    _validate_oracle_timestamp_skew(seconds)?;
+    _schedule_config_change(
+        &env,
+        ConfigChangeKind::OracleTimestampSkew,
+        ConfigChangePayload::OracleTimestampSkew(seconds),
+    )
+}
+
+pub fn get_oracle_timestamp_skew(env: Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&symbol_short!("otskew"))
+        .unwrap_or(DEFAULT_ORACLE_TIMESTAMP_SKEW)
 }
 
 pub fn schedule_protocol_fee_bps(env: Env, bps: Option<u32>) -> Result<(), ContractError> {
@@ -940,6 +966,13 @@ pub fn _validate_oracle_stale_threshold(seconds: u64) -> Result<(), ContractErro
     Ok(())
 }
 
+fn _validate_oracle_timestamp_skew(seconds: u64) -> Result<(), ContractError> {
+    if !(MIN_ORACLE_TIMESTAMP_SKEW..=MAX_ORACLE_TIMESTAMP_SKEW).contains(&seconds) {
+        return Err(ContractError::InvalidDuration);
+    }
+    Ok(())
+}
+
 pub fn _validate_oracle_max_deviation_bps(bps: Option<u32>) -> Result<(), ContractError> {
     if let Some(v) = bps {
         if v == 0 || v > MAX_ORACLE_DEVIATION_BPS {
@@ -1205,6 +1238,12 @@ pub fn _current_config_payload(env: &Env, kind: &ConfigChangeKind) -> ConfigChan
                 .get(&DataKeyCore::CloseBufferLedgers)
                 .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS),
         ),
+        ConfigChangeKind::OracleTimestampSkew => ConfigChangePayload::OracleTimestampSkew(
+            env.storage()
+                .instance()
+                .get(&symbol_short!("otskew"))
+                .unwrap_or(DEFAULT_ORACLE_TIMESTAMP_SKEW),
+        ),
         ConfigChangeKind::PendingWinningsExpiry => ConfigChangePayload::PendingWinningsExpiry(
             env.storage()
                 .persistent()
@@ -1369,6 +1408,11 @@ pub fn _apply_config_payload(
             }
         }
         (
+            ConfigChangeKind::OracleTimestampSkew,
+            ConfigChangePayload::OracleTimestampSkew(seconds),
+        ) => {
+            _validate_oracle_timestamp_skew(*seconds)?;
+            env.storage().instance().set(&symbol_short!("otskew"), seconds);
             ConfigChangeKind::PendingWinningsExpiry,
             ConfigChangePayload::PendingWinningsExpiry(ledgers),
         ) => {

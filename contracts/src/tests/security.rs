@@ -2364,7 +2364,7 @@ use soroban_sdk::{
 };
 
 #[test]
-fn test_resolve_round_stale_timestamp() {
+fn test_resolve_round_timestamp_after_round_window() {
     let env = Env::default();
     let contract_id = env.register(VirtualTokenContract, ());
     let client = VirtualTokenContractClient::new(&env, &contract_id);
@@ -2376,17 +2376,19 @@ fn test_resolve_round_stale_timestamp() {
     client.initialize(&admin, &oracle);
     client.create_round(&1_0000000, &None);
 
-    // Advance ledger time to 1000
+    // Advance ledger time to 1000, seq to 12 (round end ~ seq 12)
     env.ledger().with_mut(|li| {
         li.timestamp = 1000;
         li.sequence_number = 12; // Allow resolution
     });
 
-    // Submit payload with timestamp 600 (400s old, > 300s limit)
+    // Round started at ts=0, end_ledger=12 -> end_estimate = 0 + 12*5 = 60
+    // Window with default skew 300: [0, 60+300] = [0, 360]
+    // Payload ts=500 is after the upper bound
     let payload = OraclePayload {
         price: 1_5000000,
-        timestamp: 600,
-        round_id: 0, // Starts at ledger 0
+        timestamp: 500,
+        round_id: 0,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
@@ -2394,7 +2396,126 @@ fn test_resolve_round_stale_timestamp() {
     };
 
     let result = client.try_resolve_round(&payload);
-    assert_eq!(result, Err(Ok(ContractError::StaleOracleData)));
+    assert_eq!(result, Err(Ok(ContractError::OracleTimestampOutsideWindow)));
+}
+
+#[test]
+fn test_resolve_round_timestamp_before_round_window() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+
+    // Set initial ledger timestamp to 100 so round starts at ts=100
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+    });
+    client.create_round(&1_0000000, &None);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+        li.sequence_number = 12;
+    });
+
+    // Round start=100, end_ledger=12 -> end_estimate = 100 + 12*5 = 160
+    // Default skew 300 -> window: [100-300, 160+300] = [0, 460] (lower saturates at 0)
+    // Set a short skew of 30 via instance storage to make lower bound = 100-30 = 70
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&symbol_short!("otskew"), &30u64);
+    });
+    // With skew=30: window = [70, 190]
+    // Payload ts=10 is before the lower bound
+
+    let payload = OraclePayload {
+        price: 1_5000000,
+        timestamp: 10,
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    };
+
+    let result = client.try_resolve_round(&payload);
+    assert_eq!(result, Err(Ok(ContractError::OracleTimestampOutsideWindow)));
+}
+
+#[test]
+fn test_resolve_round_timestamp_boundary_lower() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+    });
+    client.create_round(&1_0000000, &None);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+        li.sequence_number = 12;
+    });
+
+    // Skew=30 -> window: [70, 190]
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&symbol_short!("otskew"), &30u64);
+    });
+
+    // Payload at exactly the lower bound (70) must be accepted
+    client.resolve_round(&OraclePayload {
+        price: 1_5000000,
+        timestamp: 70,
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+    assert_eq!(client.get_active_round(), None);
+}
+
+#[test]
+fn test_resolve_round_timestamp_boundary_upper() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+        li.sequence_number = 12;
+    });
+
+    // Round start=0, end_ledger=12 -> end_estimate = 60
+    // Default skew=300 -> window: [0, 360]
+    // Payload at exactly the upper bound (360) must be accepted
+    client.resolve_round(&OraclePayload {
+        price: 1_5000000,
+        timestamp: 360,
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+    });
+    assert_eq!(client.get_active_round(), None);
 }
 
 #[test]
@@ -2447,10 +2568,10 @@ fn test_resolve_round_valid_payload() {
         li.timestamp = 1000;
     });
 
-    // Valid payload: within 300s and correct round_id
+    // Valid payload: within round window [0, 60+300] and correct round_id
     let payload = OraclePayload {
         price: 1_5000000,
-        timestamp: 900, // 100s old, OK
+        timestamp: 30,
         round_id: 0,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
@@ -4415,7 +4536,7 @@ fn test_resolve_round_duplicate_nonce_rejected() {
 
     let result = client.try_resolve_round(&OraclePayload {
         price: 1_5000000,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 42u64,
         network_id: env.ledger().network_id(),
@@ -4447,7 +4568,7 @@ fn test_resolve_round_unique_nonce_resolves() {
 
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 7u64,
         network_id: env.ledger().network_id(),
@@ -4730,7 +4851,7 @@ fn test_oracle_deviation_rejected_when_over_threshold() {
     // 50% jump: diff_bps = 5000 > 500
     let result = client.try_resolve_round(&OraclePayload {
         price: 1_5000000u128,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
@@ -4765,7 +4886,7 @@ fn test_oracle_deviation_allows_at_exact_threshold() {
     // Exactly 5%: 1.00 -> 1.05 => diff_bps = 500
     client.resolve_round(&OraclePayload {
         price: 1_0500000u128,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
@@ -4800,7 +4921,7 @@ fn test_oracle_deviation_rounding_floor_is_deterministic() {
     // At threshold should pass
     client.resolve_round(&OraclePayload {
         price: 4u128,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
@@ -4834,7 +4955,7 @@ fn test_oracle_deviation_override_allows_over_threshold_and_emits_event() {
 
     client.resolve_round(&OraclePayload {
         price: 2_0000000u128, // 100% jump
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
@@ -4928,7 +5049,7 @@ fn test_resolve_round_nonce_boundary_values() {
 
     let zero = client.try_resolve_round(&OraclePayload {
         price: 1_5000000,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 0u64,
         network_id: env.ledger().network_id(),
@@ -4939,7 +5060,7 @@ fn test_resolve_round_nonce_boundary_values() {
 
     let max = client.try_resolve_round(&OraclePayload {
         price: 1_5000000,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: u64::MAX,
         network_id: env.ledger().network_id(),
@@ -4974,7 +5095,7 @@ fn test_resolve_round_wrong_network_id_rejected() {
 
     let result = client.try_resolve_round(&OraclePayload {
         price: 1_5000000,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 1u64,
         network_id: wrong_network,
@@ -5007,7 +5128,7 @@ fn test_resolve_round_wrong_contract_addr_rejected() {
 
     let result = client.try_resolve_round(&OraclePayload {
         price: 1_5000000,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
@@ -5039,7 +5160,7 @@ fn test_resolve_round_valid_domain_context_resolves() {
     // Correct network + correct contract => resolves normally
     client.resolve_round(&OraclePayload {
         price: 1_5000000,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 1u64,
         network_id: env.ledger().network_id(),
@@ -5074,7 +5195,7 @@ fn test_resolve_round_both_network_and_contract_wrong() {
     // Network is checked first, so we get OracleNetworkMismatch
     let result = client.try_resolve_round(&OraclePayload {
         price: 1_5000000,
-        timestamp: 900,
+        timestamp: 30,
         round_id: round.start_ledger,
         nonce: 1u64,
         network_id: wrong_network,

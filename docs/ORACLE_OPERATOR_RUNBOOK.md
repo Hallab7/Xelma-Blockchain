@@ -54,6 +54,23 @@ field is validated in order; a failure at any step rejects the entire submission
 | `network_id`    | `BytesN<32>`| Yes      | SHA-256 hash of the network passphrase. Prevents cross-network replay. |
 | `contract_addr` | `Address`   | Yes      | The contract this payload targets. Prevents cross-contract replay. |
 
+### Validation order (`settlement.rs`)
+
+```
+1. price ≠ 0                          → InvalidPrice
+2. oracle.require_auth()              → UnauthorizedOracle
+3. contract not paused                → ContractPaused
+4. active round exists                → NoActiveRound
+5. round_id == ActiveRound.start_ledger → InvalidOracleRound
+6. network_id matches env               → OracleNetworkMismatch
+7. contract_addr matches                → OracleContractMismatch
+8. timestamp ≤ now                     → FutureOracleData
+9. timestamp inside round window
+   [start_ts - skew, end_ts + skew]    → OracleTimestampOutsideWindow
+10. deviation ≤ OracleMaxDeviationBps  → OracleDeviationExceeded
+11. nonce not consumed                 → OracleNonceReused
+12. current_ledger ≥ end_ledger        → RoundNotEnded
+13. min-participants check             → fallback refund (not an error)
 ### Validation order (`contract.rs`)
 
 ```
@@ -73,6 +90,13 @@ field is validated in order; a failure at any step rejects the entire submission
 14. min-participants check            → fallback refund (not an error)
 ```
 
+**Round window calculation:**
+- `round_start` = timestamp recorded at round creation
+- `round_end_estimate` = `round_start + (end_ledger - start_ledger) × 5s`
+- `skew` = configurable `OracleTimestampSkew` (default 300s, range 0–86400s)
+- `lower_bound` = `max(0, round_start - skew)`
+- `upper_bound` = `round_end_estimate + skew`
+
 ### Field requirements in detail
 
 **`price`**
@@ -83,7 +107,10 @@ field is validated in order; a failure at any step rejects the entire submission
 **`timestamp`**
 - Unix epoch **seconds** (not milliseconds or ledger sequence).
 - Must not exceed `env.ledger().timestamp()` (rejects future data).
-- Must be within 300 seconds of `env.ledger().timestamp()` (300 s = 5 min stale window).
+- Must fall within the round-relative economic window:
+  `[round_start - skew, round_end_estimate + skew]`.
+  This replaces the old absolute 300s freshness check and prevents
+  wrong-phase prices from outside the round's active period.
 
 **`round_id`**
 - Must equal the **active round's** `start_ledger` (not the monotonically
@@ -410,7 +437,7 @@ MultiFeedPayload {
 
 | Error | Code | Likely Cause | Check | Fix |
 |-------|------|--------------|-------|-----|
-| `StaleOracleData` | 18 | Payload timestamp is >300 s older than `env.ledger().timestamp()` | Compare `payload.timestamp` vs ledger timestamp. Ledger may be slow. | Fetch a fresh price from the feed and rebuild the payload. |
+| `OracleTimestampOutsideWindow` | 66 | Payload timestamp is outside the round-relative window `[start - skew, end + skew]` | Compare `payload.timestamp` against `get_active_round()` timestamps and `get_oracle_timestamp_skew()`. | Ensure the price was observed during the round's active window. The timestamp must be after round creation and before the estimated round end + skew. |
 | `InvalidOracleRound` | 19 | `payload.round_id` does not match `ActiveRound.start_ledger` | Call `get_active_round()` — verify `start_ledger`. Note: it's `start_ledger`, not `round_id`! | Set `payload.round_id = start_ledger` from the active round. |
 | `FutureOracleData` | 24 | `payload.timestamp > env.ledger().timestamp()` | Check system clock skew vs ledger time. Oracle machine's clock may be ahead. | Use `Date.now() / 1000` or NTP-synchronised time; never fabricate timestamps. |
 | `OracleNonceReused` | 33 | `(round_id, nonce)` pair was already consumed | Check the oracle's nonce tracking for this round. | Increment the nonce value and resubmit. |
@@ -440,7 +467,7 @@ issue.
 - Oracle service is unable to fetch a price (feed outage, exchange downtime).
 - Price deviation guardrail is blocking a legitimate settlement.
 - Contract is paused and the admin is unreachable.
-- Repeated `StaleOracleData` despite fresh payloads (severe clock drift or bug).
+- Repeated `OracleTimestampOutsideWindow` despite fresh payloads (severe clock drift or bug).
 
 ### 7.2 Pause the contract (admin only)
 
@@ -525,6 +552,7 @@ scheduled and activates after a cooldown.
 |-----------|-------------------|-------|
 | Oracle stale threshold | `set_oracle_stale_threshold(seconds)` / `schedule_oracle_stale_threshold(seconds)` | 60–86400 s |
 | Oracle max deviation BPS | `schedule_oracle_max_deviation_bps(bps)` | 1–100000 bp |
+| Oracle timestamp skew | `schedule_oracle_timestamp_skew(seconds)` | 0–86400 s |
 
 ---
 
@@ -541,18 +569,24 @@ scheduled and activates after a cooldown.
 6. On Err(e):  Consult troubleshooting matrix, fix, retry
 ```
 
-### Playbook B: Stale payload on retry
+### Playbook B: Timestamp outside round window
 
 ```
-Symptom:  resolve_round returns StaleOracleData even after refreshing
+Symptom:  resolve_round returns OracleTimestampOutsideWindow
 Diagnosis:
-  - Check that your price-fetch timestamp is current (not cached).
-  - Check ledger timestamp via get_active_round() and env.ledger().timestamp().
+  - Round economic window: [round_start - skew, round_end_estimate + skew]
+  - round_start = timestamp recorded at round creation
+  - round_end_estimate = round_start + (end_ledger - start_ledger) * 5s
+  - skew = get_oracle_timestamp_skew() (default 300s)
+  - Verify payload.timestamp is within this window.
 Fix:
-  1. Re-fetch price and record fresh timestamp immediately before building payload.
-  2. Ensure network latency doesn't push the total round-trip > 300 s.
-  3. If unavoidable, reduce OracleStaleThreshold or batch submissions as
-     early as possible after end_ledger.
+  1. Ensure the price observation timestamp falls after round creation
+     and before the estimated round end + skew.
+  2. If the round took longer than expected (e.g. slow ledgers), the
+     end_estimate may underestimate the true end — admin can increase
+     OracleTimestampSkew via timelock if this is recurring.
+  3. Do NOT fabricate timestamps — use the actual observation time
+     from your price feed.
 ```
 
 ### Playbook C: Deviation guardrail trip

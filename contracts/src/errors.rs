@@ -56,6 +56,8 @@ pub enum ContractError {
     InvalidCommitment = 63,
     InvalidSalt = 64,
     NoRoundTemplate = 65,
+    /// Oracle payload timestamp is outside the round-relative economic window
+    OracleTimestampOutsideWindow = 66,
     /// Pending winnings entry exists but has not yet reached the configured
     /// expiry threshold — caller must wait before reclaiming.
     PendingWinningsNotExpired = 66,
