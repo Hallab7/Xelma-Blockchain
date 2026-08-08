@@ -170,6 +170,14 @@ impl VirtualTokenContract {
         admin::set_runtime_mode(env, mode)
     }
 
+    /// Returns paginated archived participation history for a user (newest first).
+    pub fn get_user_archive_history(
+        env: Env,
+        user: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<ArchivedRoundSummary> {
+        queries::get_user_archive_history(env, user, offset, limit)
     /// Returns whether `action` is currently permitted under the PolicyGate
     /// for the contract's runtime mode (Issue #261). Read-only; does not
     /// mutate state. See [`admin::_policy_gate`] for the full matrix.
@@ -1140,6 +1148,7 @@ impl VirtualTokenContract {
         limit: u32,
     ) -> Vec<(Address, UserPosition)> {
         queries::get_updown_positions_page(env, offset, limit)
+
     }
 
     /// Returns user's vXLM balance

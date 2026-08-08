@@ -156,7 +156,7 @@ pub fn cancel_round(env: Env, _reason: u32) -> Result<(), ContractError> {
         &round,
         RoundArchiveStatus::Cancelled,
         0,
-        participant_count,
+        &participants,
         0,
         None,
     );
@@ -939,6 +939,9 @@ fn _settle_round_with_price(
         let threshold_participants: Vec<Address> = env
             .storage()
             .persistent()
+            .get(&DataKey::RoundParticipants(round_id))
+            .unwrap_or(Vec::new(&env));
+        if threshold_participants.len() < min {
             .get(&DataKeyScoped::RoundParticipants(round_id))
             .unwrap_or(Vec::new(env));
         let count = threshold_participants.len();
@@ -947,6 +950,8 @@ fn _settle_round_with_price(
                 env,
                 round,
                 RoundArchiveStatus::FallbackRefund,
+                payload.price,
+                &threshold_participants,
                 final_price,
                 count,
                 0,
@@ -982,6 +987,8 @@ fn _settle_round_with_price(
     let participants: Vec<Address> = env
         .storage()
         .persistent()
+        .get(&DataKey::RoundParticipants(round_id))
+        .unwrap_or(Vec::new(&env));
         .get(&DataKeyScoped::RoundParticipants(round_id))
         .unwrap_or(Vec::new(env));
     let participant_count = participants.len();
@@ -990,6 +997,8 @@ fn _settle_round_with_price(
         env,
         round,
         RoundArchiveStatus::Resolved,
+        payload.price,
+        &participants,
         final_price,
         participant_count,
         fee_amount,
@@ -1775,11 +1784,12 @@ pub fn _archive_round(
     round: &Round,
     status: RoundArchiveStatus,
     final_price: u128,
-    participant_count: u32,
+    participants: &[Address],
     fee_amount: i128,
     confidence: Option<u32>,
 ) {
     let status_val = status.clone() as u32;
+    let participant_count = participants.len() as u32;
     let settled_at_ledger = env.ledger().sequence();
     let summary = ArchivedRoundSummary {
         round_id: round.round_id,
@@ -1792,6 +1802,20 @@ pub fn _archive_round(
         participant_count,
         settled_at_ledger,
     };
+
+    // Record per-user participation index for paginated history queries.
+    for i in 0..participants.len() {
+        if let Some(user) = participants.get(i) {
+            let index_key = DataKey::UserArchivedRoundIds(user.clone());
+            let mut user_rounds: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&index_key)
+                .unwrap_or(Vec::new(env));
+            user_rounds.push_back(round.round_id);
+            env.storage().persistent().set(&index_key, &user_rounds);
+        }
+    }
 
     env.storage()
         .persistent()
