@@ -202,6 +202,53 @@ pub fn get_user_archived_participation(
     env.storage().persistent().get(&key)
 }
 
+/// Returns paginated archived participation history for a user (newest first).
+pub fn get_user_archive_history(
+    env: Env,
+    user: Address,
+    offset: u32,
+    limit: u32,
+) -> Vec<ArchivedRoundSummary> {
+    let env_ref = &env;
+    let limit = limit.min(MAX_PAGE_SIZE);
+    if limit == 0 {
+        return Vec::new(env_ref);
+    }
+
+    let user_rounds: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::UserArchivedRoundIds(user))
+        .unwrap_or(Vec::new(env_ref));
+
+    let total = user_rounds.len();
+    if offset >= total {
+        return Vec::new(env_ref);
+    }
+
+    let start = total.saturating_sub(offset + 1);
+    let end = start.saturating_sub(limit.saturating_sub(1));
+    let mut idx = start;
+    let mut result: Vec<ArchivedRoundSummary> = Vec::new(env_ref);
+    loop {
+        if let Some(round_id) = user_rounds.get(idx) {
+            if let Some(summary) = env
+                .storage()
+                .persistent()
+                .get(&DataKey::ArchivedRound(round_id))
+            {
+                result.push_back(summary);
+            }
+        }
+        if idx == end || result.len() as u32 == limit {
+            break;
+        }
+        idx = idx.saturating_sub(1);
+    }
+
+    result
+}
+
 /// Returns user statistics (wins, losses, streaks)
 pub fn get_user_stats(env: Env, user: Address) -> UserStats {
     let key = DataKeyScoped::UserStats(user);
