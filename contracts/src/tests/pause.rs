@@ -17,6 +17,7 @@ fn setup_contract(env: &Env) -> (VirtualTokenContractClient<'_>, Address, Addres
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     (client, contract_id, admin, oracle)
 }
@@ -47,6 +48,7 @@ fn test_pause_requires_admin_auth() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     env.mock_auths(&[MockAuth {
         address: &attacker,
@@ -101,7 +103,7 @@ fn test_mutations_fail_while_paused() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(resolve_result, Err(Ok(ContractError::ContractPaused)));
 
     client.unpause_contract();

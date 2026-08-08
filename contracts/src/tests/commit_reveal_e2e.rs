@@ -36,7 +36,7 @@
 //! `env.events().all()` only returns events from the *current* ledger.
 //!
 //! Per-event topic coverage (the precise shape of `mint/initial`,
-//! `round/created`, `commit/predict`, `reveal/predict`, `round/resolved`,
+//! `round/created`, `commit/predict`, `reveal/predict`, `round/summary`,
 //! `claim/winnings` payloads) lives in dedicated test modules:
 //!
 //! - [`contracts/src/tests/event_coverage.rs`] — one test per event topic,
@@ -130,7 +130,7 @@ fn test_salt(env: &Env, seed: u8) -> BytesN<32> {
 ///    `PrecisionPosition`.
 /// 6. Advance ledger to the resolve window (≥ 12) and submit an oracle
 ///    payload selecting Carol as the unique closest guesser.
-///    Per-ledger event check: `("round", "resolved")`.
+///    Per-ledger event check: `("round", "summary")`.
 /// 7. Assert payout vector, pending winnings, user-stats deltas, and
 ///    archived round summary in one pass.
 /// 8. Carol claims her winnings and ends with the expected final balance.
@@ -153,6 +153,7 @@ fn test_commit_reveal_e2e_full_lifecycle() {
 
     // ── 1. Initialize + mint. ────────────────────────────────────────────
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     for user in [&alice, &bob, &carol] {
         client.mint_initial(user);
         assert_eq!(client.balance(user), INITIAL_BALANCE);
@@ -241,11 +242,11 @@ fn test_commit_reveal_e2e_full_lifecycle() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_active_round(), None);
 
-    // NOTE: "round/resolved" topic verification lives in
+    // NOTE: "round/summary" topic verification lives in
     // `event_coverage.rs::test_event_coverage_resolve_round` and
     // similar tests. The lifecycle test focuses on functional behavior
     // — the round is verifiably resolved because `get_active_round()`
@@ -363,6 +364,7 @@ fn test_commit_reveal_e2e_invalid_salt_or_price_returns_hash_mismatch() {
     let oracle = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&ROUND_START_PRICE, &Some(1));
 
@@ -408,6 +410,7 @@ fn test_commit_reveal_e2e_reveal_before_bet_window_closes_is_rejected() {
     let oracle = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&ROUND_START_PRICE, &Some(1));
 
@@ -443,6 +446,7 @@ fn test_commit_reveal_e2e_late_reveal_after_round_ends_is_rejected() {
     let oracle = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&ROUND_START_PRICE, &Some(1));
 
@@ -478,6 +482,7 @@ fn test_commit_reveal_e2e_double_reveal_returns_already_revealed() {
     let oracle = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&ROUND_START_PRICE, &Some(1));
 
@@ -515,6 +520,7 @@ fn test_commit_reveal_e2e_reveal_without_commit_returns_not_found() {
     let oracle = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&ROUND_START_PRICE, &Some(1));
 
@@ -537,7 +543,7 @@ fn test_commit_reveal_e2e_reveal_without_commit_returns_not_found() {
 /// has committed, they cannot bypass the hash by calling
 /// `place_precision_prediction` (and vice-versa). This enforces the
 /// contract invariant that the indexed position keys
-/// `DataKey::PrecisionPosition` / `DataKey::PrecisionCommitment` cannot both be
+/// `DataKeyScoped::PrecisionPosition` / `DataKeyScoped::PrecisionCommitment` cannot both be
 /// populated for the same `(round_id, user)`.
 #[test]
 fn test_commit_reveal_e2e_commit_then_direct_prediction_is_rejected() {
@@ -550,6 +556,7 @@ fn test_commit_reveal_e2e_commit_then_direct_prediction_is_rejected() {
     let oracle = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&ROUND_START_PRICE, &Some(1));
 
@@ -593,6 +600,7 @@ fn test_commit_reveal_e2e_two_way_tie_splits_pot_evenly() {
     let user_a = Address::generate(&env);
     let user_b = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user_a);
     client.mint_initial(&user_b);
     client.create_round(&ROUND_START_PRICE, &Some(1));
@@ -630,7 +638,7 @@ fn test_commit_reveal_e2e_two_way_tie_splits_pot_evenly() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let total_pot = bet_a + bet_b;
     let payout_a = client.get_pending_winnings(&user_a);
@@ -673,12 +681,13 @@ fn test_commit_reveal_e2e_zero_commitment_hash_is_rejected() {
     let oracle = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&ROUND_START_PRICE, &Some(1));
 
     let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
     let result = client.try_commit_prediction(&user, &zero_hash, &ALICE_BET);
-    assert_eq!(result, Err(Ok(ContractError::InvalidCommitment)));
+    assert_eq!(result, Err(Ok(ContractError::InvalidPrice)));
     assert_eq!(client.balance(&user), INITIAL_BALANCE);
 }
 
@@ -693,6 +702,7 @@ fn test_commit_reveal_e2e_weak_salt_is_rejected() {
     let oracle = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&ROUND_START_PRICE, &Some(1));
 
@@ -708,13 +718,13 @@ fn test_commit_reveal_e2e_weak_salt_is_rejected() {
     let zero_salt = BytesN::from_array(&env, &[0u8; 32]);
     assert_eq!(
         client.try_reveal_prediction(&user, &price, &zero_salt),
-        Err(Ok(ContractError::InvalidSalt))
+        Err(Ok(ContractError::InvalidPrice))
     );
 
     let constant_salt = BytesN::from_array(&env, &[0xABu8; 32]);
     assert_eq!(
         client.try_reveal_prediction(&user, &price, &constant_salt),
-        Err(Ok(ContractError::InvalidSalt))
+        Err(Ok(ContractError::InvalidPrice))
     );
 
     // Correct entropy salt still reveals successfully.
@@ -735,6 +745,7 @@ fn test_commit_reveal_e2e_all_unrevealed_refunds_conservatively() {
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.create_round(&ROUND_START_PRICE, &Some(1));
@@ -760,7 +771,7 @@ fn test_commit_reveal_e2e_all_unrevealed_refunds_conservatively() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_pending_winnings(&alice), ALICE_BET);
     assert_eq!(client.get_pending_winnings(&bob), BOB_BET);
@@ -790,6 +801,7 @@ fn test_commit_reveal_e2e_mixed_reveal_forfeits_unrevealed_to_pot() {
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.create_round(&ROUND_START_PRICE, &Some(1));
@@ -821,7 +833,7 @@ fn test_commit_reveal_e2e_mixed_reveal_forfeits_unrevealed_to_pot() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let total_pot = ALICE_BET + BOB_BET;
     assert_eq!(client.get_pending_winnings(&alice), total_pot);

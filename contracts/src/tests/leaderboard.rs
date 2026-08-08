@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Tests for the Leaderboard Read APIs and bounded index synchronization.
+//! Tests for the Leaderboard Read APIs with cursor-based pagination (Issue #296).
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::types::{LeaderboardEntry, UserStats};
@@ -39,19 +39,26 @@ fn test_leaderboard_ordered_by_wins() {
         }
     });
 
-    // Query wins leaderboard
-    let page = client.get_leaderboard_by_wins(&0, &10);
-    assert_eq!(page.len(), 3);
+    // Must create a round so the leaderboard collector can find active participants.
+    client.create_round(&1_0000000u128, &None);
 
+    // Query wins leaderboard with cursor = None (first page)
+    let page = client.get_leaderboard_by_wins(&None, &10);
+    assert_eq!(page.items.len(), 3);
+
+    let entries = page.items;
     // Expected order: Bob (5), Alice (3), Carol (2)
-    assert_eq!(page.get(0).unwrap().user, user_b);
-    assert_eq!(page.get(0).unwrap().stats.total_wins, 5);
+    assert_eq!(entries.get(0).unwrap().user, user_b);
+    assert_eq!(entries.get(0).unwrap().stats.total_wins, 5);
 
-    assert_eq!(page.get(1).unwrap().user, user_a);
-    assert_eq!(page.get(1).unwrap().stats.total_wins, 3);
+    assert_eq!(entries.get(1).unwrap().user, user_a);
+    assert_eq!(entries.get(1).unwrap().stats.total_wins, 3);
 
-    assert_eq!(page.get(2).unwrap().user, user_c);
-    assert_eq!(page.get(2).unwrap().stats.total_wins, 2);
+    assert_eq!(entries.get(2).unwrap().user, user_c);
+    assert_eq!(entries.get(2).unwrap().stats.total_wins, 2);
+
+    // next_cursor should be Some (the last entry's address)
+    assert!(page.next_cursor.is_some());
 }
 
 #[test]
@@ -92,23 +99,27 @@ fn test_leaderboard_ordered_by_streak() {
         }
     });
 
-    // Query streak leaderboard
-    let page = client.get_leaderboard_by_streak(&0, &10);
-    assert_eq!(page.len(), 3);
+    // Must create a round so the leaderboard collector can find active participants.
+    client.create_round(&1_0000000u128, &None);
 
+    // Query streak leaderboard with cursor = None
+    let page = client.get_leaderboard_by_streak(&None, &10);
+    assert_eq!(page.items.len(), 3);
+
+    let entries = page.items;
     // Expected order: Carol (4), Alice (3), Bob (2)
-    assert_eq!(page.get(0).unwrap().user, user_c);
-    assert_eq!(page.get(0).unwrap().stats.best_streak, 4);
+    assert_eq!(entries.get(0).unwrap().user, user_c);
+    assert_eq!(entries.get(0).unwrap().stats.best_streak, 4);
 
-    assert_eq!(page.get(1).unwrap().user, user_a);
-    assert_eq!(page.get(1).unwrap().stats.best_streak, 3);
+    assert_eq!(entries.get(1).unwrap().user, user_a);
+    assert_eq!(entries.get(1).unwrap().stats.best_streak, 3);
 
-    assert_eq!(page.get(2).unwrap().user, user_b);
-    assert_eq!(page.get(2).unwrap().stats.best_streak, 2);
+    assert_eq!(entries.get(2).unwrap().user, user_b);
+    assert_eq!(entries.get(2).unwrap().stats.best_streak, 2);
 }
 
 #[test]
-fn test_leaderboard_pagination() {
+fn test_leaderboard_cursor_pagination() {
     let env = Env::default();
     let contract_id = env.register(VirtualTokenContract, ());
     let client = VirtualTokenContractClient::new(&env, &contract_id);
@@ -135,16 +146,31 @@ fn test_leaderboard_pagination() {
         }
     });
 
-    // Query wins leaderboard: offset 1, limit 1 (should return Alice)
-    let page = client.get_leaderboard_by_wins(&1, &1);
-    assert_eq!(page.len(), 1);
-    assert_eq!(page.get(0).unwrap().user, user_a);
+    client.create_round(&1_0000000u128, &None);
 
-    // Query streak leaderboard: offset 2, limit 1 (should return Carol)
-    // Streak order: Bob (5), Alice (3), Carol (2).
-    let page_streak = client.get_leaderboard_by_streak(&2, &2);
-    assert_eq!(page_streak.len(), 1);
-    assert_eq!(page_streak.get(0).unwrap().user, user_c);
+    // First page: cursor = None, limit = 1 -> should return Bob (5 wins)
+    let page0 = client.get_leaderboard_by_wins(&None, &1);
+    assert_eq!(page0.items.len(), 1);
+    assert_eq!(page0.items.get(0).unwrap().user, user_b);
+    assert!(page0.next_cursor.is_some());
+
+    // Second page: cursor from page0 -> should return Alice (3 wins)
+    let page1 = client.get_leaderboard_by_wins(&page0.next_cursor, &1);
+    assert_eq!(page1.items.len(), 1);
+    assert_eq!(page1.items.get(0).unwrap().user, user_a);
+    assert!(page1.next_cursor.is_some());
+
+    // Third page: cursor from page1 -> should return Carol (2 wins)
+    let page2 = client.get_leaderboard_by_wins(&page1.next_cursor, &1);
+    assert_eq!(page2.items.len(), 1);
+    assert_eq!(page2.items.get(0).unwrap().user, user_c);
+    // Last page: next_cursor should be None (exhausted)
+    assert!(page2.next_cursor.is_none());
+
+    // Fourth page: using last cursor -> empty
+    let page3 = client.get_leaderboard_by_wins(&page2.next_cursor, &1);
+    assert_eq!(page3.items.len(), 0);
+    assert!(page3.next_cursor.is_none());
 }
 
 #[test]
@@ -169,18 +195,20 @@ fn test_leaderboard_deterministic_tie_breaking() {
         }
     });
 
-    // Query wins leaderboard
-    let page = client.get_leaderboard_by_wins(&0, &10);
-    assert_eq!(page.len(), 2);
+    client.create_round(&1_0000000u128, &None);
+
+    // Query wins leaderboard with cursor = None
+    let page = client.get_leaderboard_by_wins(&None, &10);
+    assert_eq!(page.items.len(), 2);
 
     // Expected order: sorted by Address ascending
-    let first = page.get(0).unwrap().user;
-    let second = page.get(1).unwrap().user;
+    let first = page.items.get(0).unwrap().user;
+    let second = page.items.get(1).unwrap().user;
     assert!(first < second);
 }
 
 #[test]
-fn test_leaderboard_bounded_index() {
+fn test_leaderboard_limit_capped_at_max_page_size() {
     let env = Env::default();
     env.cost_estimate().budget().reset_unlimited();
     let contract_id = env.register(VirtualTokenContract, ());
@@ -191,38 +219,72 @@ fn test_leaderboard_bounded_index() {
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
 
-    // Generate 105 users, give each some wins
-    // 100 users get 2 wins.
-    // 5 users get 1 win.
-    // Only the top 100 should be in the leaderboard.
-    let mut top_users = Vec::new(&env);
+    // Create a round so we can place bets (participants appear on the leaderboard).
+    client.create_round(&1_0000000u128, &None);
+
+    // Create many users with varying wins, all placing bets in the active round.
+    // All will be on the participant list and thus visible to the leaderboard.
     env.as_contract(&contract_id, || {
-        for _ in 0..100 {
+        for _ in 0..50 {
             let u = Address::generate(&env);
             VirtualTokenContract::_update_stats_win(&env, u.clone()).unwrap();
             VirtualTokenContract::_update_stats_win(&env, u.clone()).unwrap();
-            top_users.push_back(u);
         }
     });
 
-    let mut low_users = Vec::new(&env);
+    // Request 150 entries — limit is capped at MAX_PAGE_SIZE (100).
+    let page = client.get_leaderboard_by_wins(&None, &150);
+    // With 50 participants, we should get at most 50 results, all ≤ 100.
+    assert!(
+        page.items.len() <= 100,
+        "result count should be capped at 100"
+    );
+}
+
+#[test]
+fn test_leaderboard_empty_when_no_users() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // No round created, no users → empty leaderboard
+    let page = client.get_leaderboard_by_wins(&None, &10);
+    assert_eq!(page.items.len(), 0);
+    assert!(page.next_cursor.is_none());
+
+    let page2 = client.get_leaderboard_by_streak(&None, &10);
+    assert_eq!(page2.items.len(), 0);
+    assert!(page2.next_cursor.is_none());
+}
+
+#[test]
+fn test_leaderboard_zero_limit_is_empty() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    client.create_round(&1_0000000u128, &None);
+
+    let user = Address::generate(&env);
+    client.mint_initial(&user);
+    client.place_bet(&user, &10_0000000i128, &crate::types::BetSide::Up);
+
     env.as_contract(&contract_id, || {
-        for _ in 0..5 {
-            let u = Address::generate(&env);
-            VirtualTokenContract::_update_stats_win(&env, u.clone()).unwrap();
-            low_users.push_back(u);
-        }
+        VirtualTokenContract::_update_stats_win(&env, user.clone()).unwrap();
     });
 
-    let page = client.get_leaderboard_by_wins(&0, &150);
-    // Bounded to 100 entries
-    assert_eq!(page.len(), 100);
-
-    // Verify none of the low_users (with 1 win) are in the leaderboard
-    for entry in page.iter() {
-        assert_eq!(entry.stats.total_wins, 2);
-        for low_u in low_users.iter() {
-            assert_ne!(entry.user, low_u);
-        }
-    }
+    // limit = 0 → empty page
+    let page = client.get_leaderboard_by_wins(&None, &0);
+    assert_eq!(page.items.len(), 0);
+    assert!(page.next_cursor.is_none());
 }

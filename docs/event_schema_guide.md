@@ -40,11 +40,17 @@ Emitted when a user places a prediction directly (without commit-reveal) in `Pre
 * **Topics:** `("predict", "price")`
 * **Payload:** `(user: Address, round_id: u64, predicted_price: u128, amount: i128)`
 
-### 7. Round Resolved
-Emitted when a round is resolved with the final price from the oracle.
-* **Topics:** `("round", "resolved")`
-* **Payload:** `(round_id: u64, final_price: u128, mode: u32)`
+### 7. Round Summary (Canonical Terminal Event)
+Emitted exactly once per terminal round transition — competitive resolution,
+admin cancellation, or min-participants fallback. Replaces the previously
+separate `("round", "resolved")`, `("round", "cancelled")`, and
+`("round", "fallback")` events.
+* **Topics:** `("round", "summary")`
+* **Payload:** `(version: u32, round_id: u64, status: u32, mode: u32, price_start: u128, price_final: u128, pool_up: i128, pool_down: i128, participant_count: u32, total_pot: i128, fee_amount: i128, settled_at_ledger: u32, confidence: Option<u32>)`
+  * `version`: Schema version (`0` for this layout)
+  * `status`: `0` for `Resolved`, `1` for `Cancelled`, `2` for `FallbackRefund`
   * `mode`: `0` for `UpDown`, `1` for `Precision`
+  * `confidence`: Oracle confidence in basis points (`None` for cancel/fallback)
 
 ### 8. Outcome Loss
 Emitted per losing participant when a round settles competitively
@@ -61,12 +67,7 @@ Not emitted on refund paths (price-unchanged refund, one-sided pool
 refund, min-participants fallback, admin cancellation) — those paths use
 their respective refund-prone events instead.
 
-### 9. Round Cancelled
-Emitted when an active round is cancelled by the admin.
-* **Topics:** `("round", "cancelled")`
-* **Payload:** `(round_id: u64, reason: u32, pool_up: i128, pool_down: i128)`
-
-### 9. Winnings Claimed
+### 8. Winnings Claimed
 Emitted when a user claims their accumulated pending winnings.
 * **Topics:** `("claim", "winnings")`
 * **Payload:** `(user: Address, amount: i128)`
@@ -76,14 +77,7 @@ Emitted when a new user claims their one-time initial allocation.
 * **Topics:** `("mint", "initial")`
 * **Payload:** `(user: Address, amount: i128)`
 
-### 11. Forensic Round Summary
-Emitted when a round is resolved, cancelled, or refunded. Contains compact settlement data.
-* **Topics:** `("round", "summary")`
-* **Payload:** `(round_id: u64, mode: u32, price_start: u128, price_final: u128, participant_count: u32, total_pot: i128, status: u32)`
-  * `mode`: `0` for `UpDown`, `1` for `Precision`
-  * `status`: `0` for `Resolved`, `1` for `Cancelled`, `2` for `FallbackRefund`
-
-### 12. Runtime Mode Transition
+### 11. Runtime Mode Transition
 Emitted when the contract's emergency runtime mode is changed by the admin.
 * **Topics:** `("mode", "transition")`
 * **Payload:** `(old_mode: u32, new_mode: u32)`
@@ -106,7 +100,7 @@ Conservation `Σ payouts + fee_amount == total_pot` is enforced in
 `_apply_protocol_fee_*`. UpDown conservatively deducts from the losing
 pool first, then spills over into the winning pool — so winners
 receive their remaining principal when the fee exceeds losing liquidity.
-Refund paths (`("round","fallback")`, `("pool","onesided")`, price-unchanged
+Refund paths (the canonical `("round","summary")` with `status = 2 (FallbackRefund)`,
 refunds, admin cancellations) do NOT emit this event.
 
 ### `("protocol", "fee_bps_set")` — timelock applied

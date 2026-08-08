@@ -5,8 +5,15 @@
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
 use crate::errors::ContractError;
+use crate::settlement_math::{
+    classify_price_direction, compute_deviation_bps, compute_precision_fee,
+    compute_precision_payouts, compute_updown_fee, compute_updown_payouts,
+    find_precision_winners, is_one_sided_pool, split_pot_among_winners,
+    total_pot_updown, PrecisionEntry, PrecisionPayoutEntry, PriceDirection, UpDownPosition,
+    UpDownPayoutEntry,
+};
 use crate::types::{
-    BetSide, DataKey, OraclePayload, PrecisionPrediction, Round, RoundArchiveStatus, RoundMode,
+    BetSide, DataKeyCore, DataKeyScoped, OraclePayload, PrecisionPrediction, Round, RoundArchiveStatus, RoundMode,
     UserOutcomeType, UserPosition,
 };
 use soroban_sdk::BytesN;
@@ -59,6 +66,7 @@ fn test_resolve_round_price_unchanged() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create a round with start price 1.5 XLM
     let start_price: u128 = 1_5000000;
@@ -93,19 +101,19 @@ fn test_resolve_round_price_unchanged() {
         // Store positions in UpDownPositions (new storage location)
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         // Update round pools to match positions
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     // Get balances before resolution
@@ -128,7 +136,7 @@ fn test_resolve_round_price_unchanged() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Check pending winnings (not claimed yet)
     assert_eq!(client.get_pending_winnings(&user1), 100_0000000);
@@ -160,6 +168,7 @@ fn test_resolve_round_price_went_up() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create a round with start price 1.0 XLM
     let start_price: u128 = 1_0000000;
@@ -202,18 +211,18 @@ fn test_resolve_round_price_went_up() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 300_0000000;
         round.pool_down = 150_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     let alice_before = client.balance(&alice);
@@ -236,7 +245,7 @@ fn test_resolve_round_price_went_up() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Check pending winnings
     assert_eq!(client.get_pending_winnings(&alice), 150_0000000);
@@ -272,6 +281,7 @@ fn test_resolve_round_price_went_down() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create a round with start price 2.0 XLM
     let start_price: u128 = 2_0000000;
@@ -303,18 +313,18 @@ fn test_resolve_round_price_went_down() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 200_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     let alice_before = client.balance(&alice);
@@ -336,7 +346,7 @@ fn test_resolve_round_price_went_down() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Check pending winnings
     assert_eq!(client.get_pending_winnings(&alice), 300_0000000);
@@ -375,6 +385,7 @@ fn test_user_stats_tracking() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Initial stats should be all zeros
     let stats = client.get_user_stats(&alice);
@@ -426,6 +437,7 @@ fn test_resolve_round_without_active_round() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Try to resolve without creating a round - should return error
     let result = client.try_resolve_round(&OraclePayload {
@@ -439,7 +451,7 @@ fn test_resolve_round_without_active_round() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     assert_eq!(result, Err(Ok(ContractError::NoActiveRound)));
 }
 
@@ -458,6 +470,7 @@ fn test_resolve_precision_closest_guess_wins() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create Precision mode round starting at 2000
     client.create_round(&2000, &Some(1));
@@ -506,7 +519,7 @@ fn test_resolve_precision_closest_guess_wins() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     // Advance ledger to allow resolution
@@ -526,7 +539,7 @@ fn test_resolve_precision_closest_guess_wins() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Alice should win the entire pot (100 + 150 + 50 = 300)
     assert_eq!(client.get_pending_winnings(&alice), 300_0000000);
@@ -557,6 +570,7 @@ fn test_resolve_precision_tie_splits_pot() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create Precision mode round
     client.create_round(&2000, &Some(1));
@@ -605,7 +619,7 @@ fn test_resolve_precision_tie_splits_pot() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     // Advance ledger
@@ -625,7 +639,7 @@ fn test_resolve_precision_tie_splits_pot() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Total pot is 300, split evenly between Alice and Bob (150 each)
     assert_eq!(client.get_pending_winnings(&alice), 150_0000000);
@@ -654,6 +668,7 @@ fn test_resolve_precision_exact_match() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&2000, &Some(1));
 
@@ -688,7 +703,7 @@ fn test_resolve_precision_exact_match() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -707,7 +722,7 @@ fn test_resolve_precision_exact_match() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_pending_winnings(&alice), 200_0000000); // Wins entire pot
     assert_eq!(client.get_pending_winnings(&bob), 0);
@@ -724,6 +739,7 @@ fn test_resolve_precision_no_predictions() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Create Precision mode round with no predictions
     client.create_round(&2000, &Some(1));
@@ -744,7 +760,7 @@ fn test_resolve_precision_no_predictions() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Round should be cleared
     assert_eq!(client.get_active_round(), None);
@@ -761,6 +777,7 @@ fn test_resolve_precision_three_way_tie() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&2000, &Some(1));
 
@@ -805,7 +822,7 @@ fn test_resolve_precision_three_way_tie() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -824,7 +841,7 @@ fn test_resolve_precision_three_way_tie() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Total pot is 400, split 3 ways = 133.33... each
     // With remainder policy: Alice gets 133 + 1 (remainder), Bob and Charlie get 133
@@ -849,6 +866,7 @@ fn test_resolve_precision_single_prediction() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&2000, &Some(1));
 
@@ -869,7 +887,7 @@ fn test_resolve_precision_single_prediction() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -888,7 +906,7 @@ fn test_resolve_precision_single_prediction() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_pending_winnings(&alice), 100_0000000);
 }
@@ -904,6 +922,7 @@ fn test_resolve_precision_large_differences() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&100_0000, &Some(1));
 
@@ -937,7 +956,7 @@ fn test_resolve_precision_large_differences() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -956,7 +975,7 @@ fn test_resolve_precision_large_differences() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_pending_winnings(&alice), 200_0000000);
     assert_eq!(client.get_pending_winnings(&bob), 0);
@@ -973,6 +992,7 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&1_0000, &Some(1));
 
@@ -1018,7 +1038,7 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1037,7 +1057,7 @@ fn test_precision_remainder_3way_tie_uneven_pot() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Total pot: 100_0000000, Winner count: 3
     // payout_per_winner = 100_0000000 / 3 = 33_3333333
@@ -1068,6 +1088,7 @@ fn test_precision_remainder_5way_tie() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&1_0000, &Some(1));
 
@@ -1135,7 +1156,7 @@ fn test_precision_remainder_5way_tie() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1154,7 +1175,7 @@ fn test_precision_remainder_5way_tie() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Total pot: 103_0000000, Winner count: 5
     // payout_per_winner = 103_0000000 / 5 = 20_6000000
@@ -1186,6 +1207,7 @@ fn test_precision_no_remainder() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     client.create_round(&1_0000, &Some(1));
 
@@ -1219,7 +1241,7 @@ fn test_precision_no_remainder() {
 
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1237,7 +1259,7 @@ fn test_precision_no_remainder() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Total pot: 100, Winner count: 2
     // payout_per_winner = 100 / 2 = 50
@@ -1260,6 +1282,7 @@ fn test_round_resolved_event_emitted() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &None);
 
@@ -1282,7 +1305,7 @@ fn test_round_resolved_event_emitted() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Verify resolved event was emitted
     let events = env.events().all();
@@ -1290,12 +1313,12 @@ fn test_round_resolved_event_emitted() {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
 
     assert!(
         resolved_event.is_some(),
-        "Round resolved event should be emitted"
+        "Round summary event should be emitted"
     );
 }
 
@@ -1313,6 +1336,7 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.create_round(&1_0000000, &None);
@@ -1336,7 +1360,7 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let outcomes = payout_outcome_events(&env);
 
@@ -1348,7 +1372,7 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
                 && *mode == 0
                 && user == &alice
                 && *gross_payout == 150_0000000
-                && *outcome_type == 1
+                && *outcome_type == 0
         }));
     assert!(outcomes
         .iter()
@@ -1357,7 +1381,7 @@ fn test_updown_resolution_emits_participant_payout_outcomes() {
                 && *mode == 0
                 && user == &bob
                 && *gross_payout == 0
-                && *outcome_type == 0
+                && *outcome_type == 1
         }));
 }
 
@@ -1375,6 +1399,7 @@ fn test_unchanged_price_resolution_emits_refund_outcomes() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.create_round(&1_0000000, &None);
@@ -1398,7 +1423,7 @@ fn test_unchanged_price_resolution_emits_refund_outcomes() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let outcomes = payout_outcome_events(&env);
 
@@ -1438,6 +1463,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -1463,7 +1489,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let outcomes = payout_outcome_events(&env);
 
@@ -1475,7 +1501,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
                 && *mode == 1
                 && user == &alice
                 && *gross_payout == 300_0000000
-                && *outcome_type == 1
+                && *outcome_type == 0
         }));
     assert!(outcomes
         .iter()
@@ -1484,7 +1510,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
                 && *mode == 1
                 && user == &bob
                 && *gross_payout == 0
-                && *outcome_type == 0
+                && *outcome_type == 1
         }));
     assert!(outcomes
         .iter()
@@ -1493,7 +1519,7 @@ fn test_precision_resolution_emits_participant_payout_outcomes() {
                 && *mode == 1
                 && user == &charlie
                 && *gross_payout == 0
-                && *outcome_type == 0
+                && *outcome_type == 1
         }));
 }
 
@@ -1510,6 +1536,7 @@ fn test_claim_winnings_event_emitted() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.create_round(&1_0000000, &None);
 
@@ -1525,17 +1552,17 @@ fn test_claim_winnings_event_emitted() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -1554,7 +1581,7 @@ fn test_claim_winnings_event_emitted() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Claim winnings
     client.claim_winnings(&user);
@@ -1587,6 +1614,7 @@ fn test_no_claim_event_when_no_winnings() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     // Count events before claim
@@ -1640,6 +1668,7 @@ fn test_precision_payout_deterministic_same_inputs() {
 
         env.mock_all_auths();
         client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
         client.create_round(&1_0000, &Some(1));
 
         env.as_contract(&contract_id, || {
@@ -1670,7 +1699,7 @@ fn test_precision_payout_deterministic_same_inputs() {
             );
             env.storage()
                 .persistent()
-                .set(&DataKey::PrecisionPositions, &predictions);
+                .set(&DataKeyCore::PrecisionPositions, &predictions);
         });
 
         env.ledger().with_mut(|li| {
@@ -1687,7 +1716,7 @@ fn test_precision_payout_deterministic_same_inputs() {
             network_id: env.ledger().network_id(),
             contract_addr: contract_id.clone(),
             confidence: None,
-        });
+            attestation: None,        });
 
         (
             client.get_pending_winnings(&alice),
@@ -1725,6 +1754,7 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.create_round(&1_0000, &Some(1));
 
     let alice = Address::generate(&env);
@@ -1755,7 +1785,7 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -1772,7 +1802,7 @@ fn test_precision_payout_conservation_two_way_tie_remainder() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let alice_payout = client.get_pending_winnings(&alice);
     let bob_payout = client.get_pending_winnings(&bob);
@@ -1806,6 +1836,7 @@ fn test_min_participants_blocks_settlement_updown() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.create_round(&1_0000000, &None);
 
@@ -1829,7 +1860,7 @@ fn test_min_participants_blocks_settlement_updown() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Stake refunded to pending winnings, not claimed yet
     assert_eq!(client.get_pending_winnings(&user1), 100_0000000);
@@ -1850,6 +1881,7 @@ fn test_min_participants_allows_settlement_at_threshold() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.mint_initial(&user2);
     client.create_round(&1_0000000, &None);
@@ -1874,7 +1906,7 @@ fn test_min_participants_allows_settlement_at_threshold() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(client.get_pending_winnings(&user1), 200_0000000);
     assert_eq!(client.get_pending_winnings(&user2), 0);
@@ -1893,6 +1925,7 @@ fn test_min_participants_fallback_refunds_precision_mode() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.create_round(&2000, &Some(1));
 
@@ -1914,7 +1947,7 @@ fn test_min_participants_fallback_refunds_precision_mode() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Precision bet refunded
     assert_eq!(client.get_pending_winnings(&user1), 100_0000000);
@@ -1933,6 +1966,7 @@ fn test_min_participants_fallback_event_emitted() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.create_round(&1_0000000, &None);
     client.place_bet(&user1, &100_0000000, &BetSide::Up);
@@ -1953,18 +1987,18 @@ fn test_min_participants_fallback_event_emitted() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let events = env.events().all();
     let fallback_event = events.iter().find(|e| {
         let (_contract, topics, _data) = e;
         topics.len() == 2
             && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
-            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("fallback"))
+            && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("summary"))
     });
     assert!(
         fallback_event.is_some(),
-        "Fallback event must be emitted when min-participants threshold is not met"
+        "Fallback summary event must be emitted when min-participants threshold is not met"
     );
 }
 
@@ -1978,6 +2012,7 @@ fn test_set_min_participants_validation() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // Zero is invalid
     let result = client.try_set_min_participants(&Some(0u32));
@@ -2008,6 +2043,7 @@ fn test_no_min_participants_threshold_resolves_normally() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user1);
     client.create_round(&1_0000000, &None);
 
@@ -2030,7 +2066,7 @@ fn test_no_min_participants_threshold_resolves_normally() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Price went up but winning_pool (Up) = 100, losing_pool (Down) = 0 → payout = 100 + 0 = 100
     assert_eq!(client.get_pending_winnings(&user1), 100_0000000);
@@ -2049,6 +2085,7 @@ fn test_precision_payout_conservation_large_tie_set() {
     env.mock_all_auths();
 
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.create_round(&1_0000, &Some(1));
 
     let u0 = Address::generate(&env);
@@ -2092,7 +2129,7 @@ fn test_precision_payout_conservation_large_tie_set() {
         }
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -2109,7 +2146,7 @@ fn test_precision_payout_conservation_large_tie_set() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let users = [u0, u1, u2, u3, u4, u5, u6, u7, u8, u9];
     let mut sum: i128 = 0;
@@ -2141,6 +2178,7 @@ fn test_precision_commit_reveal_resolution_payout_with_unrevealed_participants()
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2191,7 +2229,7 @@ fn test_precision_commit_reveal_resolution_payout_with_unrevealed_participants()
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Total pot is 250 (Alice 100 + Bob 150)
     // Alice is the only revealed participant, so she wins the entire pot
@@ -2215,6 +2253,7 @@ fn test_precision_remainder_goes_to_lexicographically_lowest_winner() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user_a);
     client.mint_initial(&user_b);
 
@@ -2280,7 +2319,7 @@ fn test_precision_remainder_goes_to_lexicographically_lowest_winner() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Total pot = 200_0000001
     // split = 200_0000001 / 2 = 100_0000000
@@ -2310,7 +2349,7 @@ fn resolve_active_round(
         network_id: env.ledger().network_id(),
         contract_addr: client.address.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     round_id
 }
 
@@ -2327,6 +2366,7 @@ fn test_archived_round_after_resolve_matches_settlement() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2368,6 +2408,7 @@ fn test_archived_round_after_cancel() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     let start_price: u128 = 1_5000000;
@@ -2401,6 +2442,7 @@ fn test_archived_round_after_precision_resolve() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2439,6 +2481,7 @@ fn test_archived_round_fallback_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.set_min_participants(&Some(2u32));
     client.mint_initial(&user);
 
@@ -2478,6 +2521,7 @@ fn test_get_recent_archived_rounds_order_and_limit() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     let mut round_ids = Vec::new(&env);
     for i in 0..3 {
@@ -2569,6 +2613,7 @@ fn test_outcome_loss_event_updown_indexed_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -2595,7 +2640,7 @@ fn test_outcome_loss_event_updown_indexed_path() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Two losers => exactly two loss events.
     assert_eq!(
@@ -2644,6 +2689,7 @@ fn test_outcome_loss_event_updown_legacy_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2670,18 +2716,18 @@ fn test_outcome_loss_event_updown_legacy_path() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -2699,7 +2745,7 @@ fn test_outcome_loss_event_updown_legacy_path() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // One loser (bob) => exactly one loss event.
     assert_eq!(count_outcome_loss_events(&env), 1);
@@ -2729,6 +2775,7 @@ fn test_outcome_loss_event_precision_indexed_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -2765,7 +2812,7 @@ fn test_outcome_loss_event_precision_indexed_path() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Two losers => two loss events (includes the unrevealed-commitment loser).
     assert_eq!(
@@ -2813,6 +2860,7 @@ fn test_outcome_loss_event_precision_legacy_path() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -2850,7 +2898,7 @@ fn test_outcome_loss_event_precision_legacy_path() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| {
@@ -2868,7 +2916,7 @@ fn test_outcome_loss_event_precision_legacy_path() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // 2 losers => 2 loss events.
     assert_eq!(count_outcome_loss_events(&env), 2);
@@ -2913,6 +2961,7 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -2937,17 +2986,17 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_0000000;
         round.pool_down = 50_0000000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| {
@@ -2964,7 +3013,7 @@ fn test_outcome_loss_event_not_emitted_on_refund() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(
         count_outcome_loss_events(&env),
@@ -2985,6 +3034,7 @@ fn test_outcome_loss_event_not_emitted_on_min_participants_fallback() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.set_min_participants(&Some(3u32));
 
@@ -3005,7 +3055,7 @@ fn test_outcome_loss_event_not_emitted_on_min_participants_fallback() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Fallback refunds the user; no loss event should be emitted.
     assert_eq!(
@@ -3027,6 +3077,7 @@ fn test_outcome_loss_event_not_emitted_on_cancel() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     client.create_round(&1_0000000, &None);
@@ -3058,6 +3109,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&u_a);
     client.mint_initial(&u_b);
     client.mint_initial(&u_c);
@@ -3084,7 +3136,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let updown_count = count_outcome_loss_events(&env);
     assert_eq!(
@@ -3113,7 +3165,7 @@ fn test_outcome_loss_event_count_matches_outcomes_across_modes() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     let total_after_precision = count_outcome_loss_events(&env);
     assert_eq!(
@@ -3161,6 +3213,7 @@ fn test_archive_retention_prunes_oldest() {
     let oracle = Address::generate(&env);
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // MAX_ARCHIVED_ROUNDS = 128; create 129 resolved rounds to force pruning of round 1.
     let mut first_round_id = 0u64;
@@ -3202,6 +3255,7 @@ fn test_get_user_archived_participation_updown_win() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3243,6 +3297,7 @@ fn test_get_user_archived_participation_updown_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
 
     let start_price: u128 = 1_0000000;
@@ -3274,6 +3329,7 @@ fn test_get_user_archived_participation_precision_win() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3316,6 +3372,7 @@ fn test_get_user_archived_participation_cancel() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
 
     let start_price: u128 = 1_0000000;
@@ -3332,7 +3389,7 @@ fn test_get_user_archived_participation_cancel() {
     assert_eq!(outcome.prediction_side, 0);
     assert_eq!(outcome.stake, 100_0000000);
     assert_eq!(outcome.payout, 100_0000000);
-    assert_eq!(outcome.outcome, UserOutcomeType::Cancel);
+    assert_eq!(outcome.outcome, UserOutcomeType::Void);
 }
 
 #[test]
@@ -3360,6 +3417,7 @@ fn test_get_user_archived_participation_min_participants_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&user);
     client.set_min_participants(&Some(2u32));
 
@@ -3429,7 +3487,7 @@ fn sum_pending_payouts(
     let mut total: i128 = 0;
     env.as_contract(contract, || {
         for u in users {
-            let key = crate::types::DataKey::PendingWinnings(u.clone());
+            let key = crate::types::DataKeyScoped::PendingWinnings(u.clone());
             let v: Option<i128> = env.storage().persistent().get(&key);
             total = total
                 .checked_add(v.unwrap_or(0))
@@ -3457,6 +3515,7 @@ fn test_protocol_fee_disabled_default_is_no_behaviour_change() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3476,7 +3535,7 @@ fn test_protocol_fee_disabled_default_is_no_behaviour_change() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Pre-#162 UpDown formula: payout_alice = 100 + 100 * 50 / 100 = 150 stroops.
     assert_eq!(
@@ -3505,6 +3564,7 @@ fn test_protocol_fee_updown_indexed_conservation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3532,7 +3592,7 @@ fn test_protocol_fee_updown_indexed_conservation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // total_pot = 150; fee = floor(150_000_0000 * 200 / 10_000) = 3_000_0000.
     // fee_from_losing = min(3, 50) = 3; fee_from_winning = 0.
@@ -3581,6 +3641,7 @@ fn test_protocol_fee_updown_legacy_conservation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3610,18 +3671,18 @@ fn test_protocol_fee_updown_legacy_conservation() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
 
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_000_0000;
         round.pool_down = 50_000_0000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -3636,7 +3697,7 @@ fn test_protocol_fee_updown_legacy_conservation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // total_pot = 150; fee = floor(150_000_0000 * 500 / 10_000) = 7_500_0000 (7.5 tokens).
     // distributable_winning = 100_000_0000, distributable_losing = 42_500_0000.
@@ -3663,6 +3724,7 @@ fn test_protocol_fee_precision_indexed_conservation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -3688,7 +3750,7 @@ fn test_protocol_fee_precision_indexed_conservation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // total_pot = 100 + 150 + 50 = 300. fee = 300 * 1000 / 10_000 = 30.
     // winner_count = 1 -> payout_pool = 270 -> alice gets 270.
@@ -3721,6 +3783,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&charlie);
@@ -3760,7 +3823,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::PrecisionPositions, &predictions);
+            .set(&DataKeyCore::PrecisionPositions, &predictions);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -3775,7 +3838,7 @@ fn test_protocol_fee_precision_legacy_conservation() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // total_pot = 300; fee = 300 * 100 / 10_000 = 3.
     // payout_pool = 297 -> winner alice gets 297.
@@ -3811,6 +3874,7 @@ fn test_protocol_fee_thin_losing_pool_updown() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3840,7 +3904,7 @@ fn test_protocol_fee_thin_losing_pool_updown() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // winning_pool = 1000_000_0000, losing_pool = 1_000_0000.
     // total_pot = 10_010_000_000; fee = 10_010_000_000 * 1000 / 10_000 = 1_001_000_000.
@@ -3881,6 +3945,7 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3908,17 +3973,17 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
         );
         env.storage()
             .persistent()
-            .set(&DataKey::UpDownPositions, &positions);
+            .set(&DataKeyCore::UpDownPositions, &positions);
         let mut round: Round = env
             .storage()
             .persistent()
-            .get(&DataKey::ActiveRound)
+            .get(&DataKeyCore::ActiveRound)
             .unwrap();
         round.pool_up = 100_000_0000;
         round.pool_down = 50_000_0000;
         env.storage()
             .persistent()
-            .set(&DataKey::ActiveRound, &round);
+            .set(&DataKeyCore::ActiveRound, &round);
     });
 
     env.ledger().with_mut(|li| li.sequence_number += 12);
@@ -3933,7 +3998,7 @@ fn test_protocol_fee_not_collected_on_refund_paths() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     // Refund: no fee event, treasury still 0.
     assert_eq!(
@@ -3965,6 +4030,7 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
 
@@ -3991,7 +4057,7 @@ fn test_protocol_fee_not_collected_on_one_sided_pool_refund() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
 
     assert_eq!(
         count_protocol_fee_events(&env),
@@ -4025,6 +4091,7 @@ fn test_protocol_fee_withdrawal_to_recipient() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
     client.mint_initial(&alice);
     client.mint_initial(&bob);
     client.mint_initial(&treasury_account);
@@ -4049,7 +4116,7 @@ fn test_protocol_fee_withdrawal_to_recipient() {
         network_id: env.ledger().network_id(),
         contract_addr: contract_id.clone(),
         confidence: None,
-    });
+        attestation: None,    });
     // total_pot = 150; fee = 15; distributable_losing = 35.
     // payout = 100 + 100 * 35 / 100 = 135.
     assert_eq!(client.get_protocol_fee_treasury(), 15_000_0000i128);
@@ -4088,6 +4155,7 @@ fn test_protocol_fee_schedule_validation_rejects_zero_and_over_cap() {
 
     env.mock_all_auths();
     client.initialize(&admin, &oracle);
+    client.update_oracle_heartbeat(&0u32);
 
     // None always OK.
     client.schedule_protocol_fee_bps(&None);
@@ -4118,4 +4186,813 @@ fn test_protocol_fee_schedule_validation_rejects_zero_and_over_cap() {
     run_to_activation(&env);
     client.apply_scheduled_changes(&crate::types::ConfigChangeKind::ProtocolFeeBps);
     assert_eq!(client.get_protocol_fee_bps(), Some(1_000u32));
+}
+
+// ============================================================================
+// GOLDEN VECTOR TESTS — Pure settlement_math verification (Issue #257)
+// ============================================================================
+// These tests verify settlement_math functions with known inputs and expected
+// outputs. They do NOT require the Soroban test harness — only std::prelude.
+
+// ─── Price direction golden vectors ─────────────────────────────────────────
+
+#[test]
+fn golden_price_direction_up() {
+    assert_eq!(
+        classify_price_direction(1_0000000, 1_5000000),
+        PriceDirection::Up
+    );
+}
+
+#[test]
+fn golden_price_direction_down() {
+    assert_eq!(
+        classify_price_direction(2_0000000, 1_0000000),
+        PriceDirection::Down
+    );
+}
+
+#[test]
+fn golden_price_direction_unchanged() {
+    assert_eq!(
+        classify_price_direction(1_0000000, 1_0000000),
+        PriceDirection::Unchanged
+    );
+}
+
+#[test]
+fn golden_price_direction_large_values() {
+    assert_eq!(
+        classify_price_direction(100_0000000, 200_0000000),
+        PriceDirection::Up
+    );
+    assert_eq!(
+        classify_price_direction(200_0000000, 100_0000000),
+        PriceDirection::Down
+    );
+}
+
+// ─── One-sided pool golden vectors ──────────────────────────────────────────
+
+#[test]
+fn golden_is_one_sided_only_up() {
+    assert!(is_one_sided_pool(100, 0));
+}
+
+#[test]
+fn golden_is_one_sided_only_down() {
+    assert!(is_one_sided_pool(0, 100));
+}
+
+#[test]
+fn golden_not_one_sided_both_filled() {
+    assert!(!is_one_sided_pool(100, 50));
+}
+
+#[test]
+fn golden_not_one_sided_both_empty() {
+    assert!(!is_one_sided_pool(0, 0));
+}
+
+// ─── Fee math golden vectors ────────────────────────────────────────────────
+
+#[test]
+fn golden_updown_fee_1pct_conservation() {
+    // pool_up=300, pool_down=150, total=450, fee@100bps=4
+    let (dw, dl, fee) = compute_updown_fee(300, 150, Some(100)).unwrap();
+    assert_eq!(fee, 4);
+    assert_eq!(dl, 146); // losing_pool - fee_from_losing
+    assert_eq!(dw, 300); // winning_pool unchanged (fee < losing_pool)
+    // Conservation: dw + dl + fee == original total
+    assert_eq!(dw + dl + fee, 450);
+}
+
+#[test]
+fn golden_updown_fee_spillover_from_winning() {
+    // Fee exceeds losing pool → spillover from winning
+    let (dw, dl, fee) = compute_updown_fee(1000, 10, Some(500)).unwrap();
+    // total_pot=1010, fee=1010*500/10000=50
+    assert_eq!(fee, 50);
+    assert_eq!(dl, 0); // losing_pool drained
+    assert_eq!(dw, 960); // winning_pool - (fee - losing_pool) = 1000 - 40
+    assert_eq!(dw + dl + fee, 1010);
+}
+
+#[test]
+fn golden_updown_fee_zero_bps_is_noop() {
+    let (dw, dl, fee) = compute_updown_fee(300, 150, Some(0)).unwrap();
+    assert_eq!(dw, 300);
+    assert_eq!(dl, 150);
+    assert_eq!(fee, 0);
+}
+
+#[test]
+fn golden_updown_fee_none_is_noop() {
+    let (dw, dl, fee) = compute_updown_fee(300, 150, None).unwrap();
+    assert_eq!(dw, 300);
+    assert_eq!(dl, 150);
+    assert_eq!(fee, 0);
+}
+
+#[test]
+fn golden_precision_fee_2pct() {
+    let (dist, fee) = compute_precision_fee(1000, Some(200)).unwrap();
+    assert_eq!(fee, 20);
+    assert_eq!(dist, 980);
+    assert_eq!(dist + fee, 1000); // conservation
+}
+
+#[test]
+fn golden_precision_fee_none() {
+    let (dist, fee) = compute_precision_fee(500, None).unwrap();
+    assert_eq!(fee, 0);
+    assert_eq!(dist, 500);
+}
+
+#[test]
+fn golden_precision_fee_zero_pot() {
+    let (dist, fee) = compute_precision_fee(0, Some(100)).unwrap();
+    assert_eq!(fee, 0);
+    assert_eq!(dist, 0);
+}
+
+#[test]
+fn golden_precision_fee_negative_pot() {
+    let (dist, fee) = compute_precision_fee(-10, Some(100)).unwrap();
+    assert_eq!(fee, 0);
+    assert_eq!(dist, -10); // negative pot passes through unchanged
+}
+
+// ─── Deviation math golden vectors ──────────────────────────────────────────
+
+#[test]
+fn golden_deviation_5pct_up() {
+    let bps = compute_deviation_bps(1_0500000, 1_0000000).unwrap();
+    assert_eq!(bps, 500);
+}
+
+#[test]
+fn golden_deviation_5pct_down() {
+    let bps = compute_deviation_bps(9500000, 1_0000000).unwrap();
+    assert_eq!(bps, 500);
+}
+
+#[test]
+fn golden_deviation_10pct() {
+    let bps = compute_deviation_bps(1_1000000, 1_0000000).unwrap();
+    assert_eq!(bps, 1000);
+}
+
+#[test]
+fn golden_deviation_exact_zero() {
+    let bps = compute_deviation_bps(1_0000000, 1_0000000).unwrap();
+    assert_eq!(bps, 0);
+}
+
+#[test]
+fn golden_deviation_tiny() {
+    // 0.01% deviation: diff=100, ref=1_0000000
+    // bps = 100 * 10000 / 1_0000000 = 0 (floor)
+    let bps = compute_deviation_bps(1_0000100, 1_0000000).unwrap();
+    assert_eq!(bps, 0);
+}
+
+// ─── Total pot golden vectors ───────────────────────────────────────────────
+
+#[test]
+fn golden_total_pot_updown() {
+    assert_eq!(total_pot_updown(300, 150), 450);
+    assert_eq!(total_pot_updown(0, 0), 0);
+    assert_eq!(total_pot_updown(1_000_000, 500_000), 1_500_000);
+}
+
+// ─── UpDown payout golden vectors ───────────────────────────────────────────
+
+#[test]
+fn golden_updown_price_up_two_winners() {
+    // Alice bets 100 Up, Bob bets 200 Up, Charlie bets 150 Down
+    // Start=1.0, Final=1.5 (Up), no fee
+    // pool_up=300, pool_down=150, total_distributable=450
+    // Alice: 100*450/300=150, Bob: 200*450/300=300, Charlie: 0
+    let positions = vec![
+        UpDownPosition { index: 0, amount: 100, side_up: true },
+        UpDownPosition { index: 1, amount: 200, side_up: true },
+        UpDownPosition { index: 2, amount: 150, side_up: false },
+    ];
+    let results = compute_updown_payouts(
+        &positions, 1_0000000, 1_5000000, 300, 150, None,
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 3);
+    // Alice
+    assert_eq!(results[0].payout, 150);
+    assert!(results[0].is_winner);
+    assert!(!results[0].is_refund);
+    // Bob
+    assert_eq!(results[1].payout, 300);
+    assert!(results[1].is_winner);
+    // Charlie
+    assert_eq!(results[2].payout, 0);
+    assert!(!results[2].is_winner);
+    // Conservation: sum(payouts) == total_pot
+    assert_eq!(results[0].payout + results[1].payout + results[2].payout, 450);
+}
+
+#[test]
+fn golden_updown_price_down_single_winner() {
+    // Alice Down 200, Bob Up 100
+    // Start=2.0, Final=1.0 (Down), no fee
+    // pool_up=100, pool_down=200, total_distributable=300
+    // Alice: 200*300/200=300, Bob: 0
+    let positions = vec![
+        UpDownPosition { index: 0, amount: 200, side_up: false },
+        UpDownPosition { index: 1, amount: 100, side_up: true },
+    ];
+    let results = compute_updown_payouts(
+        &positions, 2_0000000, 1_0000000, 100, 200, None,
+    )
+    .unwrap();
+
+    assert_eq!(results[0].payout, 300);
+    assert!(results[0].is_winner);
+    assert_eq!(results[1].payout, 0);
+    assert!(!results[1].is_winner);
+    assert_eq!(results[0].payout + results[1].payout, 300);
+}
+
+#[test]
+fn golden_updown_price_unchanged_refunds_all() {
+    let positions = vec![
+        UpDownPosition { index: 0, amount: 100, side_up: true },
+        UpDownPosition { index: 1, amount: 50, side_up: false },
+    ];
+    let results = compute_updown_payouts(
+        &positions, 1_0000000, 1_0000000, 100, 50, None,
+    )
+    .unwrap();
+
+    assert_eq!(results[0].payout, 100);
+    assert!(results[0].is_refund);
+    assert_eq!(results[1].payout, 50);
+    assert!(results[1].is_refund);
+    assert_eq!(results[0].payout + results[1].payout, 150);
+}
+
+#[test]
+fn golden_updown_one_sided_refunds_all() {
+    // Only Up pool filled, no Down — one-sided
+    let positions = vec![
+        UpDownPosition { index: 0, amount: 100, side_up: true },
+        UpDownPosition { index: 1, amount: 200, side_up: true },
+    ];
+    let results = compute_updown_payouts(
+        &positions, 1_0000000, 1_5000000, 300, 0, None,
+    )
+    .unwrap();
+
+    // One-sided: all refunded regardless of price movement
+    assert_eq!(results[0].payout, 100);
+    assert!(results[0].is_refund);
+    assert_eq!(results[1].payout, 200);
+    assert!(results[1].is_refund);
+}
+
+#[test]
+fn golden_updown_with_1pct_fee() {
+    // pool_up=300, pool_down=150, total=450, fee@100bps=4
+    // Alice Up 100: 100*(450-4)/300 = 100*446/300 = 148
+    let positions = vec![
+        UpDownPosition { index: 0, amount: 100, side_up: true },
+        UpDownPosition { index: 1, amount: 150, side_up: false },
+    ];
+    let results = compute_updown_payouts(
+        &positions, 1_0000000, 1_5000000, 300, 150, Some(100),
+    )
+    .unwrap();
+
+    // Alice: 100 * (300+150-4) / 300 = 100*446/300 = 148
+    assert_eq!(results[0].payout, 148);
+    assert!(results[0].is_winner);
+    // Charlie: 0
+    assert_eq!(results[1].payout, 0);
+    // Conservation: 148 + 0 = 148 winning payout, losers got 146-4=142 back via losing pool reduction
+    // Total distributed to winners+losing side = 148 + 0 from winners + losing_pool reduced = OK
+}
+
+#[test]
+fn golden_updown_empty_winning_pool_refunds() {
+    // Price up but no one bet Up — winning_pool=0, everyone refunded
+    let positions = vec![
+        UpDownPosition { index: 0, amount: 100, side_up: false },
+        UpDownPosition { index: 1, amount: 50, side_up: false },
+    ];
+    let results = compute_updown_payouts(
+        &positions, 1_0000000, 1_5000000, 0, 150, None,
+    )
+    .unwrap();
+
+    assert_eq!(results[0].payout, 100);
+    assert!(results[0].is_refund);
+    assert_eq!(results[1].payout, 50);
+    assert!(results[1].is_refund);
+}
+
+// ─── Precision winner determination golden vectors ──────────────────────────
+
+#[test]
+fn golden_precision_winners_single_clear_winner() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 2297, amount: 100, revealed: true },
+        PrecisionEntry { index: 1, predicted_price: 2300, amount: 150, revealed: true },
+        PrecisionEntry { index: 2, predicted_price: 2500, amount: 50, revealed: true },
+    ];
+    let result = find_precision_winners(&entries, 2298);
+    // Alice (diff=1) wins, Bob (diff=2) loses, Charlie (diff=202) loses
+    assert_eq!(result.winner_indices, vec![0]);
+    assert_eq!(result.total_pot, 300);
+    assert!(result.loser_indices.contains(&1));
+    assert!(result.loser_indices.contains(&2));
+}
+
+#[test]
+fn golden_precision_winners_two_way_tie() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 2100, amount: 100, revealed: true },
+        PrecisionEntry { index: 1, predicted_price: 2300, amount: 150, revealed: true },
+    ];
+    let result = find_precision_winners(&entries, 2200);
+    // Both diff=100
+    assert_eq!(result.winner_indices.len(), 2);
+    assert_eq!(result.total_pot, 250);
+}
+
+#[test]
+fn golden_precision_winners_exact_match() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 2250, amount: 100, revealed: true },
+        PrecisionEntry { index: 1, predicted_price: 2200, amount: 100, revealed: true },
+    ];
+    let result = find_precision_winners(&entries, 2250);
+    // Alice diff=0, Bob diff=50
+    assert_eq!(result.winner_indices, vec![0]);
+}
+
+#[test]
+fn golden_precision_winners_unrevealed_loses() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 2297, amount: 100, revealed: false },
+        PrecisionEntry { index: 1, predicted_price: 4000, amount: 100, revealed: true },
+    ];
+    let result = find_precision_winners(&entries, 2298);
+    // Alice unrevealed → auto-loser. Bob wins despite being further.
+    assert_eq!(result.winner_indices, vec![1]);
+}
+
+#[test]
+fn golden_precision_winners_all_unrevealed() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 0, amount: 100, revealed: false },
+        PrecisionEntry { index: 1, predicted_price: 0, amount: 50, revealed: false },
+    ];
+    let result = find_precision_winners(&entries, 2298);
+    assert!(result.winner_indices.is_empty());
+    assert_eq!(result.total_pot, 150);
+}
+
+#[test]
+fn golden_precision_winners_empty() {
+    let entries: Vec<PrecisionEntry> = vec![];
+    let result = find_precision_winners(&entries, 2298);
+    assert!(result.winner_indices.is_empty());
+    assert_eq!(result.total_pot, 0);
+}
+
+// ─── Pot splitting golden vectors ───────────────────────────────────────────
+
+#[test]
+fn golden_split_pot_even() {
+    let payouts = split_pot_among_winners(100, 2).unwrap();
+    assert_eq!(payouts, vec![50, 50]);
+}
+
+#[test]
+fn golden_split_pot_remainder_to_first() {
+    let payouts = split_pot_among_winners(100, 3).unwrap();
+    assert_eq!(payouts, vec![34, 33, 33]);
+    // Conservation
+    assert_eq!(payouts.iter().sum::<i128>(), 100);
+}
+
+#[test]
+fn golden_split_pot_large_remainder() {
+    let payouts = split_pot_among_winners(103, 5).unwrap();
+    assert_eq!(payouts, vec![23, 20, 20, 20, 20]);
+    assert_eq!(payouts.iter().sum::<i128>(), 103);
+}
+
+#[test]
+fn golden_split_pot_single_winner() {
+    let payouts = split_pot_among_winners(500, 1).unwrap();
+    assert_eq!(payouts, vec![500]);
+}
+
+#[test]
+fn golden_split_pot_zero_pot() {
+    let payouts = split_pot_among_winners(0, 3).unwrap();
+    assert!(payouts.is_empty());
+}
+
+#[test]
+fn golden_split_pot_zero_winners() {
+    let payouts = split_pot_among_winners(100, 0).unwrap();
+    assert!(payouts.is_empty());
+}
+
+// ─── Composite Precision payout golden vectors ──────────────────────────────
+
+#[test]
+fn golden_precision_payouts_single_winner_no_fee() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 2297, amount: 100, revealed: true },
+        PrecisionEntry { index: 1, predicted_price: 2300, amount: 150, revealed: true },
+        PrecisionEntry { index: 2, predicted_price: 2500, amount: 50, revealed: true },
+    ];
+    let results = compute_precision_payouts(&entries, 2298, None).unwrap();
+
+    assert_eq!(results.len(), 3);
+    // Alice wins entire pot
+    assert_eq!(results[0].payout, 300);
+    assert!(results[0].is_winner);
+    // Bob loses
+    assert_eq!(results[1].payout, 0);
+    assert!(!results[1].is_winner);
+    // Charlie loses
+    assert_eq!(results[2].payout, 0);
+    assert!(!results[2].is_winner);
+    // Conservation
+    assert_eq!(results.iter().map(|r| r.payout).sum::<i128>(), 300);
+}
+
+#[test]
+fn golden_precision_payouts_two_way_tie_no_fee() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 2100, amount: 100, revealed: true },
+        PrecisionEntry { index: 1, predicted_price: 2300, amount: 150, revealed: true },
+        PrecisionEntry { index: 2, predicted_price: 2500, amount: 50, revealed: true },
+    ];
+    let results = compute_precision_payouts(&entries, 2200, None).unwrap();
+
+    // Alice and Bob tie (both diff 100)
+    assert_eq!(results.len(), 3);
+    // Total pot = 300, 2 winners → each gets 150
+    assert_eq!(results[0].payout, 150);
+    assert!(results[0].is_winner);
+    assert_eq!(results[1].payout, 150);
+    assert!(results[1].is_winner);
+    assert_eq!(results[2].payout, 0);
+    assert!(!results[2].is_winner);
+    // Conservation
+    assert_eq!(
+        results.iter().map(|r| r.payout).sum::<i128>(),
+        300
+    );
+}
+
+#[test]
+fn golden_precision_payouts_all_unrevealed_refunds() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 0, amount: 100, revealed: false },
+        PrecisionEntry { index: 1, predicted_price: 0, amount: 50, revealed: false },
+    ];
+    let results = compute_precision_payouts(&entries, 2298, None).unwrap();
+
+    assert_eq!(results[0].payout, 100);
+    assert!(results[0].is_refund);
+    assert_eq!(results[1].payout, 50);
+    assert!(results[1].is_refund);
+    // Conservation: full refunds
+    assert_eq!(results.iter().map(|r| r.payout).sum::<i128>(), 150);
+}
+
+#[test]
+fn golden_precision_payouts_with_1pct_fee() {
+    let entries = vec![
+        PrecisionEntry { index: 0, predicted_price: 2250, amount: 100, revealed: true },
+        PrecisionEntry { index: 1, predicted_price: 2200, amount: 100, revealed: true },
+    ];
+    // 1% fee on total_pot=200 → fee=2, distributable=198
+    let results = compute_precision_payouts(&entries, 2250, Some(100)).unwrap();
+
+    // Alice wins alone, gets distributable=198
+    assert_eq!(results[0].payout, 198);
+    assert!(results[0].is_winner);
+    assert_eq!(results[1].payout, 0);
+    // Conservation: 198 + 2(fee) = 200 ✓
+    assert_eq!(results.iter().map(|r| r.payout).sum::<i128>(), 198);
+}
+
+#[test]
+fn golden_precision_payouts_empty() {
+    let entries: Vec<PrecisionEntry> = vec![];
+    let results = compute_precision_payouts(&entries, 2298, None).unwrap();
+    assert!(results.is_empty());
+}
+
+// ─── Conservation invariant: UpDown ─────────────────────────────────────────
+
+#[test]
+fn golden_updown_conservation_invariant() {
+    // Run 10 different scenarios and verify conservation for each
+    let scenarios = vec![
+        // (pool_up, pool_down, start_price, final_price, fee_bps)
+        (300, 150, 1_0000000u128, 1_5000000u128, None),
+        (300, 150, 1_0000000u128, 1_5000000u128, Some(100u32)),
+        (100, 200, 2_0000000u128, 1_0000000u128, None),
+        (100, 200, 2_0000000u128, 1_0000000u128, Some(500u32)),
+        (500, 500, 1_0000000u128, 1_0000000u128, None), // unchanged
+        (500, 500, 1_0000000u128, 1_5000000u128, Some(50u32)),
+        (0, 100, 1_0000000u128, 1_5000000u128, None), // one-sided
+        (100, 0, 1_0000000u128, 5000000u128, None), // one-sided
+        (1, 1000, 1_0000000u128, 1_5000000u128, Some(50u32)), // thin winning
+        (1000, 1, 1_0000000u128, 5000000u128, Some(100u32)), // thin losing
+    ];
+
+    for (pool_up, pool_down, start, final_price, fee_bps) in &scenarios {
+        let direction = classify_price_direction(*start, *final_price);
+        let one_sided = is_one_sided_pool(*pool_up, *pool_down);
+
+        let positions = vec![
+            UpDownPosition { index: 0, amount: *pool_up, side_up: true },
+            UpDownPosition { index: 1, amount: *pool_down, side_up: false },
+        ];
+        let results =
+            compute_updown_payouts(&positions, *start, *final_price, *pool_up, *pool_down, *fee_bps)
+                .unwrap();
+
+        let sum_payouts: i128 = results.iter().map(|r| r.payout).sum();
+
+        if direction == PriceDirection::Unchanged || one_sided || {
+            // winning_pool == 0 edge case
+            let wp = if direction == PriceDirection::Up { *pool_up } else { *pool_down };
+            wp == 0
+        } {
+            // Refund scenario: sum_payouts == total_pot
+            assert_eq!(
+                sum_payouts,
+                *pool_up + *pool_down,
+                "Refund scenario: conservation failed for ({}, {}, {}, {})",
+                pool_up, pool_down, start, final_price
+            );
+        } else {
+            // Competitive scenario: sum_payouts + fee == total_pot
+            let (_, _, fee) = compute_updown_fee(
+                if direction == PriceDirection::Up { *pool_up } else { *pool_down },
+                if direction == PriceDirection::Up { *pool_down } else { *pool_up },
+                *fee_bps,
+            )
+            .unwrap();
+            assert_eq!(
+                sum_payouts + fee,
+                *pool_up + *pool_down,
+                "Competitive scenario: conservation failed"
+            );
+        }
+    }
+}
+
+// ─── Conservation invariant: Precision ──────────────────────────────────────
+
+#[test]
+fn golden_precision_conservation_invariant() {
+    let scenarios: Vec<(Vec<PrecisionEntry>, u128, Option<u32>)> = vec![
+        // Single winner, no fee
+        (
+            vec![
+                PrecisionEntry { index: 0, predicted_price: 100, amount: 200, revealed: true },
+                PrecisionEntry { index: 1, predicted_price: 300, amount: 100, revealed: true },
+            ],
+            100, None,
+        ),
+        // Two-way tie, with fee
+        (
+            vec![
+                PrecisionEntry { index: 0, predicted_price: 2100, amount: 100, revealed: true },
+                PrecisionEntry { index: 1, predicted_price: 2300, amount: 150, revealed: true },
+            ],
+            2200, Some(100),
+        ),
+        // All unrevealed — refund
+        (
+            vec![
+                PrecisionEntry { index: 0, predicted_price: 0, amount: 50, revealed: false },
+                PrecisionEntry { index: 1, predicted_price: 0, amount: 100, revealed: false },
+            ],
+            2298, None,
+        ),
+        // Mixed revealed/unrevealed, no fee
+        (
+            vec![
+                PrecisionEntry { index: 0, predicted_price: 2297, amount: 100, revealed: true },
+                PrecisionEntry { index: 1, predicted_price: 0, amount: 200, revealed: false },
+            ],
+            2298, None,
+        ),
+        // Empty entries
+        (vec![], 2298, None),
+    ];
+
+    for (entries, final_price, fee_bps) in &scenarios {
+        let results = compute_precision_payouts(entries, *final_price, *fee_bps).unwrap();
+        let sum_payouts: i128 = results.iter().map(|r| r.payout).sum();
+        let total_stakes: i128 = entries.iter().map(|e| e.amount).sum();
+
+        if total_stakes > 0 {
+            // sum_payouts <= total_stakes (fee may be deducted)
+            assert!(
+                sum_payouts <= total_stakes,
+                "Precision payouts exceed total stakes: {} > {}",
+                sum_payouts, total_stakes
+            );
+            // No negative payouts
+            for r in &results {
+                assert!(r.payout >= 0, "Negative payout detected");
+            }
+        } else {
+            assert_eq!(sum_payouts, 0);
+        }
+    }
+=======
+#[test]
+fn test_precision_payout_policy_config() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // Default policy should be 0 (Equal)
+    assert_eq!(client.get_precision_payout_policy(), 0);
+
+    // Set to 1 (StakeWeighted)
+    client.set_precision_payout_policy(&1);
+    assert_eq!(client.get_precision_payout_policy(), 1);
+
+    // Reject invalid policy value
+    let res = client.try_set_precision_payout_policy(&2);
+    assert_eq!(res, Err(Ok(ContractError::InvalidMode)));
+    assert_eq!(client.get_precision_payout_policy(), 1);
+
+    // Set back to 0 (Equal)
+    client.set_precision_payout_policy(&0);
+    assert_eq!(client.get_precision_payout_policy(), 0);
+}
+
+#[test]
+fn test_resolve_precision_stake_weighted_policy() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let user_c = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // Set policy to 1 (StakeWeighted)
+    client.set_precision_payout_policy(&1);
+
+    client.mint_initial(&user_a);
+    client.mint_initial(&user_b);
+    client.mint_initial(&user_c);
+
+    // Determine user sorting lexicographically
+    let mut sorted_users = std::vec![user_a.clone(), user_b.clone(), user_c.clone()];
+    sorted_users.sort();
+    let lowest_user = sorted_users[0].clone();
+    let middle_user = sorted_users[1].clone();
+    let highest_user = sorted_users[2].clone();
+
+    // Create Precision round (mode 1)
+    client.create_round(&1_0000000, &Some(1));
+
+    // Place predictions (exact guess 1500 for A and B, 2000 for C)
+    client.place_precision_prediction(&lowest_user, &100_0000000i128, &1500u128); // Winner A
+    client.place_precision_prediction(&middle_user, &200_0000000i128, &1500u128); // Winner B
+    client.place_precision_prediction(&highest_user, &300_0000000i128, &2000u128); // Loser C
+
+    // Advance past betting window
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 20;
+    });
+
+    // Resolve at 1500
+    client.resolve_round(&OraclePayload {
+        price: 1500u128,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+        attestation: None,
+    });
+
+    // Total pot = 100 + 200 + 300 = 600. Winning stakes = 300.
+    // User A should get (100 * 600) / 300 = 200.
+    // User B should get (200 * 600) / 300 = 400.
+    // User C should get 0.
+    assert_eq!(
+        client.balance(&lowest_user),
+        1000_0000000 - 100_0000000 + 200_0000000
+    );
+    assert_eq!(
+        client.balance(&middle_user),
+        1000_0000000 - 200_0000000 + 400_0000000
+    );
+    assert_eq!(client.balance(&highest_user), 1000_0000000 - 300_0000000);
+
+    // Verify resolved event has the policy code 1 (StakeWeighted) in the 5th element
+    let events = env.events().all();
+    let resolved_event = events
+        .iter()
+        .find(|e| {
+            let (_contract, topics, _data) = e;
+            topics.len() == 2
+                && topics.get(0).unwrap().try_into_val(&env) == Ok(symbol_short!("round"))
+                && topics.get(1).unwrap().try_into_val(&env) == Ok(symbol_short!("resolved"))
+        })
+        .unwrap();
+
+    let resolved_data: (u64, u128, u32, Option<u32>, u32) =
+        resolved_event.2.clone().try_into_val(&env).unwrap();
+    assert_eq!(resolved_data.4, 1); // policy value == 1 (StakeWeighted)
+}
+
+#[test]
+fn test_precision_stake_weighted_conservation_remainder() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &oracle);
+
+    // Set policy to 1 (StakeWeighted)
+    client.set_precision_payout_policy(&1);
+
+    client.mint_initial(&user_a);
+    client.mint_initial(&user_b);
+
+    let mut sorted_users = std::vec![user_a.clone(), user_b.clone()];
+    sorted_users.sort();
+    let lowest_user = sorted_users[0].clone();
+    let other_user = sorted_users[1].clone();
+
+    client.create_round(&1_0000000, &Some(1));
+
+    // Place predictions (Total pot = 100)
+    // Lowest user: stake 100. Other user: stake 200. Total = 300.
+    // Proportional payouts from pot 100:
+    // lowest: (100 * 100) / 300 = 33
+    // other: (200 * 100) / 300 = 66
+    // Sum = 99. Remainder = 1.
+    // The remainder goes to the lexicographically lowest winner (lowest_user).
+    // Final payouts: lowest_user = 34, other_user = 66.
+    client.place_precision_prediction(&lowest_user, &100i128, &1500u128);
+    client.place_precision_prediction(&other_user, &200i128, &1500u128);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 20;
+    });
+
+    client.resolve_round(&OraclePayload {
+        price: 1500u128,
+        timestamp: env.ledger().timestamp(),
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+        attestation: None,
+    });
+
+    assert_eq!(
+        client.balance(&lowest_user),
+        1000_0000000 - 100i128 + 34i128
+    );
+    assert_eq!(client.balance(&other_user), 1000_0000000 - 200i128 + 66i128);
 }

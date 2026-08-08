@@ -8,100 +8,83 @@ use soroban_sdk::contracterror;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
-    /// Contract has already been initialized
     AlreadyInitialized = 1,
-    /// Admin address not set - call initialize first
     AdminNotSet = 2,
-    /// Oracle address not set - call initialize first
     OracleNotSet = 3,
-    /// Bet amount must be greater than zero
     InvalidBetAmount = 6,
-    /// No active round exists
     NoActiveRound = 7,
-    /// Round has already ended
     RoundEnded = 8,
-    /// User has insufficient balance
     InsufficientBalance = 9,
-    /// User has already placed a bet in this round
     AlreadyBet = 10,
-    /// Arithmetic overflow occurred
     Overflow = 11,
-    /// Invalid price value
     InvalidPrice = 12,
-    /// Invalid duration value
     InvalidDuration = 13,
-    /// Invalid round mode (must be 0 or 1)
     InvalidMode = 14,
-    /// Wrong prediction type for current round mode
     WrongModeForPrediction = 15,
-    /// Round has not reached end_ledger yet
     RoundNotEnded = 16,
-
-    /// Oracle data is too old (STALE)
     StaleOracleData = 18,
-    /// Oracle payload round_id doesn't match ActiveRound
     InvalidOracleRound = 19,
-    /// An active round already exists and cannot be overwritten
     RoundAlreadyActive = 20,
-
-    /// Contract is paused for emergency recovery
     ContractPaused = 22,
-    /// One or more window values exceed configured maximum bounds
     WindowOutOfRange = 23,
-    /// Oracle payload timestamp is in the future
     FutureOracleData = 24,
-    /// Arithmetic overflow in payout accumulation — no funds moved
     PayoutOverflow = 25,
-    /// Round cannot be cancelled (no active round or already resolved)
     RoundNotCancellable = 27,
-    /// Bet amount exceeds the configured maximum stake
     StakeExceedsMax = 28,
-    /// User's cumulative exposure in this round exceeds the configured cap
     ExposureCapExceeded = 29,
-    /// Pending winnings accumulation would exceed the configured cap
     PendingWinningsCapExceeded = 30,
-    /// Start price is outside the allowed range
     InvalidStartPrice = 31,
-    /// Oracle payload nonce was already consumed for this round (replay)
     OracleNonceReused = 33,
-    /// Minimum participants value is out of valid range (must be 1–10000)
     InvalidMinParticipants = 35,
-    /// Precision participant cap is out of range (must be 1–10000)
     InvalidPrecisionCap = 38,
-    /// Precision round has reached the configured participant cap
     PrecisionCapExceeded = 39,
-    /// Oracle final price deviates beyond configured threshold
     OracleDeviationExceeded = 41,
-    /// Stored schema version is unknown or unsupported by this contract build
     UnsupportedSchemaVersion = 42,
-
-    /// Migration cannot run while a round is active
     MigrationActiveRound = 44,
-    /// Commitment for precision prediction not found
     CommitmentNotFound = 45,
-    /// Precision prediction has already been revealed
     AlreadyRevealed = 46,
-    /// Attempted to reveal prediction outside the valid window
     InvalidRevealWindow = 47,
-    /// Revealed prediction hash does not match committed hash
     HashMismatch = 48,
-    /// Oracle payload network_id does not match the runtime network
     OracleNetworkMismatch = 49,
-    /// Protocol fee bps is outside the allowed range (must be in `1..=MAX_PROTOCOL_FEE_BPS`)
     InvalidProtocolFeeBps = 51,
-
-    /// Rate limit for minting in the current ledger has been exceeded
     MintLimitExceeded = 53,
-    /// No pending oracle rotation proposal to accept or cancel
     NoPendingRotation = 54,
+    /// Oracle rotation delay has not elapsed yet (must wait MIN_ROTATION_DELAY_SECONDS)
+    RotationDelayNotElapsed = 55,
     /// Invalid archive retention limit
     InvalidArchiveRetention = 62,
-    /// Commitment hash is malformed (e.g. the all-zero placeholder)
     InvalidCommitment = 63,
-    /// Reveal salt fails minimum entropy rules (all-zero or constant-byte)
     InvalidSalt = 64,
-    /// `create_next_from_template` called with no round template configured
     NoRoundTemplate = 65,
+    /// Pending winnings entry exists but has not yet reached the configured
+    /// expiry threshold — caller must wait before reclaiming.
+    PendingWinningsNotExpired = 66,
+    /// Epoch mint budget has been fully consumed
+    EpochBudgetExceeded = 67,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
-    OracleNotLive = 66,
+    OracleNotLive = 68,
+    /// Invalid precision payout policy
+    InvalidPayoutPolicy = 69,
+    /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
+    BelowMinBet = 70,
+    /// Multi-feed resolution: fewer observations survived outlier rejection
+    /// than the configured quorum threshold.
+    InsufficientOracleQuorum = 71,
+    /// Multi-feed resolution: payload contains fewer observations than the
+    /// configured minimum.
+    TooFewObservations = 72,
+    /// Multi-feed resolution: outlier observations would dominate the result
+    /// (too many rejected, cannot form quorum).
+    OracleOutlierRejected = 73,
+    /// Multi-feed payload contains duplicate source identifiers.
+    DuplicateOracleSource = 74,
+    /// Multi-feed payload has observations that are not sorted or sources
+    /// are out of expected range.
+    InvalidObservationOrder = 75,
+    /// The requested data key is not allowed for batch TTL touch operations.
+    UnsupportedDataKeyForTtlTouch = 76,
+    /// Pending winnings entry does not exist or expiry is not configured.
+    PendingWinningsNotFound = 77,
+    /// Pending winnings expiry is not configured (value is 0).
+    ExpiryNotConfigured = 78,
 }
