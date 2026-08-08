@@ -3,6 +3,7 @@
 
 mod archive_retention;
 mod attestation;
+mod access_control;
 mod betting;
 mod cei_ordering;
 mod chaos_recovery;
