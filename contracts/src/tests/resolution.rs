@@ -4822,7 +4822,8 @@ fn golden_precision_conservation_invariant() {
             assert_eq!(sum_payouts, 0);
         }
     }
-=======
+}
+
 #[test]
 fn test_precision_payout_policy_config() {
     let env = Env::default();

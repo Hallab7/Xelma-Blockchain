@@ -2,18 +2,12 @@
 extern crate alloc;
 use alloc::vec::Vec as StdVec;
 use crate::errors::ContractError;
-use crate::types::{
-    ConfigChangeKind, ConfigChangePayload, DataKey, PendingWinningsUpdatedAtKey, Round, RoundPhase,
-};
+use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, PendingWinningsUpdatedAtKey, Round, RoundPhase};
 use soroban_sdk::{symbol_short, Address, Env, IntoVal, Symbol, Val, Vec};
 
 pub const DEFAULT_PENDING_WINNINGS_EXPIRY: u32 = 0; // 0 = disabled
 pub const MIN_PENDING_WINNINGS_EXPIRY: u32 = 128;   // ~10 min at 5s ledgers
 pub const MAX_PENDING_WINNINGS_EXPIRY: u32 = 1_000_000; // ~58 days
-use crate::types::{ConfigChangeKind, ConfigChangePayload, DataKeyCore, DataKeyScoped, Round, RoundPhase};
-use soroban_sdk::{symbol_short, Address, Env, IntoVal, Symbol, Val, Vec};
-
-// ─── DataKey overflow workaround (DataKey has 51 variants, XDR limit is 50) ──
 // Moved out of DataKey to get under the limit.
 
 pub fn _migrated_key(env: &Env) -> Symbol {
@@ -105,7 +99,6 @@ pub const MAX_TWAP_WINDOW_SAMPLES: u32 = 64;
 
 /// Bumps/extends the TTL of the given persistent storage key if its remaining TTL
 /// is less than the threshold. Enforces rent policy (Issue #142).
-pub fn _extend_persistent_ttl<K: IntoVal<Env, Val>>(env: &Env, key: &K) {
 pub fn _extend_persistent_ttl<T: IntoVal<Env, Val>>(env: &Env, key: &T) {
     if env.storage().persistent().has(key) {
         env.storage()

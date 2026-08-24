@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Test modules for the XLM Price Prediction Market contract.
 
+mod adversarial;
 mod archive_retention;
 mod attestation;
 mod access_control;

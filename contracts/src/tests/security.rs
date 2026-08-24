@@ -1811,7 +1811,7 @@ fn test_heartbeat_gate_strict_on_blocks_when_stale_past_grace() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -1887,7 +1887,7 @@ fn test_heartbeat_gate_blocks_offline_status_in_strict_mode() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -1919,7 +1919,7 @@ fn test_heartbeat_gate_blocks_no_heartbeat_in_strict_mode() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -2033,7 +2033,7 @@ fn test_heartbeat_gate_override_is_one_shot() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -2115,7 +2115,7 @@ fn test_heartbeat_gate_grace_period_blocks_after_grace_expires() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -2192,7 +2192,7 @@ fn test_heartbeat_gate_degraded_stale_past_grace_blocked() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -3751,7 +3751,7 @@ fn test_heartbeat_gate_strict_on_blocks_when_stale_past_grace() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -3827,7 +3827,7 @@ fn test_heartbeat_gate_blocks_offline_status_in_strict_mode() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -3859,7 +3859,7 @@ fn test_heartbeat_gate_blocks_no_heartbeat_in_strict_mode() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -3976,7 +3976,7 @@ fn test_heartbeat_gate_override_is_one_shot() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -4058,7 +4058,7 @@ fn test_heartbeat_gate_grace_period_blocks_after_grace_expires() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -4135,7 +4135,7 @@ fn test_heartbeat_gate_degraded_stale_past_grace_blocked() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -4168,7 +4168,7 @@ fn test_heartbeat_gate_hblocked_event_emitted() {
         confidence: None,
         attestation: None,    });
 
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -5602,7 +5602,7 @@ fn test_heartbeat_gate_strict_on_blocks_when_stale_past_grace() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -5678,7 +5678,7 @@ fn test_heartbeat_gate_blocks_offline_status_in_strict_mode() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -5710,7 +5710,7 @@ fn test_heartbeat_gate_blocks_no_heartbeat_in_strict_mode() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -5820,7 +5820,7 @@ fn test_heartbeat_gate_override_is_one_shot() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -5902,7 +5902,7 @@ fn test_heartbeat_gate_grace_period_blocks_after_grace_expires() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -5979,7 +5979,7 @@ fn test_heartbeat_gate_degraded_stale_past_grace_blocked() {
         contract_addr: contract_id.clone(),
         confidence: None,
     });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -7416,7 +7416,7 @@ fn test_heartbeat_gate_strict_on_blocks_when_stale_past_grace() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -7492,7 +7492,7 @@ fn test_heartbeat_gate_blocks_offline_status_in_strict_mode() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -7524,7 +7524,7 @@ fn test_heartbeat_gate_blocks_no_heartbeat_in_strict_mode() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -7641,7 +7641,7 @@ fn test_heartbeat_gate_override_is_one_shot() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -7723,7 +7723,7 @@ fn test_heartbeat_gate_grace_period_blocks_after_grace_expires() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -7800,7 +7800,7 @@ fn test_heartbeat_gate_degraded_stale_past_grace_blocked() {
         contract_addr: contract_id.clone(),
         confidence: None,
         attestation: None,    });
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
@@ -7833,7 +7833,7 @@ fn test_heartbeat_gate_hblocked_event_emitted() {
         confidence: None,
         attestation: None,    });
 
-    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
+    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
 }
 
 #[test]
