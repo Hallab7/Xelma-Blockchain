@@ -26,6 +26,7 @@ mod leaderboard;
 mod queries;
 mod settlement;
 mod storage;
+mod math_common;
 mod settlement_math;
 mod types;
 

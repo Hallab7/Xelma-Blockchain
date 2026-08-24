@@ -44,6 +44,9 @@ jobs:
       - name: Run cargo test
         run: cargo test --workspace --verbose --locked
 
+      - name: Run deterministic replay parity suite (Issue #369)
+        run: cargo test -p xelma-replay --locked -- --nocapture
+
       - name: Run emergency claims-only drill test
         run: cargo test --package xelma-contract --lib tests::drill --locked -- --nocapture
 

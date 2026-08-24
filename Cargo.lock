@@ -2145,6 +2145,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xelma-replay"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
