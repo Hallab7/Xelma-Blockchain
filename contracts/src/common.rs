@@ -74,7 +74,7 @@ pub const MAX_ORACLE_TIMESTAMP_SKEW: u64 = 86_400;
 
 // ─── Protocol fee ────────────────────────────────────────────────
 pub const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
-pub const BPS_DENOMINATOR: i128 = 10_000;
+pub use crate::math_common::{payout_add, payout_mul, BPS_DENOMINATOR};
 
 // ─── Storage schema versioning ───────────────────────────────────────────────
 pub const CURRENT_SCHEMA_VERSION: u32 = 3;
@@ -137,17 +137,6 @@ pub fn sort_addresses(addresses: Vec<Address>) -> Vec<Address> {
         sorted.push_back(addr);
     }
     sorted
-}
-
-/// Checked addition for payout accumulation.
-#[inline(always)]
-pub fn payout_add(a: i128, b: i128) -> Result<i128, ContractError> {
-    a.checked_add(b).ok_or(ContractError::PayoutOverflow)
-}
-
-#[inline(always)]
-pub fn payout_mul(a: i128, b: i128) -> Result<i128, ContractError> {
-    a.checked_mul(b).ok_or(ContractError::PayoutOverflow)
 }
 
 /// Accumulates `amount` into a user's pending winnings, enforcing the cap if set (Issue #120).

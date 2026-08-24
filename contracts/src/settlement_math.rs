@@ -11,7 +11,7 @@
 
 use alloc::vec::Vec;
 
-use crate::common::{payout_add, payout_mul, BPS_DENOMINATOR};
+use crate::math_common::{payout_add, payout_mul, BPS_DENOMINATOR};
 use crate::errors::ContractError;
 
 // ─── Price direction ─────────────────────────────────────────────────────────
