@@ -68,6 +68,38 @@ Test distribution:
 | `security.rs` | 4 | Oracle freshness, future timestamp, round-id replay, valid payload |
 | `storage_benchmarks.rs` | 5 | Indexed key writes and resolution cleanup |
 | `windows.rs` | 13 | Window bounds, timing, auth, precision window enforcement |
+| `adversarial/` | 13 | Economic attack simulations: sybil faucet, sniping, oracle griefing, fee gaming (Issue #372) |
+
+## Adversarial Simulation Suite (Issue #372)
+
+A first-class red-team suite lives at `contracts/src/tests/adversarial/` and scripts
+economic attacks with deterministic seed `3722026`:
+
+| Scenario | Defense | Residual risk |
+| --- | --- | --- |
+| Sybil faucet (mint limit) | `MintLimitExceeded` | none when limit configured |
+| Sybil faucet (epoch budget) | `EpochBudgetExceeded` | none when budget configured |
+| Last-ledger sniping (UpDown) | `RoundEnded` (close buffer) | none when close_buffer configured |
+| Last-ledger sniping (Precision) | `RoundEnded` (close buffer) | none when close_buffer configured |
+| Precision spam commits | `PrecisionCapExceeded` | none when cap configured |
+| Oracle heartbeat griefing | `OracleNotLive` | admin override available |
+| Oracle nonce replay | `OracleNonceReused` | none |
+| Cross-round payload replay | `InvalidOracleRound` | none |
+| Stale oracle timestamp griefing | `StaleOracleData` | none |
+| Fee gaming (mid-round schedule) | Timelock (pending config only) | none |
+| Exposure cap boundary | `ExposureCapExceeded` | sybil bypass (accepted) |
+| Double-claim attack | idempotent zero payout | none |
+| Mode confusion | `WrongModeForPrediction` | none |
+
+Run locally:
+
+```text
+./scripts/run_adversarial_suite.sh
+```
+
+Reports are written to `adversarial-reports/adversarial-report.{md,json}`.
+Three CI-critical scenarios run in the default `ci.yml` rust-test job; the full
+suite (13 scenarios) runs nightly via `.github/workflows/nightly-adversarial.yml`.
 
 ## Threat Model
 
