@@ -14,6 +14,29 @@ use alloc::vec::Vec;
 use crate::math_common::{payout_add, payout_mul, BPS_DENOMINATOR};
 use crate::errors::ContractError;
 
+/// Payout policy for Precision mode
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum PrecisionPayoutPolicy {
+    Equal = 0,         // Split payout pool equally among winners (default)
+    StakeWeighted = 1, // Split payout pool proportionally to winner stakes
+}
+
+/// Scoring mode for Precision winner determination
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum PrecisionScoringMode {
+    AbsoluteDistance = 0, // Score = |predicted_price - final_price|
+    RelativeDistance = 1, // Score = |predicted_price - final_price| * 10_000 / final_price (basis points)
+}
+
+/// Scoring policy for Precision mode including scoring metric and optional confidence band tolerance
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrecisionScoringPolicy {
+    pub mode: PrecisionScoringMode,
+    pub confidence_band: Option<u128>,
+}
+
 // ─── Price direction ─────────────────────────────────────────────────────────
 
 /// Outcome of comparing the oracle settlement price against the round's
@@ -153,19 +176,30 @@ pub struct PrecisionWinnersResult {
     pub loser_indices: Vec<usize>,
 }
 
-/// Finds the closest prediction(s) to `final_price`.
-///
-/// Returns `PrecisionWinnersResult` with winner/loser indices.  Ties are
-/// resolved by including all entries with the same minimum absolute
-/// difference.  Only revealed entries can win; unrevealed entries are
-/// automatically losers.
+/// Finds the closest prediction(s) to `final_price` under default absolute distance scoring.
 pub fn find_precision_winners(
     entries: &[PrecisionEntry],
     final_price: u128,
 ) -> PrecisionWinnersResult {
-    let mut winner_indices: Vec<usize> = Vec::new();
+    find_precision_winners_with_policy(
+        entries,
+        final_price,
+        PrecisionScoringPolicy {
+            mode: PrecisionScoringMode::AbsoluteDistance,
+            confidence_band: None,
+        },
+    )
+}
+
+/// Finds precision winners given a explicit `PrecisionScoringPolicy` (Absolute vs Relative distance, optional confidence band).
+pub fn find_precision_winners_with_policy(
+    entries: &[PrecisionEntry],
+    final_price: u128,
+    policy: PrecisionScoringPolicy,
+) -> PrecisionWinnersResult {
     let mut total_pot: i128 = 0;
-    let mut min_diff: Option<u128> = None;
+    let mut scores: Vec<(usize, u128)> = Vec::new();
+    let mut min_score: Option<u128> = None;
 
     for entry in entries {
         total_pot = total_pot.saturating_add(entry.amount);
@@ -174,26 +208,44 @@ pub fn find_precision_winners(
             continue;
         }
 
-        let diff = if entry.predicted_price >= final_price {
+        let abs_diff = if entry.predicted_price >= final_price {
             entry.predicted_price - final_price
         } else {
             final_price - entry.predicted_price
         };
 
-        match min_diff {
-            None => {
-                min_diff = Some(diff);
-                winner_indices.push(entry.index);
-            }
-            Some(current_min) => {
-                if diff < current_min {
-                    min_diff = Some(diff);
-                    winner_indices.clear();
-                    winner_indices.push(entry.index);
-                } else if diff == current_min {
-                    winner_indices.push(entry.index);
+        let score = match policy.mode {
+            PrecisionScoringMode::AbsoluteDistance => abs_diff,
+            PrecisionScoringMode::RelativeDistance => {
+                if final_price > 0 {
+                    abs_diff.saturating_mul(10_000) / final_price
+                } else {
+                    abs_diff
                 }
-                // diff > current_min: this entry is a loser, skip
+            }
+        };
+
+        scores.push((entry.index, score));
+
+        match min_score {
+            None => min_score = Some(score),
+            Some(cur_min) => {
+                if score < cur_min {
+                    min_score = Some(score);
+                }
+            }
+        }
+    }
+
+    let mut winner_indices: Vec<usize> = Vec::new();
+    if let Some(best) = min_score {
+        for &(idx, score) in &scores {
+            let is_winner = match policy.confidence_band {
+                None => score == best,
+                Some(band) => score <= band || score <= best.saturating_add(band),
+            };
+            if is_winner {
+                winner_indices.push(idx);
             }
         }
     }
@@ -215,12 +267,10 @@ pub fn find_precision_winners(
 
 // ─── Precision pot splitting ─────────────────────────────────────────────────
 
-/// Splits `distributable` among `winner_count` winners.
+/// Splits `distributable` among `winner_count` winners equally.
 ///
 /// The remainder (distributable % winner_count) is assigned to the first
-/// winner.  Every winner receives at least `distributable / winner_count`.
-///
-/// Returns a vector of length `winner_count` with each winner's payout.
+/// winner. Every winner receives at least `distributable / winner_count`.
 pub fn split_pot_among_winners(
     distributable: i128,
     winner_count: usize,
@@ -245,6 +295,53 @@ pub fn split_pot_among_winners(
     }
     Ok(payouts)
 }
+
+/// Splits `distributable` proportionally according to winner stakes.
+///
+/// Integer remainder is allocated to the first winner for exact conservation.
+pub fn split_pot_stake_weighted(
+    distributable: i128,
+    winner_stakes: &[i128],
+) -> Result<Vec<i128>, ContractError> {
+    if winner_stakes.is_empty() || distributable <= 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut total_winner_stake: i128 = 0;
+    for &stake in winner_stakes {
+        total_winner_stake = total_winner_stake
+            .checked_add(stake)
+            .ok_or(ContractError::Overflow)?;
+    }
+
+    if total_winner_stake == 0 {
+        return split_pot_among_winners(distributable, winner_stakes.len());
+    }
+
+    let mut payouts = Vec::new();
+    let mut total_allocated = 0i128;
+
+    for &stake in winner_stakes {
+        let payout = payout_mul(stake, distributable)? / total_winner_stake;
+        payouts.push(payout);
+        total_allocated = total_allocated
+            .checked_add(payout)
+            .ok_or(ContractError::Overflow)?;
+    }
+
+    let remainder = distributable
+        .checked_sub(total_allocated)
+        .ok_or(ContractError::Overflow)?;
+
+    if remainder > 0 && !payouts.is_empty() {
+        payouts[0] = payouts[0]
+            .checked_add(remainder)
+            .ok_or(ContractError::Overflow)?;
+    }
+
+    Ok(payouts)
+}
+
 
 // ─── Composite: compute full UpDown payout vector ────────────────────────────
 
@@ -354,16 +451,32 @@ pub struct PrecisionPayoutEntry {
     pub is_refund: bool,
 }
 
-/// Computes the full payout vector for a Precision round.
-///
-/// Handles the all-unrevealed refund case, competitive settlement with
-/// winner-determination, and the remainder-to-first-winner policy.
 pub fn compute_precision_payouts(
     entries: &[PrecisionEntry],
     final_price: u128,
     fee_bps: Option<u32>,
 ) -> Result<Vec<PrecisionPayoutEntry>, ContractError> {
-    let result = find_precision_winners(entries, final_price);
+    compute_precision_payouts_with_policy(
+        entries,
+        final_price,
+        fee_bps,
+        PrecisionScoringPolicy {
+            mode: PrecisionScoringMode::AbsoluteDistance,
+            confidence_band: None,
+        },
+        PrecisionPayoutPolicy::Equal,
+    )
+}
+
+/// Computes the full payout vector for a Precision round using explicit scoring and payout policies.
+pub fn compute_precision_payouts_with_policy(
+    entries: &[PrecisionEntry],
+    final_price: u128,
+    fee_bps: Option<u32>,
+    scoring_policy: PrecisionScoringPolicy,
+    payout_policy: PrecisionPayoutPolicy,
+) -> Result<Vec<PrecisionPayoutEntry>, ContractError> {
+    let result = find_precision_winners_with_policy(entries, final_price, scoring_policy);
 
     // All-unrevealed: refund everyone
     if result.winner_indices.is_empty() && result.total_pot > 0 {
@@ -399,7 +512,20 @@ pub fn compute_precision_payouts(
 
     let (distributable, _fee_amount) =
         compute_precision_fee(result.total_pot, fee_bps)?;
-    let winner_payouts = split_pot_among_winners(distributable, result.winner_indices.len())?;
+
+    let winner_payouts = match payout_policy {
+        PrecisionPayoutPolicy::Equal => {
+            split_pot_among_winners(distributable, result.winner_indices.len())?
+        }
+        PrecisionPayoutPolicy::StakeWeighted => {
+            let winner_stakes: Vec<i128> = result
+                .winner_indices
+                .iter()
+                .map(|&idx| entries[idx].amount)
+                .collect();
+            split_pot_stake_weighted(distributable, &winner_stakes)?
+        }
+    };
 
     let mut payouts: Vec<PrecisionPayoutEntry> = Vec::new();
     for entry in entries {
@@ -820,5 +946,71 @@ mod tests {
     #[test]
     fn test_total_pot_precision() {
         assert_eq!(total_pot_precision(&[100, 150, 50]), 300);
+    }
+
+    #[test]
+    fn test_precision_scoring_mode_and_confidence_band() {
+        let entries = vec![
+            PrecisionEntry {
+                index: 0,
+                predicted_price: 10_010,
+                amount: 1_000,
+                revealed: true,
+            },
+            PrecisionEntry {
+                index: 1,
+                predicted_price: 10_020,
+                amount: 2_000,
+                revealed: true,
+            },
+        ];
+
+        let abs_policy = PrecisionScoringPolicy {
+            mode: PrecisionScoringMode::AbsoluteDistance,
+            confidence_band: Some(15),
+        };
+        let res = find_precision_winners_with_policy(&entries, 10_000, abs_policy);
+        assert_eq!(res.winner_indices, vec![0, 1]);
+
+        let rel_policy = PrecisionScoringPolicy {
+            mode: PrecisionScoringMode::RelativeDistance,
+            confidence_band: None,
+        };
+        let res_rel = find_precision_winners_with_policy(&entries, 10_000, rel_policy);
+        assert_eq!(res_rel.winner_indices, vec![0]);
+    }
+
+    #[test]
+    fn test_split_pot_stake_weighted_math() {
+        let payouts = split_pot_stake_weighted(100, &[30, 70]).unwrap();
+        assert_eq!(payouts, vec![30, 70]);
+
+        let payouts_policy = compute_precision_payouts_with_policy(
+            &[
+                PrecisionEntry {
+                    index: 0,
+                    predicted_price: 10_000,
+                    amount: 30,
+                    revealed: true,
+                },
+                PrecisionEntry {
+                    index: 1,
+                    predicted_price: 10_000,
+                    amount: 70,
+                    revealed: true,
+                },
+            ],
+            10_000,
+            None,
+            PrecisionScoringPolicy {
+                mode: PrecisionScoringMode::AbsoluteDistance,
+                confidence_band: None,
+            },
+            PrecisionPayoutPolicy::StakeWeighted,
+        )
+        .unwrap();
+
+        assert_eq!(payouts_policy[0].payout, 30);
+        assert_eq!(payouts_policy[1].payout, 70);
     }
 }

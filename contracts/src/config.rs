@@ -1413,6 +1413,8 @@ pub fn _apply_config_payload(
         ) => {
             _validate_oracle_timestamp_skew(*seconds)?;
             env.storage().instance().set(&symbol_short!("otskew"), seconds);
+        }
+        (
             ConfigChangeKind::PendingWinningsExpiry,
             ConfigChangePayload::PendingWinningsExpiry(ledgers),
         ) => {

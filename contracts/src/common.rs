@@ -106,7 +106,6 @@ pub const MAX_TWAP_WINDOW_SAMPLES: u32 = 64;
 /// Bumps/extends the TTL of the given persistent storage key if its remaining TTL
 /// is less than the threshold. Enforces rent policy (Issue #142).
 pub fn _extend_persistent_ttl<K: IntoVal<Env, Val>>(env: &Env, key: &K) {
-pub fn _extend_persistent_ttl<T: IntoVal<Env, Val>>(env: &Env, key: &T) {
     if env.storage().persistent().has(key) {
         env.storage()
             .persistent()

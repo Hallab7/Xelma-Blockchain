@@ -42,3 +42,5 @@ mod storage_benchmarks;
 mod ttl_tests;
 mod windows;
 mod archive_participation;
+mod precision_scoring;
+

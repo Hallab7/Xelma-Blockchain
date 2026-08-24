@@ -939,12 +939,9 @@ fn _settle_round_with_price(
         let threshold_participants: Vec<Address> = env
             .storage()
             .persistent()
-            .get(&DataKey::RoundParticipants(round_id))
-            .unwrap_or(Vec::new(&env));
-        if threshold_participants.len() < min {
             .get(&DataKeyScoped::RoundParticipants(round_id))
             .unwrap_or(Vec::new(env));
-        let count = threshold_participants.len();
+        let count = threshold_participants.len() as u32;
         if count < min {
             _archive_round(
                 env,
@@ -952,17 +949,12 @@ fn _settle_round_with_price(
                 RoundArchiveStatus::FallbackRefund,
                 payload.price,
                 &threshold_participants,
-                final_price,
-                count,
-                0,
-                None,
             );
-            _refund_under_threshold(&env, &round, &threshold_participants)?;
             _refund_under_threshold(env, round, &threshold_participants)?;
             #[allow(deprecated)]
             env.events().publish(
                 (symbol_short!("round"), symbol_short!("fallback")),
-                (round_id, participant_count, min),
+                (round_id, count, min),
             );
             return Ok(());
         }
@@ -987,8 +979,6 @@ fn _settle_round_with_price(
     let participants: Vec<Address> = env
         .storage()
         .persistent()
-        .get(&DataKey::RoundParticipants(round_id))
-        .unwrap_or(Vec::new(&env));
         .get(&DataKeyScoped::RoundParticipants(round_id))
         .unwrap_or(Vec::new(env));
     let participant_count = participants.len();
