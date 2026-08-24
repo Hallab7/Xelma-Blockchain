@@ -178,8 +178,6 @@ impl VirtualTokenContract {
         limit: u32,
     ) -> Vec<ArchivedRoundSummary> {
         queries::get_user_archive_history(env, user, offset, limit)
-    }
-
     /// Returns whether `action` is currently permitted under the PolicyGate
     /// for the contract's runtime mode (Issue #261). Read-only; does not
     /// mutate state. See [`admin::_policy_gate`] for the full matrix.

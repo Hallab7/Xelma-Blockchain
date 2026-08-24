@@ -414,6 +414,12 @@ fn test_event_coverage_resolve_round() {
     assert_eq!(canon.10, 0i128);         // fee_amount
     assert_eq!(canon.11, 12u32);         // settled_at_ledger
     assert_eq!(canon.12, None);          // confidence
+        Ok(symbol_short!("resolved"))
+    );
+    assert_eq!(
+        data.try_into_val(&env),
+        Ok((1u64, 1_2000000u128, 0u32, Option::<u32>::None, 0u32))
+    );
 }
 
 #[test]

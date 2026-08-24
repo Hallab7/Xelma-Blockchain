@@ -89,18 +89,4 @@ pub enum ContractError {
     PendingWinningsNotFound = 77,
     /// Pending winnings expiry is not configured (value is 0).
     ExpiryNotConfigured = 78,
-    /// Participant access denied by allowlist/denylist gate (Issue #274).
-    AccessDenied = 79,
-    /// Oracle heartbeat unhealthy — settlement blocked (Issue #264).
-    OracleHeartbeatUnhealthy = 80,
-    /// Action rejected due to round phase mismatch.
-    IllegalPhaseTransition = 81,
-    /// Governance action by unauthorized signer.
-    GovUnauthorized = 82,
-    /// Governance proposal in invalid state for requested transition.
-    GovInvalidState = 83,
-    /// Governance proposal not found.
-    ProposalNotFound = 84,
-    /// Governance proposal expired.
-    ProposalExpired = 85,
 }

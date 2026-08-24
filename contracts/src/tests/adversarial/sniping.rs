@@ -38,6 +38,7 @@ fn test_critical_last_ledger_sniping_updown_blocked() {
 
     emit_result(
         "last_ledger_sniping_updown",
+        "pass",
         "RoundEnded (close buffer)",
         "none when close_buffer configured",
         "medium",
@@ -68,6 +69,7 @@ fn test_last_ledger_sniping_precision_blocked() {
 
     emit_result(
         "last_ledger_sniping_precision",
+        "pass",
         "RoundEnded (close buffer)",
         "none when close_buffer configured",
         "medium",

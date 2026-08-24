@@ -2,13 +2,13 @@
 //! Oracle griefing — heartbeat manipulation, nonce replay, cross-round replay.
 
 use super::super::config_helpers::apply_oracle_stale_threshold;
-use super::{emit_result, setup_contract};
+use super::{emit_result, oracle_payload, setup_contract};
 use crate::errors::ContractError;
-use crate::types::{BetSide, OraclePayload};
+use crate::types::BetSide;
 use soroban_sdk::{testutils::Ledger, Address, Env};
 
 /// Attacker (or compromised oracle service) marks heartbeat offline to block settlement.
-/// Defense: `OracleHeartbeatUnhealthy` — admin may arm override as recovery path.
+/// Defense: `OracleNotLive` — admin may arm override as recovery path.
 #[test]
 fn test_oracle_heartbeat_griefing_blocks_settlement() {
     let env = Env::default();
@@ -19,7 +19,6 @@ fn test_oracle_heartbeat_griefing_blocks_settlement() {
     client.create_round(&1_0000000, &None);
     client.place_bet(&user, &100_0000000, &BetSide::Up);
 
-    // Griefing: oracle marks itself offline
     client.update_oracle_heartbeat(&2u32);
 
     env.ledger().with_mut(|li| {
@@ -27,21 +26,20 @@ fn test_oracle_heartbeat_griefing_blocks_settlement() {
         li.timestamp = 200;
     });
 
-    let result = client.try_resolve_round(&OraclePayload {
-        price: 1_5000000,
-        timestamp: env.ledger().timestamp(),
-        round_id: 0,
-        nonce: 1u64,
-        network_id: env.ledger().network_id(),
-        contract_addr: contract_id.clone(),
-        confidence: None,
-    });
-    assert_eq!(result, Err(Ok(ContractError::OracleHeartbeatUnhealthy)));
+    let result = client.try_resolve_round(&oracle_payload(
+        &env,
+        &contract_id,
+        1_5000000,
+        0,
+        1,
+    ));
+    assert_eq!(result, Err(Ok(ContractError::OracleNotLive)));
     assert!(client.get_active_round().is_some());
 
     emit_result(
         "oracle_heartbeat_griefing",
-        "OracleHeartbeatUnhealthy",
+        "pass",
+        "OracleNotLive",
         "admin heartbeat override available",
         "high",
         false,
@@ -64,16 +62,7 @@ fn test_oracle_nonce_replay_blocked() {
         li.timestamp = 100;
     });
 
-    let payload = OraclePayload {
-        price: 1_5000000,
-        timestamp: env.ledger().timestamp(),
-        round_id: 0,
-        nonce: 42u64,
-        network_id: env.ledger().network_id(),
-        contract_addr: contract_id.clone(),
-        confidence: None,
-    };
-
+    let payload = oracle_payload(&env, &contract_id, 1_5000000, 0, 42);
     client.resolve_round(&payload);
 
     client.create_round(&1_5000000, &None);
@@ -89,6 +78,7 @@ fn test_oracle_nonce_replay_blocked() {
 
     emit_result(
         "oracle_nonce_replay",
+        "pass",
         "OracleNonceReused",
         "none",
         "high",
@@ -113,15 +103,7 @@ fn test_cross_round_payload_replay_blocked() {
         li.timestamp = 100;
     });
 
-    let stale_payload = OraclePayload {
-        price: 1_5000000,
-        timestamp: env.ledger().timestamp(),
-        round_id: 0,
-        nonce: 1u64,
-        network_id: env.ledger().network_id(),
-        contract_addr: contract_id.clone(),
-        confidence: None,
-    };
+    let stale_payload = oracle_payload(&env, &contract_id, 1_5000000, 0, 1);
     client.resolve_round(&stale_payload);
 
     client.create_round(&1_5000000, &None);
@@ -137,6 +119,7 @@ fn test_cross_round_payload_replay_blocked() {
 
     emit_result(
         "cross_round_payload_replay",
+        "pass",
         "InvalidOracleRound",
         "none",
         "high",
@@ -162,20 +145,16 @@ fn test_stale_oracle_timestamp_griefing_blocked() {
         li.timestamp = 1000;
     });
 
-    let result = client.try_resolve_round(&OraclePayload {
-        price: 1_5000000,
-        timestamp: 600,
-        round_id: 0,
-        nonce: 1u64,
-        network_id: env.ledger().network_id(),
-        contract_addr: contract_id.clone(),
-        confidence: None,
-    });
+    let mut payload = oracle_payload(&env, &contract_id, 1_5000000, 0, 1);
+    payload.timestamp = 600;
+
+    let result = client.try_resolve_round(&payload);
     assert_eq!(result, Err(Ok(ContractError::StaleOracleData)));
     assert!(client.get_active_round().is_some());
 
     emit_result(
         "stale_oracle_timestamp_griefing",
+        "pass",
         "StaleOracleData",
         "none",
         "medium",

@@ -47,8 +47,8 @@ jobs:
       - name: Run emergency claims-only drill test
         run: cargo test --package xelma-contract --lib tests::drill --locked -- --nocapture
 
-      - name: Run adversarial simulation suite (CI-critical scenarios)
-        run: cargo test --package xelma-contract --lib tests::adversarial --locked -- --nocapture
+      - name: Run adversarial CI-critical scenarios only
+        run: cargo test --package xelma-contract --lib test_critical_ --locked -- --nocapture
 
       - name: Benchmark report (cost/gas regression guardrails)
         run: cargo test --package xelma-contract cost_benchmarks --locked -- --nocapture

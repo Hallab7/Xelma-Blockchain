@@ -6,7 +6,7 @@
 //! expected defense holds (or documents accepted residual risk), and emits a
 //! structured `ADVERSARIAL_RESULT:` line for the report harness.
 //!
-//! ## Scenario catalog
+//! ## Scenario catalog (13 scenarios)
 //!
 //! | Scenario | Module | Defense | CI-critical |
 //! |----------|--------|---------|-------------|
@@ -15,10 +15,11 @@
 //! | Last-ledger sniping (UpDown) | `sniping` | `RoundEnded` + close buffer | yes |
 //! | Last-ledger sniping (Precision) | `sniping` | `RoundEnded` + close buffer | |
 //! | Precision spam commits | `precision` | `PrecisionCapExceeded` | yes |
-//! | Oracle heartbeat griefing | `oracle` | `OracleHeartbeatUnhealthy` | |
+//! | Oracle heartbeat griefing | `oracle` | `OracleNotLive` | |
 //! | Oracle nonce replay | `oracle` | `OracleNonceReused` | |
 //! | Cross-round payload replay | `oracle` | `InvalidOracleRound` | |
-//! | Fee gaming (mid-round config) | `economic` | Conservation invariant | |
+//! | Stale oracle timestamp griefing | `oracle` | `StaleOracleData` | |
+//! | Fee gaming (mid-round schedule) | `economic` | Timelock (pending only) | |
 //! | Exposure cap boundary | `economic` | `ExposureCapExceeded` | |
 //! | Double-claim attack | `lifecycle` | Idempotent zero payout | |
 //! | Mode confusion | `lifecycle` | `WrongModeForPrediction` | |
@@ -38,6 +39,7 @@ mod sybil;
 pub const ADVERSARIAL_SEED: u64 = 372_2026;
 
 use crate::contract::{VirtualTokenContract, VirtualTokenContractClient};
+use crate::types::OraclePayload;
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 /// Standard contract setup for adversarial scenarios.
@@ -54,17 +56,37 @@ pub(crate) fn setup_contract(
     (client, contract_id, admin, oracle)
 }
 
+/// Build a valid oracle payload including the required `attestation` field.
+pub(crate) fn oracle_payload(
+    env: &Env,
+    contract_id: &Address,
+    price: u128,
+    round_id: u32,
+    nonce: u64,
+) -> OraclePayload {
+    OraclePayload {
+        price,
+        timestamp: env.ledger().timestamp(),
+        round_id,
+        nonce,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+        attestation: None,
+    }
+}
+
 /// Emit a structured JSON line consumed by `scripts/adversarial_report.py`.
 pub(crate) fn emit_result(
     scenario: &str,
+    status: &str,
     defense: &str,
     residual_risk: &str,
     severity: &str,
     ci_critical: bool,
 ) {
-    // Host-side test harness only — safe to print for report collection.
     std::eprintln!(
-        "ADVERSARIAL_RESULT:{{\"scenario\":\"{scenario}\",\"status\":\"pass\",\"defense\":\"{defense}\",\"residual_risk\":\"{residual_risk}\",\"severity\":\"{severity}\",\"seed\":{seed},\"ci_critical\":{ci_critical}}}",
+        "ADVERSARIAL_RESULT:{{\"scenario\":\"{scenario}\",\"status\":\"{status}\",\"defense\":\"{defense}\",\"residual_risk\":\"{residual_risk}\",\"severity\":\"{severity}\",\"seed\":{seed},\"ci_critical\":{ci_critical}}}",
         seed = ADVERSARIAL_SEED,
         ci_critical = ci_critical,
     );

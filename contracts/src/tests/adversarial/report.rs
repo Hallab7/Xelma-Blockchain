@@ -8,7 +8,7 @@ use super::ADVERSARIAL_SEED;
 /// this test documents the catalog and seed for the report harness.
 #[test]
 fn test_adversarial_suite_inventory() {
-    const SCENARIO_COUNT: usize = 12;
+    const SCENARIO_COUNT: usize = 13;
 
     assert!(SCENARIO_COUNT >= 8, "Issue #372 requires ≥8 scenarios");
 

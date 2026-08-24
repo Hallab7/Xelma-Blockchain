@@ -2,15 +2,17 @@
 //! Economic attacks — fee gaming, exposure cap boundary abuse.
 
 use super::super::config_helpers::{apply_max_stake, apply_max_user_exposure};
-use super::{emit_result, setup_contract};
+use super::{emit_result, oracle_payload, setup_contract};
 use crate::errors::ContractError;
-use crate::types::{BetSide, DataKey, FeeModel, OraclePayload};
+use crate::types::{BetSide, ConfigChangeKind};
 use soroban_sdk::{testutils::Ledger, Address, Env};
 
-/// Attacker tries to game fee by having admin change fee config after bets are placed.
-/// Defense: settlement still conserves value; treasury delta matches configured fee.
+/// Malicious admin schedules a fee change mid-round via the public timelock API,
+/// hoping to skim the active pot before settlement.
+/// Defense: schedule creates pending config only — active fee remains unset until
+/// timelock elapses and `apply_scheduled_changes` runs.
 #[test]
-fn test_fee_gaming_mid_round_config_conservation() {
+fn test_fee_gaming_mid_round_schedule_does_not_affect_settlement() {
     let env = Env::default();
     let (client, contract_id, _admin, _oracle) = setup_contract(&env);
 
@@ -23,40 +25,32 @@ fn test_fee_gaming_mid_round_config_conservation() {
     client.place_bet(&alice, &60, &BetSide::Up);
     client.place_bet(&bob, &40, &BetSide::Up);
 
-    // Attacker hopes admin fee change mid-round creates arbitrage
-    env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .set(&DataKey::ProtocolFeeBps, &1_000u32);
-        env.storage()
-            .persistent()
-            .set(&DataKey::FeeModel, &FeeModel::FeeOnPot);
-    });
+    // Mid-round fee schedule via public API (attacker with admin key)
+    client.schedule_protocol_fee_bps(&Some(1_000u32));
+    assert!(
+        client
+            .get_pending_config_change(&ConfigChangeKind::ProtocolFeeBps)
+            .is_some()
+    );
+    assert_eq!(client.get_protocol_fee_bps(), None);
 
     env.ledger().with_mut(|li| li.sequence_number = 12);
     let treasury_before = client.get_protocol_fee_treasury();
 
-    client.resolve_round(&OraclePayload {
-        price: 2_000u128,
-        timestamp: env.ledger().timestamp(),
-        round_id: 0,
-        nonce: 1u64,
-        network_id: env.ledger().network_id(),
-        contract_addr: contract_id.clone(),
-        confidence: None,
-    });
+    client.resolve_round(&oracle_payload(&env, &contract_id, 2_000u128, 0, 1));
 
     let alice_pay = client.get_pending_winnings(&alice);
     let bob_pay = client.get_pending_winnings(&bob);
     let treasury_delta = client.get_protocol_fee_treasury() - treasury_before;
 
     assert_eq!(alice_pay + bob_pay + treasury_delta, 100);
-    assert_eq!(treasury_delta, 10);
+    assert_eq!(treasury_delta, 0);
 
     emit_result(
-        "fee_gaming_mid_round_config",
-        "conservation invariant (fee-on-pot)",
-        "none — fee applied at settlement",
+        "fee_gaming_mid_round_schedule",
+        "pass",
+        "timelock (pending config only)",
+        "none — fee requires timelock activation",
         "low",
         false,
     );
@@ -84,6 +78,7 @@ fn test_exposure_cap_boundary_attack_blocked() {
 
     emit_result(
         "exposure_cap_boundary",
+        "pass",
         "ExposureCapExceeded",
         "sybil addresses can bypass per-user cap (accepted)",
         "medium",

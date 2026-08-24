@@ -5,7 +5,8 @@ use crate::admin::{
 use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _set_balance, balance,
     payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
-    DEFAULT_ORACLE_TIMESTAMP_SKEW, MAX_ORACLE_OBSERVATIONS, SECONDS_PER_LEDGER,
+    DEFAULT_ORACLE_TIMESTAMP_SKEW, SECONDS_PER_LEDGER,
+    payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION, MAX_ORACLE_OBSERVATIONS,
     TTL_BUMP_AMOUNT, TTL_BUMP_THRESHOLD,
 };
 use crate::config::{
@@ -541,9 +542,9 @@ pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractErr
                     &env,
                     &oracle,
                     symbol_short!("resolve"),
-                    ContractError::OracleHeartbeatUnhealthy,
+                    ContractError::OracleNotLive,
                 );
-                return Err(ContractError::OracleHeartbeatUnhealthy);
+                return Err(ContractError::OracleNotLive);
             }
         }
     }
@@ -938,6 +939,9 @@ fn _settle_round_with_price(
         let threshold_participants: Vec<Address> = env
             .storage()
             .persistent()
+            .get(&DataKey::RoundParticipants(round_id))
+            .unwrap_or(Vec::new(&env));
+        if threshold_participants.len() < min {
             .get(&DataKeyScoped::RoundParticipants(round_id))
             .unwrap_or(Vec::new(env));
         let count = threshold_participants.len();
@@ -946,21 +950,20 @@ fn _settle_round_with_price(
                 env,
                 round,
                 RoundArchiveStatus::FallbackRefund,
-                final_price,
+                payload.price,
                 &threshold_participants,
+                final_price,
+                count,
                 0,
-                confidence,
+                None,
             );
+            _refund_under_threshold(&env, &round, &threshold_participants)?;
             _refund_under_threshold(env, round, &threshold_participants)?;
             #[allow(deprecated)]
             env.events().publish(
                 (symbol_short!("round"), symbol_short!("fallback")),
-                (round_id, count, min),
+                (round_id, participant_count, min),
             );
-            env.storage()
-                .persistent()
-                .remove(&DataKeyScoped::RoundParticipants(round_id));
-            env.storage().persistent().remove(&DataKeyCore::ActiveRound);
             return Ok(());
         }
     }
@@ -981,20 +984,25 @@ fn _settle_round_with_price(
         RoundMode::Precision => _resolve_precision_mode(env, round_id, final_price, false)?,
     };
 
-    let raw_participants: Vec<Address> = env
+    let participants: Vec<Address> = env
         .storage()
         .persistent()
+        .get(&DataKey::RoundParticipants(round_id))
+        .unwrap_or(Vec::new(&env));
         .get(&DataKeyScoped::RoundParticipants(round_id))
         .unwrap_or(Vec::new(env));
+    let participant_count = participants.len();
 
     _archive_round(
         env,
         round,
         RoundArchiveStatus::Resolved,
+        payload.price,
+        &participants,
         final_price,
-        &raw_participants,
+        participant_count,
         fee_amount,
-        confidence,
+        payload.confidence,
     );
 
     // Mode-scoped position cleanup (eliminates redundant storage delete lookups)
@@ -1059,12 +1067,6 @@ pub fn _resolve_updown_mode(
     final_price: u128,
     skip_payout: bool,
 ) -> Result<(bool, i128), ContractError> {
-    let round_id = round.round_id;
-    let raw_participants: Vec<Address> = env
-        .storage()
-        .persistent()
-        .get(&DataKeyScoped::RoundParticipants(round_id))
-        .unwrap_or(Vec::new(env));
     let participants = sort_addresses(raw_participants.clone());
 
     // Pure price-direction classification and one-sided check delegated to

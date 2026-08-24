@@ -68,7 +68,7 @@ Test distribution:
 | `security.rs` | 4 | Oracle freshness, future timestamp, round-id replay, valid payload |
 | `storage_benchmarks.rs` | 5 | Indexed key writes and resolution cleanup |
 | `windows.rs` | 13 | Window bounds, timing, auth, precision window enforcement |
-| `adversarial/` | 12 | Economic attack simulations: sybil faucet, sniping, oracle griefing, fee gaming (Issue #372) |
+| `adversarial/` | 13 | Economic attack simulations: sybil faucet, sniping, oracle griefing, fee gaming (Issue #372) |
 
 ## Adversarial Simulation Suite (Issue #372)
 
@@ -80,11 +80,13 @@ economic attacks with deterministic seed `3722026`:
 | Sybil faucet (mint limit) | `MintLimitExceeded` | none when limit configured |
 | Sybil faucet (epoch budget) | `EpochBudgetExceeded` | none when budget configured |
 | Last-ledger sniping (UpDown) | `RoundEnded` (close buffer) | none when close_buffer configured |
+| Last-ledger sniping (Precision) | `RoundEnded` (close buffer) | none when close_buffer configured |
 | Precision spam commits | `PrecisionCapExceeded` | none when cap configured |
 | Oracle heartbeat griefing | `OracleNotLive` | admin override available |
 | Oracle nonce replay | `OracleNonceReused` | none |
 | Cross-round payload replay | `InvalidOracleRound` | none |
-| Fee gaming (mid-round config) | conservation invariant | none |
+| Stale oracle timestamp griefing | `StaleOracleData` | none |
+| Fee gaming (mid-round schedule) | Timelock (pending config only) | none |
 | Exposure cap boundary | `ExposureCapExceeded` | sybil bypass (accepted) |
 | Double-claim attack | idempotent zero payout | none |
 | Mode confusion | `WrongModeForPrediction` | none |
@@ -97,7 +99,7 @@ Run locally:
 
 Reports are written to `adversarial-reports/adversarial-report.{md,json}`.
 Three CI-critical scenarios run in the default `ci.yml` rust-test job; the full
-suite (12 scenarios) runs nightly via `.github/workflows/nightly-adversarial.yml`.
+suite (13 scenarios) runs nightly via `.github/workflows/nightly-adversarial.yml`.
 
 ## Threat Model
 

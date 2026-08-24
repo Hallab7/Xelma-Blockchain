@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 //! Lifecycle attacks — double-claim, mode confusion.
 
-use super::{emit_result, setup_contract};
+use super::{emit_result, oracle_payload, setup_contract};
 use crate::errors::ContractError;
-use crate::types::{BetSide, OraclePayload};
+use crate::types::BetSide;
 use soroban_sdk::{testutils::Ledger, Address, Env};
 
 /// Attacker calls `claim_winnings` twice to double-spend pending payouts.
@@ -27,15 +27,7 @@ fn test_double_claim_attack_idempotent() {
         li.timestamp = 100;
     });
 
-    client.resolve_round(&OraclePayload {
-        price: 1_5000000,
-        timestamp: env.ledger().timestamp(),
-        round_id: 0,
-        nonce: 1u64,
-        network_id: env.ledger().network_id(),
-        contract_addr: contract_id.clone(),
-        confidence: None,
-    });
+    client.resolve_round(&oracle_payload(&env, &contract_id, 1_5000000, 0, 1));
 
     let pending = client.get_pending_winnings(&winner);
     assert!(pending > 0);
@@ -51,6 +43,7 @@ fn test_double_claim_attack_idempotent() {
 
     emit_result(
         "double_claim_attack",
+        "pass",
         "idempotent zero payout",
         "none",
         "high",
@@ -75,6 +68,7 @@ fn test_mode_confusion_updown_in_precision_blocked() {
 
     emit_result(
         "mode_confusion_updown_in_precision",
+        "pass",
         "WrongModeForPrediction",
         "none",
         "medium",

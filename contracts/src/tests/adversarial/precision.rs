@@ -55,6 +55,7 @@ fn test_critical_precision_spam_commits_blocked() {
 
     emit_result(
         "precision_spam_commits",
+        "pass",
         "PrecisionCapExceeded",
         "none when max_precision_participants configured",
         "medium",

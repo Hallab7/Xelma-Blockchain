@@ -27,6 +27,7 @@ fn test_critical_sybil_faucet_abuse_mint_limit() {
 
     emit_result(
         "sybil_faucet_mint_limit",
+        "pass",
         "MintLimitExceeded",
         "none",
         "info",
@@ -55,6 +56,7 @@ fn test_sybil_faucet_abuse_epoch_budget() {
 
     emit_result(
         "sybil_faucet_epoch_budget",
+        "pass",
         "EpochBudgetExceeded",
         "none when budget configured",
         "info",
