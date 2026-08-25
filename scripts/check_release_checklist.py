@@ -34,7 +34,7 @@ def _is_worktree_clean() -> bool:
 
 
 def _artifact_present() -> bool:
-    artifact = Path("target/wasm32-unknown-unknown/release/xelma_contract.wasm")
+    artifact = Path("target/wasm32v1-none/release/xelma_contract.wasm")
     return artifact.exists()
 
 

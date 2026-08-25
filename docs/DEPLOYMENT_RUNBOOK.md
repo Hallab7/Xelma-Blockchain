@@ -2,6 +2,18 @@
 
 This runbook covers staging-to-mainnet deployment for Xelma contract updates, including pre-flight checks, staged rollout, rollback, and incident communication.
 
+## Build Target
+
+**`wasm32v1-none`** is the canonical WASM target for all builds and deployments. This target uses the WASM MVP feature baseline that the Soroban host supports, avoiding `reference-types` which are rejected at deploy time.
+
+All CI jobs, deploy scripts, and documentation reference this target. When building locally, always use:
+
+```bash
+cargo rustc --manifest-path=contracts/Cargo.toml --crate-type=cdylib --target=wasm32v1-none --release --locked
+```
+
+The output artifact is located at: `target/wasm32v1-none/release/xelma_contract.wasm`
+
 ## 1. Pre-deployment checklist
 
 ### Ownership
