@@ -116,7 +116,7 @@ The payload carries the full terminal state of the round:
 |----------|---------------------|--------------|-----------------------------------------------------------------------------|
 | 0        | `version`           | `u32`        | Schema version tag (`0` for this layout). Reserved for future field changes. |
 | 1        | `round_id`          | `u64`        | Monotonically increasing round identifier                                   |
-| 2        | `status`            | `u32`        | Terminal status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund       |
+| 2        | `status`            | `u32`        | Terminal status: `0` = Resolved, `1` = Cancelled, `2` = FallbackRefund, `3` = Voided |
 | 3        | `mode`              | `u32`        | Round mode: `0` = UpDown, `1` = Precision                                   |
 | 4        | `price_start`       | `u128`       | Opening price at round start (4 decimal places)                             |
 | 5        | `price_final`       | `u128`       | Settlement price from oracle, or `0` for cancelled/fallback rounds           |
@@ -126,7 +126,47 @@ The payload carries the full terminal state of the round:
 | 9        | `total_pot`         | `i128`       | Total accumulated round pot (stroops)                                        |
 | 10       | `fee_amount`        | `i128`       | Protocol fees collected (stroops), `0` for non-competitive paths             |
 | 11       | `settled_at_ledger` | `u32`        | Ledger sequence number when the round was archived                           |
-| 12       | `confidence`        | `Option<u32>` | Oracle confidence in basis points (`None` for cancel / fallback)            |
+| 12       | `confidence`        | `Option<u32>` | Oracle confidence in basis points (`None` for cancel / fallback; staged value for void) |
+
+For dispute-enabled rounds, competitive settlement is staged before this
+terminal summary is emitted. The archive status additionally uses `3` =
+`Voided` when the permissionless refund path is selected.
+
+### `("round", "pending")`
+
+Emitted after a valid oracle result is staged and all payouts and protocol fees
+are deferred for the configured dispute window.
+
+| Position | Field                | Type   | Description                                      |
+|----------|----------------------|--------|--------------------------------------------------|
+| 0        | `round_id`           | `u64`  | Round awaiting a terminal dispute decision       |
+| 1        | `final_price`        | `u128` | Validated oracle settlement price                 |
+| 2        | `resolved_at_ledger` | `u32`  | Ledger where the oracle result was staged         |
+| 3        | `deadline_ledger`    | `u32`  | First ledger where finalization is permitted      |
+
+### `("round", "voided")`
+
+Emitted when any caller voids a staged round strictly before its deadline. Each
+participant is credited exactly their recorded stake and the protocol fee is
+zero.
+
+| Position | Field               | Type   | Description                              |
+|----------|---------------------|--------|------------------------------------------|
+| 0        | `round_id`          | `u64`  | Voided round                             |
+| 1        | `participant_count` | `u32`  | Number of refunded participants          |
+| 2        | `total_refund`      | `i128` | Sum of full-stake refunds in stroops      |
+
+### `("round", "finalized")`
+
+Emitted when any caller finalizes a staged round at or after its frozen
+deadline. The standard settlement and fee policy has completed before emission.
+
+| Position | Field               | Type   | Description                              |
+|----------|---------------------|--------|------------------------------------------|
+| 0        | `round_id`          | `u64`  | Finalized round                          |
+| 1        | `final_price`       | `u128` | Staged oracle settlement price           |
+| 2        | `participant_count` | `u32`  | Number of settled participants           |
+| 3        | `fee_amount`        | `i128` | Protocol fee collected in stroops        |
 
 Emitted once per participant during round resolution after that participant's settlement
 outcome is known. Indexers can use these events to reconstruct the complete participant-level
