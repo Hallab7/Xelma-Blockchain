@@ -4,7 +4,7 @@
 use soroban_sdk::contracterror;
 
 /// Contract error types
-#[contracterror]
+#[contracterror(export = false)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
@@ -60,7 +60,7 @@ pub enum ContractError {
     OracleTimestampOutsideWindow = 66,
     /// Pending winnings entry exists but has not yet reached the configured
     /// expiry threshold — caller must wait before reclaiming.
-    PendingWinningsNotExpired = 66,
+    PendingWinningsNotExpired = 79,
     /// Epoch mint budget has been fully consumed
     EpochBudgetExceeded = 67,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
@@ -89,4 +89,22 @@ pub enum ContractError {
     PendingWinningsNotFound = 77,
     /// Pending winnings expiry is not configured (value is 0).
     ExpiryNotConfigured = 78,
+    /// Participant is blocked by access-control policy (Issue #274).
+    AccessDenied = 80,
+    /// Caller is not authorized for governance actions (Issue #272).
+    GovUnauthorized = 81,
+    /// Governance proposal is in an invalid state for the requested transition.
+    GovInvalidState = 82,
+    /// Governance proposal id does not exist.
+    ProposalNotFound = 83,
+    /// Governance proposal has passed its expiry ledger.
+    ProposalExpired = 84,
+    /// TWAP reference window does not yet contain enough samples (Issue #266).
+    InsufficientTwapSamples = 85,
+    /// Oracle heartbeat health gate blocked settlement (Issue #264).
+    OracleHeartbeatUnhealthy = 86,
+    /// Claim attempted while dispute window is still open.
+    ClaimLocked = 87,
+    /// Void attempted outside the dispute window.
+    DisputeWindowExpired = 88,
 }
