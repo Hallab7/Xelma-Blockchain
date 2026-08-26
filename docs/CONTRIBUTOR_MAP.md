@@ -605,9 +605,9 @@ cd bindings && npm run test:parity
 
 **Regeneration commands:**
 ```bash
-cargo build --target wasm32-unknown-unknown --release --package xelma-contract
+cargo rustc --manifest-path=contracts/Cargo.toml --crate-type=cdylib --target=wasm32v1-none --release --locked
 stellar contract bindings typescript \
-  --wasm target/wasm32-unknown-unknown/release/xelma_contract.wasm \
+  --wasm target/wasm32v1-none/release/xelma_contract.wasm \
   --output-dir ./bindings/src \
   --overwrite
 cd bindings && npm install && npm run build
