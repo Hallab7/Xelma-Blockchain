@@ -282,6 +282,8 @@ pub struct PendingConfigChange {
 }
 
 /// One-sided (degenerate) market settlement policy (Issue #270 / #390).
+/// When exactly one of pool_up/pool_down is empty, refund all stakes on the
+/// populated side (default policy for one-sided UpDown pools).
 #[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
