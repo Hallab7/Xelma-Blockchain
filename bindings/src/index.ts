@@ -536,6 +536,10 @@ export const ContractError = {
    */
   54: {message:"NoPendingRotation"},
   /**
+   * Oracle rotation delay has not elapsed
+   */
+  55: {message:"RotationDelayNotElapsed"},
+  /**
    * Invalid archive retention limit
    */
   62: {message:"InvalidArchiveRetention"},
@@ -548,20 +552,59 @@ export const ContractError = {
    */
   64: {message:"InvalidSalt"},
   /**
-   * Epoch mint budget has been fully consumed
-   */
-  66: {message:"EpochBudgetExceeded"}
-   * create_next_from_template called with no round template configured
+   * No round template is configured
    */
   65: {message:"NoRoundTemplate"},
   /**
+   * Oracle timestamp is outside the round-relative economic window
+   */
+  66: {message:"OracleTimestampOutsideWindow"},
+  /**
+   * Epoch mint budget has been fully consumed
+   */
+  67: {message:"EpochBudgetExceeded"},
+  /**
    * Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
    */
-  66: {message:"OracleNotLive"},
+  68: {message:"OracleNotLive"},
   /**
    * Invalid precision payout policy
    */
-  67: {message:"InvalidPayoutPolicy"}
+  69: {message:"InvalidPayoutPolicy"},
+  /** Stake is below the configured minimum bet. */
+  70: {message:"BelowMinBet"},
+  /** Too few oracle observations survived quorum validation. */
+  71: {message:"InsufficientOracleQuorum"},
+  /** Multi-feed payload has too few observations. */
+  72: {message:"TooFewObservations"},
+  /** Oracle observation was rejected as an outlier. */
+  73: {message:"OracleOutlierRejected"},
+  /** Multi-feed payload contains a duplicate source. */
+  74: {message:"DuplicateOracleSource"},
+  /** Multi-feed observations are in an invalid order. */
+  75: {message:"InvalidObservationOrder"},
+  /** Data key is not allowed for batch TTL touch. */
+  76: {message:"UnsupportedDataKeyForTtlTouch"},
+  /** Pending winnings entry was not found. */
+  77: {message:"PendingWinningsNotFound"},
+  /** Pending winnings expiry is not configured. */
+  78: {message:"ExpiryNotConfigured"},
+  /** Participant is blocked by the active access-control policy. */
+  79: {message:"AccessDenied"},
+  /** Governance proposal was not found. */
+  80: {message:"ProposalNotFound"},
+  /** Governance proposal has expired. */
+  81: {message:"ProposalExpired"},
+  /** Governance proposal is in an invalid state. */
+  82: {message:"GovInvalidState"},
+  /** Caller is unauthorized by the governance policy. */
+  83: {message:"GovUnauthorized"},
+  /** Action is invalid in the current round lifecycle phase. */
+  84: {message:"IllegalPhaseTransition"},
+  /** Oracle heartbeat failed the configured health policy. */
+  85: {message:"OracleHeartbeatUnhealthy"},
+  /** Pending winnings have not reached their expiry threshold. */
+  86: {message:"PendingWinningsNotExpired"}
 }
 
 /**

@@ -60,7 +60,7 @@ pub enum ContractError {
     OracleTimestampOutsideWindow = 66,
     /// Pending winnings entry exists but has not yet reached the configured
     /// expiry threshold — caller must wait before reclaiming.
-    PendingWinningsNotExpired = 66,
+    PendingWinningsNotExpired = 86,
     /// Epoch mint budget has been fully consumed
     EpochBudgetExceeded = 67,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
@@ -89,4 +89,18 @@ pub enum ContractError {
     PendingWinningsNotFound = 77,
     /// Pending winnings expiry is not configured (value is 0).
     ExpiryNotConfigured = 78,
+    /// Participant is blocked by the active allowlist or denylist policy.
+    AccessDenied = 79,
+    /// Governance proposal does not exist.
+    ProposalNotFound = 80,
+    /// Governance proposal is past its execution deadline.
+    ProposalExpired = 81,
+    /// Governance proposal cannot transition from its current state.
+    GovInvalidState = 82,
+    /// Caller is not authorized by the configured governance policy.
+    GovUnauthorized = 83,
+    /// Requested action is not valid in the round's current lifecycle phase.
+    IllegalPhaseTransition = 84,
+    /// Oracle heartbeat failed the configured freshness or health policy.
+    OracleHeartbeatUnhealthy = 85,
 }
