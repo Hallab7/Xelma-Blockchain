@@ -87,6 +87,48 @@ Emitted when a user submits a Precision mode price prediction.
 
 ---
 
+### `("commit", "predict")`
+
+Emitted when a user locks a Precision stake behind a commitment hash.
+
+| Position | Field        | Type         | Description                                      |
+|----------|--------------|--------------|--------------------------------------------------|
+| 0        | `user`       | `Address`    | User who submitted the commitment                |
+| 1        | `round_id`   | `u64`        | Round the commitment belongs to                  |
+| 2        | `commitment` | `BytesN<32>` | SHA-256 commitment digest                        |
+| 3        | `amount`     | `i128`       | Locked stake in stroops                          |
+
+---
+
+### `("reveal", "predict")`
+
+Emitted after a commitment is successfully opened during the reveal window.
+The salt is intentionally omitted from the event payload.
+
+| Position | Field             | Type      | Description                                      |
+|----------|-------------------|-----------|--------------------------------------------------|
+| 0        | `user`            | `Address` | User who revealed the commitment                 |
+| 1        | `round_id`        | `u64`     | Round the revealed prediction belongs to         |
+| 2        | `predicted_price` | `u128`    | Revealed price (4 decimal places)                 |
+| 3        | `amount`          | `i128`    | Locked stake in stroops                          |
+
+---
+
+### `("forfeit", "predict")`
+
+Emitted at competitive Precision settlement for each commitment that was not
+revealed. The stake remains in the pot and can only be paid to eligible,
+revealed winners. It is not emitted when nobody reveals and all stakes are
+refunded, or on cancellation/fallback refund paths.
+
+| Position | Field      | Type      | Description                                      |
+|----------|------------|-----------|--------------------------------------------------|
+| 0        | `user`     | `Address` | User whose unrevealed commitment was forfeited   |
+| 1        | `round_id` | `u64`     | Round settled                                    |
+| 2        | `amount`   | `i128`    | Forfeited stake in stroops                       |
+
+---
+
 ### `("round", "summary")`
 ### `("round", "resolved")`
 

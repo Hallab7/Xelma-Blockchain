@@ -1330,7 +1330,7 @@ pub fn _resolve_precision_mode(
     round_id: u64,
     final_price: u128,
     skip_payout: bool,
-) -> Result<i128, ContractError> {
+) -> Result<(i128, i128), ContractError> {
     let mut participants: Vec<Address> = env
         .storage()
         .persistent()
@@ -1356,6 +1356,7 @@ pub fn _resolve_precision_mode(
     let p_len = participants.len() as usize;
     let mut participant_amounts: StdVec<i128> = StdVec::with_capacity(p_len);
     let mut participant_prices: StdVec<u128> = StdVec::with_capacity(p_len);
+    let mut participant_revealed: StdVec<bool> = StdVec::with_capacity(p_len);
     let mut is_winner_mask: StdVec<bool> = StdVec::with_capacity(p_len);
 
     for i in 0..participants.len() {
@@ -1384,12 +1385,14 @@ pub fn _resolve_precision_mode(
                 .as_ref()
                 .map(|p| p.predicted_price)
                 .unwrap_or(0u128);
+            let revealed = pred_opt.is_some();
 
             total_pot = total_pot
                 .checked_add(amount)
                 .ok_or(ContractError::Overflow)?;
             participant_amounts.push(amount);
             participant_prices.push(cached_price);
+            participant_revealed.push(revealed);
             is_winner_mask.push(false);
 
             if let Some(pred) = pred_opt {
@@ -1475,6 +1478,14 @@ pub fn _resolve_precision_mode(
                 if !was_winner {
                     let stake = participant_amounts[idx];
                     let predicted_price = participant_prices[idx];
+
+                    if !participant_revealed[idx] {
+                        #[allow(deprecated)]
+                        env.events().publish(
+                            (symbol_short!("forfeit"), symbol_short!("predict")),
+                            (user.clone(), round_id, stake),
+                        );
+                    }
 
                     #[allow(deprecated)]
                     env.events().publish(
