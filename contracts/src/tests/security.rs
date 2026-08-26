@@ -2787,3 +2787,150 @@ fn test_resolve_round_multi_too_few_observations_rejected() {
     });
     assert_eq!(result, Err(Ok(ContractError::TooFewObservations)));
 }
+
+
+// ─── Economic Window Timestamp Tests ─────────────────────────────────────────
+
+#[test]
+fn test_resolve_round_timestamp_after_round_window() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+        li.sequence_number = 12;
+    });
+
+    let payload = OraclePayload {
+        price: 1_5000000,
+        timestamp: 500,
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+        attestation: None,
+    };
+
+    let result = client.try_resolve_round(&payload);
+    assert_eq!(result, Err(Ok(ContractError::OracleTimestampOutsideWindow)));
+}
+
+#[test]
+fn test_resolve_round_timestamp_before_round_window() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+    });
+    client.create_round(&1_0000000, &None);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+        li.sequence_number = 12;
+    });
+
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&symbol_short!("otskew"), &30u64);
+    });
+
+    let payload = OraclePayload {
+        price: 1_5000000,
+        timestamp: 10,
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+        attestation: None,
+    };
+
+    let result = client.try_resolve_round(&payload);
+    assert_eq!(result, Err(Ok(ContractError::OracleTimestampOutsideWindow)));
+}
+
+#[test]
+fn test_resolve_round_timestamp_boundary_lower() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+    });
+    client.create_round(&1_0000000, &None);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+        li.sequence_number = 12;
+    });
+
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&symbol_short!("otskew"), &30u64);
+    });
+
+    client.resolve_round(&OraclePayload {
+        price: 1_5000000,
+        timestamp: 70,
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+        attestation: None,
+    });
+    assert_eq!(client.get_active_round(), None);
+}
+
+#[test]
+fn test_resolve_round_timestamp_boundary_upper() {
+    let env = Env::default();
+    let contract_id = env.register(VirtualTokenContract, ());
+    let client = VirtualTokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &oracle);
+    client.create_round(&1_0000000, &None);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+        li.sequence_number = 12;
+    });
+
+    client.resolve_round(&OraclePayload {
+        price: 1_5000000,
+        timestamp: 360,
+        round_id: 0,
+        nonce: 1u64,
+        network_id: env.ledger().network_id(),
+        contract_addr: contract_id.clone(),
+        confidence: None,
+        attestation: None,
+    });
+    assert_eq!(client.get_active_round(), None);
+}
