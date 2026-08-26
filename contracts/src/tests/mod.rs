@@ -8,7 +8,7 @@ mod access_control;
 mod betting;
 mod cei_ordering;
 mod chaos_recovery;
-// mod commit_reveal_e2e; // upstream bug: all-unrevealed refunds test expects behavior contract doesn't implement
+mod commit_reveal_e2e;
 mod config_helpers;
 // mod config_timelock; // upstream bug
 mod conservation;
