@@ -51,10 +51,6 @@ pub enum ContractError {
     NoPendingRotation = 54,
     /// Oracle rotation delay has not elapsed yet (must wait MIN_ROTATION_DELAY_SECONDS)
     RotationDelayNotElapsed = 55,
-    /// Invalid archive retention limit
-    InvalidArchiveRetention = 62,
-    InvalidCommitment = 63,
-    InvalidSalt = 64,
     NoRoundTemplate = 65,
     /// Oracle payload timestamp is outside the round-relative economic window
     OracleTimestampOutsideWindow = 66,
@@ -65,8 +61,6 @@ pub enum ContractError {
     EpochBudgetExceeded = 67,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
     OracleNotLive = 68,
-    /// Invalid precision payout policy
-    InvalidPayoutPolicy = 69,
     /// Stake amount is below the configured minimum bet (dust protection, Issue #269)
     BelowMinBet = 70,
     /// Multi-feed resolution: fewer observations survived outlier rejection
@@ -75,18 +69,16 @@ pub enum ContractError {
     /// Multi-feed resolution: payload contains fewer observations than the
     /// configured minimum.
     TooFewObservations = 72,
-    /// Multi-feed resolution: outlier observations would dominate the result
-    /// (too many rejected, cannot form quorum).
-    OracleOutlierRejected = 73,
     /// Multi-feed payload contains duplicate source identifiers.
     DuplicateOracleSource = 74,
-    /// Multi-feed payload has observations that are not sorted or sources
-    /// are out of expected range.
-    InvalidObservationOrder = 75,
     /// The requested data key is not allowed for batch TTL touch operations.
     UnsupportedDataKeyForTtlTouch = 76,
     /// Pending winnings entry does not exist or expiry is not configured.
     PendingWinningsNotFound = 77,
     /// Pending winnings expiry is not configured (value is 0).
     ExpiryNotConfigured = 78,
+    ProposalNotFound = 79,
+    ProposalExpired = 80,
+    GovInvalidState = 81,
+    GovUnauthorized = 82,
 }
