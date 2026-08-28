@@ -25,6 +25,7 @@ mod invariant_harness;
 mod leaderboard;
 mod leaderboard_seasons;
 mod lifecycle;
+mod market_snapshot;
 mod migration_versioning;
 mod min_bet;
 mod mode_tests;

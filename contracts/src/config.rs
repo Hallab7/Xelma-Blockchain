@@ -386,6 +386,26 @@ pub fn get_close_buffer_ledgers(env: Env) -> u32 {
         .unwrap_or(DEFAULT_CLOSE_BUFFER_LEDGERS)
 }
 
+/// Returns the configured betting-window length in ledgers (Issue #280).
+pub fn get_bet_window_ledgers(env: Env) -> u32 {
+    let key = DataKeyCore::BetWindowLedgers;
+    _extend_persistent_ttl(&env, &key);
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DEFAULT_BET_WINDOW_LEDGERS)
+}
+
+/// Returns the configured run-window length in ledgers (Issue #280).
+pub fn get_run_window_ledgers(env: Env) -> u32 {
+    let key = DataKeyCore::RunWindowLedgers;
+    _extend_persistent_ttl(&env, &key);
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(DEFAULT_RUN_WINDOW_LEDGERS)
+}
+
 pub fn set_min_participants(env: Env, min: Option<u32>) -> Result<(), ContractError> {
     _require_supported_schema(&env)?;
     let admin: Address = env

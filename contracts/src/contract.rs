@@ -11,7 +11,7 @@ use crate::governance;
 use crate::types::{
     ArchivedRoundSummary, AccessState, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore,
     DataKeyScoped, DeviationReferenceMode, LeaderboardEntry, MultiFeedPayload, OneSidedPolicy,
-    OracleHeartbeatRecord,
+    MarketSnapshot, OracleHeartbeatRecord,
     OraclePayload, OracleQuorumConfig, OracleRotationProposal, PendingConfigChange,
     PolicyAction, PrecisionPrediction, PriceSample, ProtocolHealthStatus, ProtocolStatus, Round,
     RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
@@ -951,6 +951,16 @@ impl VirtualTokenContract {
         config::get_close_buffer_ledgers(env)
     }
 
+    /// Returns the configured betting-window length in ledgers.
+    pub fn get_bet_window_ledgers(env: Env) -> u32 {
+        config::get_bet_window_ledgers(env)
+    }
+
+    /// Returns the configured run-window length in ledgers.
+    pub fn get_run_window_ledgers(env: Env) -> u32 {
+        config::get_run_window_ledgers(env)
+    }
+
     /// Sets the early cash-out penalty rate in basis points (admin only).
     /// `None` disables early cash-out entirely (default).
     /// `Some(bps)` enables it with the given penalty rate (1–1000 bps).
@@ -1142,6 +1152,13 @@ impl VirtualTokenContract {
 
     pub fn get_round_phase(env: Env) -> Result<RoundPhase, ContractError> {
         queries::get_round_phase(env)
+    }
+
+    /// Returns a single-read composite snapshot of current market state:
+    /// round phase, pool composition, timing buffers, and fee configuration.
+    /// See `MarketSnapshot` for empty-round semantics.
+    pub fn get_market_snapshot(env: Env) -> MarketSnapshot {
+        queries::get_market_snapshot(env)
     }
 
     pub fn get_last_round_id(env: Env) -> u64 {
