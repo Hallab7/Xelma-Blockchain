@@ -17,6 +17,7 @@ extern crate alloc;
 extern crate std;
 
 
+mod access_control;
 mod admin;
 mod betting;
 pub mod common;

@@ -5,16 +5,18 @@
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Map, Symbol, Vec};
 
+use crate::access_control;
 use crate::errors::ContractError;
 use crate::governance;
 use crate::types::{
-    ArchivedRoundSummary, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore,
-    DataKeyScoped, DeviationReferenceMode, LeaderboardEntry, MultiFeedPayload, OracleHeartbeatRecord,
+    ArchivedRoundSummary, AccessState, BetSide, ConfigChangeKind, ConfigChangePayload, DataKeyCore,
+    DataKeyScoped, DeviationReferenceMode, LeaderboardEntry, MultiFeedPayload, OneSidedPolicy,
+    OracleHeartbeatRecord,
     OraclePayload, OracleQuorumConfig, OracleRotationProposal, PendingConfigChange,
     PolicyAction, PrecisionPrediction, PriceSample, ProtocolHealthStatus, ProtocolStatus, Round,
     RoundArchiveStatus, RoundPhase, RoundPoolStats, RoundStatus, RoundTemplate, RuntimeMode,
     SeasonArchive, SeasonLeaderboardEntry, SimulationResult, UserPosition,
-    UserRoundOutcome, UserStats,
+    UserRoundOutcome, UserStats, FeeModel, GovAction, GovProposal,
 };
 
 // ─── Economic control limits ─────────────────────────────────────────────────
@@ -615,6 +617,48 @@ impl VirtualTokenContract {
         proposal
     }
 
+    // ─── Participant access control (Issue #274) ────────────────────────────
+
+    pub fn set_access_control_enabled(env: Env, enabled: bool) -> Result<(), ContractError> {
+        access_control::set_access_control_enabled(env, enabled)
+    }
+
+    pub fn is_access_control_enabled(env: Env) -> bool {
+        access_control::is_access_control_enabled(env)
+    }
+
+    pub fn add_allowlisted(env: Env, user: Address) -> Result<(), ContractError> {
+        access_control::add_allowlisted(env, user)
+    }
+
+    pub fn remove_allowlisted(env: Env, user: Address) -> Result<(), ContractError> {
+        access_control::remove_allowlisted(env, user)
+    }
+
+    pub fn add_denylisted(env: Env, user: Address) -> Result<(), ContractError> {
+        access_control::add_denylisted(env, user)
+    }
+
+    pub fn remove_denylisted(env: Env, user: Address) -> Result<(), ContractError> {
+        access_control::remove_denylisted(env, user)
+    }
+
+    pub fn is_allowlisted(env: Env, user: Address) -> bool {
+        access_control::is_allowlisted(env, user)
+    }
+
+    pub fn is_denylisted(env: Env, user: Address) -> bool {
+        access_control::is_denylisted(env, user)
+    }
+
+    pub fn get_access_state(env: Env, user: Address) -> AccessState {
+        access_control::get_access_state(env, user)
+    }
+
+    pub fn get_access_policy(env: Env, user: Address) -> (bool, AccessState) {
+        access_control::get_access_policy(env, user)
+    }
+
     // ─── Dual-Approval Governance (Issue #272) ──────────────────────────────
 
     /// Configures the secondary governance approver (admin only).
@@ -1076,7 +1120,7 @@ impl VirtualTokenContract {
     }
 
     pub fn get_one_sided_policy(env: Env) -> OneSidedPolicy {
-        let active_round: Option<Round> = env.storage().persistent().get(&DataKey::ActiveRound);
+        let active_round: Option<Round> = env.storage().persistent().get(&DataKeyCore::ActiveRound);
         if let Some(round) = active_round {
             settlement::_select_one_sided_policy(&round)
         } else {

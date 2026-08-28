@@ -4,7 +4,7 @@
 use soroban_sdk::contracterror;
 
 /// Contract error types
-#[contracterror]
+#[contracterror(export = false)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
@@ -56,7 +56,7 @@ pub enum ContractError {
     OracleTimestampOutsideWindow = 66,
     /// Pending winnings entry exists but has not yet reached the configured
     /// expiry threshold — caller must wait before reclaiming.
-    PendingWinningsNotExpired = 66,
+    PendingWinningsNotExpired = 61,
     /// Epoch mint budget has been fully consumed
     EpochBudgetExceeded = 67,
     /// Oracle heartbeat is not live and strict mode blocks settlement (Issue #264)
@@ -81,4 +81,12 @@ pub enum ContractError {
     ProposalExpired = 80,
     GovInvalidState = 81,
     GovUnauthorized = 82,
+    /// Early cash-out feature is disabled or not configured
+    EarlyCashoutDisabled = 83,
+    /// User does not have an active position to cash out
+    PositionNotFound = 84,
+    /// Early cash-out attempted outside the valid running phase
+    InvalidPhaseForCashout = 85,
+    /// Early cash-out is only supported for UpDown rounds
+    WrongModeForCashout = 86,
 }
