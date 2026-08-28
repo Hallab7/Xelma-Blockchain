@@ -97,8 +97,12 @@ pub enum ContractError {
     InvalidPhaseForCashout = 81,
     /// Early cash-out is only supported for UpDown rounds
     WrongModeForCashout = 82,
+    ProposalNotFound = 83,
+    ProposalExpired = 84,
+    GovInvalidState = 85,
+    GovUnauthorized = 86,
     /// claim_many batch size exceeds MAX_CLAIM_BATCH_SIZE (Issue #277)
-    ClaimBatchTooLarge = 83,
+    ClaimBatchTooLarge = 87,
     /// claim_many batch contains the same address more than once (Issue #277)
-    DuplicateClaimAddress = 84,
+    DuplicateClaimAddress = 88,
 }

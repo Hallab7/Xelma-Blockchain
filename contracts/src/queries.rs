@@ -4,16 +4,16 @@ use crate::common::{
     sort_addresses, BPS_DENOMINATOR, DEFAULT_ARCHIVE_RETENTION, MAX_PAGE_SIZE,
 };
 use crate::config::{
-    _read_fee_model, _read_protocol_fee_bps, calculate_protocol_fee_precision,
-    calculate_protocol_fee_updown, get_bet_window_ledgers, get_close_buffer_ledgers,
-    get_run_window_ledgers,
+    _read_fee_model, _read_precision_payout_policy, _read_protocol_fee_bps,
+    calculate_protocol_fee_precision, calculate_protocol_fee_updown, get_bet_window_ledgers,
+    get_close_buffer_ledgers, get_run_window_ledgers,
 };
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKey, DataKeyCore, DataKeyScoped, LeaderboardEntry,
-    MarketSnapshot, PrecisionCommitment, PrecisionPrediction, PendingWinningsUpdatedAtKey, Round,
-    RoundMode, RoundPhase, RoundPoolStats, RoundTemplate, SeasonArchive, SimulationResult,
-    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    MarketSnapshot, PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction,
+    PendingWinningsUpdatedAtKey, Round, RoundMode, RoundPhase, RoundPoolStats, RoundTemplate,
+    SeasonArchive, SimulationResult, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -701,19 +701,60 @@ pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, 
                 payout_pool = dist;
             }
 
-            let winner_count = winners.len() as i128;
-            let payout_per_winner = if winner_count > 0 {
-                payout_pool / winner_count
-            } else {
-                0
-            };
-            let remainder = if winner_count > 0 {
-                payout_pool % winner_count
-            } else {
-                0
-            };
+            // Mirrors `_calculate_precision_payouts` in settlement.rs so the preview
+            // never drifts from the round's configured payout policy (Equal vs
+            // StakeWeighted) — a hardcoded equal split here would silently diverge
+            // from the real settlement outcome for StakeWeighted rounds.
+            let policy = _read_precision_payout_policy(&env);
+            let winner_count = winners.len();
+            let mut winner_payouts: Vec<i128> = Vec::new(&env);
+            let mut total_paid: i128 = 0;
 
-            let mut winner_idx = 0;
+            match policy {
+                PrecisionPayoutPolicy::Equal => {
+                    if winner_count > 0 {
+                        let payout_per_winner = payout_pool / winner_count as i128;
+                        for _ in 0..winner_count {
+                            winner_payouts.push_back(payout_per_winner);
+                            total_paid = payout_add(total_paid, payout_per_winner)?;
+                        }
+                    }
+                }
+                PrecisionPayoutPolicy::StakeWeighted => {
+                    let mut total_winner_stakes: i128 = 0;
+                    for i in 0..winners.len() {
+                        if let Some(winner) = winners.get(i) {
+                            total_winner_stakes = payout_add(total_winner_stakes, winner.amount)?;
+                        }
+                    }
+                    if total_winner_stakes > 0 {
+                        for i in 0..winners.len() {
+                            if let Some(winner) = winners.get(i) {
+                                let payout =
+                                    payout_mul(winner.amount, payout_pool)? / total_winner_stakes;
+                                winner_payouts.push_back(payout);
+                                total_paid = payout_add(total_paid, payout)?;
+                            }
+                        }
+                    } else {
+                        for _ in 0..winner_count {
+                            winner_payouts.push_back(0);
+                        }
+                    }
+                }
+            }
+
+            if winner_count > 0 {
+                let remainder = payout_pool
+                    .checked_sub(total_paid)
+                    .ok_or(ContractError::PayoutOverflow)?;
+                if let Some(base) = winner_payouts.get(0) {
+                    let adjusted = payout_add(base, remainder)?;
+                    winner_payouts.set(0, adjusted);
+                }
+            }
+
+            let mut winner_idx: u32 = 0;
             for i in 0..participants.len() {
                 if let Some(user) = participants.get(i) {
                     let mut payout = 0;
@@ -730,11 +771,7 @@ pub fn simulate_payout(env: Env, final_price: u128) -> Result<SimulationResult, 
                         payout = amt; // refund
                         outcome_type = UserOutcomeType::Refund;
                     } else if is_winner {
-                        payout = if winner_idx == 0 {
-                            payout_per_winner.checked_add(remainder).unwrap()
-                        } else {
-                            payout_per_winner
-                        };
+                        payout = winner_payouts.get(winner_idx).unwrap_or(0);
                         outcome_type = UserOutcomeType::Win;
                         winner_idx += 1;
                     }
