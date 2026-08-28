@@ -101,4 +101,8 @@ pub enum ContractError {
     ProposalExpired = 84,
     GovInvalidState = 85,
     GovUnauthorized = 86,
+    /// claim_many batch size exceeds MAX_CLAIM_BATCH_SIZE (Issue #277)
+    ClaimBatchTooLarge = 87,
+    /// claim_many batch contains the same address more than once (Issue #277)
+    DuplicateClaimAddress = 88,
 }

@@ -8,6 +8,7 @@ mod access_control;
 mod betting;
 mod cei_ordering;
 mod chaos_recovery;
+mod claim_many;
 // mod commit_reveal_e2e; // upstream bug: all-unrevealed refunds test expects behavior contract doesn't implement
 mod config_helpers;
 // mod config_timelock; // upstream bug
@@ -24,6 +25,7 @@ mod invariant_harness;
 mod leaderboard;
 mod leaderboard_seasons;
 mod lifecycle;
+mod market_snapshot;
 mod migration_versioning;
 mod min_bet;
 mod mode_tests;

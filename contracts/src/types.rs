@@ -468,6 +468,49 @@ pub struct RoundPoolStats {
     pub precision_revealed_count: u32,
 }
 
+/// One-read composite view of current market state for frontends: round
+/// phase, pool composition, ledger timing buffers, and fee configuration —
+/// replacing several separate calls that could otherwise observe
+/// inconsistent state if the ledger advances between them (Issue #280).
+///
+/// # Empty-round semantics
+///
+/// When there is no active round, `phase` and `pool_stats` are both `None`.
+/// The timing-buffer and fee fields are always populated regardless — they
+/// reflect contract-wide configuration, not round state, so they have a
+/// well-defined value whether or not a round is active.
+///
+/// # Consistency with individual getters
+///
+/// `phase` and `pool_stats` are the exact, unmodified results of
+/// `get_round_phase`/`get_round_pool_stats` (never recomputed), and the
+/// buffer/fee fields are read via the same public getters
+/// (`get_bet_window_ledgers`, `get_run_window_ledgers`,
+/// `get_close_buffer_ledgers`, `get_protocol_fee_bps`, `get_fee_model`) that
+/// callers could otherwise call individually — so a snapshot can never
+/// disagree with those getters.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarketSnapshot {
+    /// Current round's lifecycle phase, or `None` if no round is active.
+    pub phase: Option<RoundPhase>,
+    /// Full pool-composition breakdown for the active round, or `None` if no
+    /// round is active.
+    pub pool_stats: Option<RoundPoolStats>,
+    /// Number of ledgers the betting window stays open after round creation.
+    pub bet_window_ledgers: u32,
+    /// Number of ledgers after round creation before the round becomes
+    /// resolvable.
+    pub run_window_ledgers: u32,
+    /// Extra ledgers appended after the betting window closes, before the
+    /// round transitions to `Running` (0 = disabled).
+    pub close_buffer_ledgers: u32,
+    /// Configured protocol fee in basis points, or `None` if fees are disabled.
+    pub protocol_fee_bps: Option<u32>,
+    /// Configured fee incidence model (`FeeOnPot` or `FeeOnWinnings`).
+    pub fee_model: FeeModel,
+}
+
 /// Terminal outcome recorded when a round leaves the active state.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]

@@ -8,8 +8,8 @@ use crate::admin::{
 use crate::common::{
     _accumulate_pending, _emit_action_rejected, _extend_persistent_ttl, _extend_ttl_symbol,
     _set_balance, balance, payout_add, payout_mul, sort_addresses, DEFAULT_ARCHIVE_RETENTION,
-    DEFAULT_ORACLE_TIMESTAMP_SKEW, MAX_ORACLE_OBSERVATIONS, SECONDS_PER_LEDGER, TTL_BUMP_AMOUNT,
-    TTL_BUMP_THRESHOLD,
+    DEFAULT_ORACLE_TIMESTAMP_SKEW, MAX_CLAIM_BATCH_SIZE, MAX_ORACLE_OBSERVATIONS,
+    SECONDS_PER_LEDGER, TTL_BUMP_AMOUNT, TTL_BUMP_THRESHOLD,
 };
 use crate::config::{
     _apply_protocol_fee_precision, _apply_protocol_fee_updown, _read_fee_model,
@@ -253,6 +253,102 @@ pub fn claim_winnings(env: Env, user: Address) -> Result<i128, ContractError> {
     );
 
     Ok(pending)
+}
+
+/// Claims pending winnings for a bounded batch of users in a single call
+/// (Issue #277).
+///
+/// # CEI Ordering (Checks-Effects-Interactions)
+///
+/// **Checks** (before any storage mutation):
+/// 1. Schema version is supported.
+/// 2. Contract is not in `FullyPaused` mode (Normal & ClaimsOnly are permitted).
+/// 3. `users.len()` does not exceed [`MAX_CLAIM_BATCH_SIZE`] — bounds
+///    per-invocation compute/storage-op cost for the whole batch.
+/// 4. `users` contains no duplicate address — a duplicate would otherwise
+///    claim once and silently no-op the second time, which is surprising
+///    for an operator batch API, so it is rejected outright instead.
+///
+/// Per user, inside the loop:
+/// 5. The user authenticates (`user.require_auth()`), exactly as
+///    [`claim_winnings`] requires — an operator submitting this batch must
+///    bundle each user's own pre-authorized signature; this function does
+///    not grant itself any elevated claim authority over admin/operator auth.
+/// 6. Pending winnings must be non-zero, or the user is skipped as a no-op
+///    (idempotent, matching [`claim_winnings`]'s single-claim behaviour).
+/// 7. `balance + pending` must not overflow i128 (guarded by `payout_add`).
+///
+/// **Effects** and **Interactions** per user mirror [`claim_winnings`]
+/// exactly (remove `PendingWinnings` first, then write the new balance, then
+/// emit the same `(claim, winnings)` event) so downstream indexers observe
+/// identical per-user events whether a claim happened individually or as
+/// part of a batch.
+///
+/// # All-or-nothing
+///
+/// This function performs no manual two-phase validate/commit: Soroban
+/// discards every storage write made during a host function invocation that
+/// returns `Err`, so returning `Err` at any point — cap check, duplicate
+/// check, a missing per-user auth, or a `payout_add` overflow — atomically
+/// reverts every effect already applied earlier in the same call, including
+/// balance/pending-winnings updates for users processed before the failure.
+///
+/// # Returns
+///
+/// A `Vec<i128>` of claimed amounts, one per entry in `users`, in the same
+/// order (0 for a user with no pending winnings at call time).
+pub fn claim_many(env: Env, users: Vec<Address>) -> Result<Vec<i128>, ContractError> {
+    // ── Checks ────────────────────────────────────────────────────────────
+    _require_supported_schema(&env)?;
+    _ensure_not_paused(&env)?; // rejects FullyPaused; allows Normal & ClaimsOnly
+
+    if users.len() > MAX_CLAIM_BATCH_SIZE {
+        return Err(ContractError::ClaimBatchTooLarge);
+    }
+
+    let sorted = sort_addresses(users.clone());
+    for i in 1..sorted.len() {
+        if sorted.get(i) == sorted.get(i - 1) {
+            return Err(ContractError::DuplicateClaimAddress);
+        }
+    }
+
+    let mut amounts: Vec<i128> = Vec::new(&env);
+
+    for user in users.iter() {
+        // ── Checks (per user) ────────────────────────────────────────────
+        user.require_auth();
+
+        let key = DataKeyScoped::PendingWinnings(user.clone());
+        let pending: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+
+        if pending == 0 {
+            amounts.push_back(0);
+            continue;
+        }
+
+        let current_balance = balance(env.clone(), user.clone());
+        let new_balance = payout_add(current_balance, pending)?;
+
+        // ── Effects ───────────────────────────────────────────────────────
+        // 1. Remove the pending-winnings claim slot first (prevent double-claim).
+        env.storage().persistent().remove(&key);
+        env.storage()
+            .persistent()
+            .remove(&PendingWinningsUpdatedAtKey(user.clone()));
+        _set_balance(&env, user.clone(), new_balance);
+
+        // ── Interactions ──────────────────────────────────────────────────
+        #[allow(deprecated)]
+        env.events().publish(
+            (symbol_short!("claim"), symbol_short!("winnings")),
+            (user.clone(), pending, current_balance, new_balance),
+        );
+
+        amounts.push_back(pending);
+    }
+
+    Ok(amounts)
 }
 
 pub fn resolve_round(env: Env, payload: OraclePayload) -> Result<(), ContractError> {

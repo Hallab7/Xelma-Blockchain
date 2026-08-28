@@ -5,14 +5,15 @@ use crate::common::{
 };
 use crate::config::{
     _read_fee_model, _read_precision_payout_policy, _read_protocol_fee_bps,
-    calculate_protocol_fee_precision, calculate_protocol_fee_updown,
+    calculate_protocol_fee_precision, calculate_protocol_fee_updown, get_bet_window_ledgers,
+    get_close_buffer_ledgers, get_run_window_ledgers,
 };
 use crate::errors::ContractError;
 use crate::types::{
     ArchivedRoundSummary, BetSide, DataKey, DataKeyCore, DataKeyScoped, LeaderboardEntry,
-    PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction, PendingWinningsUpdatedAtKey,
-    Round, RoundMode, RoundPhase, RoundPoolStats, RoundTemplate, SeasonArchive, SimulationResult,
-    UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
+    MarketSnapshot, PrecisionCommitment, PrecisionPayoutPolicy, PrecisionPrediction,
+    PendingWinningsUpdatedAtKey, Round, RoundMode, RoundPhase, RoundPoolStats, RoundTemplate,
+    SeasonArchive, SimulationResult, UserOutcomeType, UserPosition, UserRoundOutcome, UserStats,
 };
 use soroban_sdk::{Address, Env, Map, Vec};
 
@@ -119,6 +120,32 @@ pub fn get_round_phase(env: Env) -> Result<RoundPhase, ContractError> {
         .get::<_, Round>(&DataKeyCore::ActiveRound)
         .ok_or(ContractError::NoActiveRound)?;
     Ok(_derive_round_phase(env.ledger().sequence(), &round))
+}
+
+/// Returns a single-read composite snapshot of current market state: round
+/// phase, pool composition, ledger timing buffers, and fee configuration
+/// (Issue #280). See [`MarketSnapshot`] for empty-round semantics and the
+/// exact getters each field is sourced from.
+pub fn get_market_snapshot(env: Env) -> MarketSnapshot {
+    let phase = get_round_phase(env.clone()).ok();
+    let pool_stats = get_round_pool_stats(env.clone());
+
+    let bet_window_ledgers = get_bet_window_ledgers(env.clone());
+    let run_window_ledgers = get_run_window_ledgers(env.clone());
+    let close_buffer_ledgers = get_close_buffer_ledgers(env.clone());
+
+    let protocol_fee_bps = _read_protocol_fee_bps(&env);
+    let fee_model = _read_fee_model(&env);
+
+    MarketSnapshot {
+        phase,
+        pool_stats,
+        bet_window_ledgers,
+        run_window_ledgers,
+        close_buffer_ledgers,
+        protocol_fee_bps,
+        fee_model,
+    }
 }
 
 /// Returns the ID of the last created round (0 if no rounds created yet)
