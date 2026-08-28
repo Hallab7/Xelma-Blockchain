@@ -227,6 +227,22 @@ round_id: u32;
   timestamp: u64;
 }
 
+export interface MultiFeedPayload {
+  contract_addr: string;
+  network_id: Buffer;
+  nonce: u64;
+  prices: Array<u128>;
+  round_id: u32;
+  sources: Array<u32>;
+  timestamp: u64;
+}
+
+export interface OracleQuorumConfig {
+  min_observations: u32;
+  outlier_threshold_bps: u32;
+  quorum_threshold: u32;
+}
+
 /**
  * Identifies which critical risk setting is pending timelocked activation.
  */
@@ -546,10 +562,8 @@ export const ContractError = {
   /**
    * Commitment hash is malformed (e.g. the all-zero placeholder)
    */
+  61: {message:"PendingWinningsNotExpired"},
   63: {message:"InvalidCommitment"},
-  /**
-   * Reveal salt fails minimum entropy rules (all-zero or constant-byte)
-   */
   64: {message:"InvalidSalt"},
   /**
    * No round template is configured
@@ -772,6 +786,28 @@ export interface Client {
    * Mode 1 (Precision/Legends): Closest guess wins full pot; ties split evenly
    */
   resolve_round: ({payload}: {payload: OraclePayload}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate a resolve_round_multi transaction.
+   * Resolves the round using multi-feed oracle payload with median calculation and outlier rejection.
+   */
+  resolve_round_multi: ({payload}: {payload: MultiFeedPayload}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate an early cash-out transaction.
+   * Allows an UpDown bettor to exit during the running phase with a penalty fee.
+   */
+  cash_out_early: ({user}: {user: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Sets multi-feed oracle quorum configuration (admin only).
+   */
+  set_oracle_quorum_config: ({cfg}: {cfg: OracleQuorumConfig}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Gets multi-feed oracle quorum configuration if configured.
+   */
+  get_oracle_quorum_config: (options?: MethodOptions) => Promise<AssembledTransaction<Option<OracleQuorumConfig>>>
 
   /**
    * Construct and simulate a set_max_stake transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.

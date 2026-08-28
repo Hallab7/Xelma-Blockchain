@@ -4,7 +4,7 @@
 use soroban_sdk::contracterror;
 
 /// Contract error types
-#[contracterror]
+#[contracterror(export = false)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
