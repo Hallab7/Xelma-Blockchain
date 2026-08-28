@@ -97,4 +97,8 @@ pub enum ContractError {
     InvalidPhaseForCashout = 81,
     /// Early cash-out is only supported for UpDown rounds
     WrongModeForCashout = 82,
+    ProposalNotFound = 83,
+    ProposalExpired = 84,
+    GovInvalidState = 85,
+    GovUnauthorized = 86,
 }
