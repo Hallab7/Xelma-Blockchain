@@ -32,6 +32,10 @@ pub const MAX_MIN_PARTICIPANTS: u32 = 10_000;
 pub const DEFAULT_MAX_PRECISION_PARTICIPANTS: u32 = 1_000;
 pub const MAX_PRECISION_PARTICIPANTS_LIMIT: u32 = 10_000;
 pub const MAX_PAGE_SIZE: u32 = 100;
+/// Hard cap on the number of addresses accepted by `claim_many` in a single
+/// call, bounding per-invocation compute/storage-op cost for operator batch
+/// claims (Issue #277).
+pub const MAX_CLAIM_BATCH_SIZE: u32 = 50;
 /// Maximum entries retained in each bounded leaderboard index (lifetime and
 /// per-season). Keeps insertion-sort maintenance cost bounded on every
 /// win/loss update, at the cost of not tracking ranks below the top N.

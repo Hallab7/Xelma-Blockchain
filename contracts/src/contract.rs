@@ -1077,6 +1077,14 @@ impl VirtualTokenContract {
         settlement::claim_winnings(env, user)
     }
 
+    /// Claims pending winnings for up to `MAX_CLAIM_BATCH_SIZE` users in one
+    /// call. All-or-nothing: any failure (batch too large, a duplicate
+    /// address, or a missing per-user auth) reverts every effect in this
+    /// call. See `settlement::claim_many` for full semantics.
+    pub fn claim_many(env: Env, users: Vec<Address>) -> Result<Vec<i128>, ContractError> {
+        settlement::claim_many(env, users)
+    }
+
     /// Early cash-out during the Running phase for UpDown rounds.
     ///
     /// Allows a bettor to exit their position early, forfeiting a percentage
