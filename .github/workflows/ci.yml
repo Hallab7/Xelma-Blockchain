@@ -54,7 +54,19 @@ jobs:
         run: cargo test --package xelma-contract --lib test_critical_ --locked -- --nocapture
 
       - name: Benchmark report (cost/gas regression guardrails)
-        run: cargo test --package xelma-contract cost_benchmarks --locked -- --nocapture
+        run: |
+          set -o pipefail
+          cargo test --package xelma-contract cost_benchmarks --locked -- --nocapture \
+            | tee cost-benchmarks.log
+
+      - name: Upload cost benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-benchmarks
+          path: cost-benchmarks.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Snapshot drift detection
         run: |
@@ -568,25 +580,7 @@ jobs:
         run: cargo rustc --manifest-path=contracts/Cargo.toml --crate-type=cdylib --target=wasm32v1-none --release --locked
 
       - name: Measure WASM size and check budget
-        run: |
-          WASM_SIZE=$(wc -c < target/wasm32v1-none/release/xelma_contract.wasm)
-          BASELINE=$(cat .wasm-size-baseline)
-          BUDGET=$(( BASELINE + BASELINE / 10 ))
-
-          echo "WASM size report"
-          echo "  Current : ${WASM_SIZE} bytes"
-          echo "  Baseline: ${BASELINE} bytes"
-          echo "  Budget  : ${BUDGET} bytes (+10%)"
-          echo "  Delta   : $(( WASM_SIZE - BASELINE )) bytes"
-
-          if [ "${WASM_SIZE}" -gt "${BUDGET}" ]; then
-            echo ""
-            echo "ERROR: WASM size ${WASM_SIZE} exceeds budget ${BUDGET} bytes."
-            echo "If this growth is intentional, update .wasm-size-baseline to ${WASM_SIZE}."
-            exit 1
-          else
-            echo "OK: WASM size is within budget."
-          fi
+        run: ./scripts/check_wasm_size.sh target/wasm32v1-none/release/xelma_contract.wasm
 
   ci-success:
     name: CI Success
