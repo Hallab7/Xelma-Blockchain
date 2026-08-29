@@ -105,4 +105,15 @@ pub enum ContractError {
     ClaimBatchTooLarge = 87,
     /// claim_many batch contains the same address more than once (Issue #277)
     DuplicateClaimAddress = 88,
+    /// Caller is denylisted, or allowlist mode is enabled and caller is not
+    /// allowlisted (Issue #274 access-control gate).
+    AccessDenied = 89,
+    /// Oracle heartbeat is not live and strict mode blocks single-feed
+    /// settlement (Issue #264 sibling check for `resolve_round`).
+    OracleHeartbeatUnhealthy = 90,
+    /// The dispute window for `void_round` has expired, or dispute windows
+    /// are not configured (`dispute_ledgers == 0`).
+    DisputeWindowExpired = 91,
+    /// `finalize_round` was called before the dispute window elapsed.
+    ClaimLocked = 92,
 }
